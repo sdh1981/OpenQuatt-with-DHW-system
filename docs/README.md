@@ -14,6 +14,7 @@ Gebruik je de standaardfirmware, dan is de web installer uit de README meestal d
 ## Hoofdroute
 
 - [Installatie en ingebruikname](installatie-en-ingebruikname.md): eerste installatie en controle na de eerste start.
+- [Hardwarebeschrijving Duo + DHW (LilyGO)](hardware-dhw-lilygo.md): complete hardwarelijst, GPIO-mapping en bekabeling.
 - [Hoe OpenQuatt werkt](hoe-openquatt-werkt.md): rolverdeling tussen thermostaat, OpenQuatt, warmtepomp en Home Assistant.
 - [Heating Strategy](heating-strategy.md): overzicht van `Power House` en `Water Temperature Control`, en wanneer welke aanpak past.
 - [Power House](power-house.md): uitleg van de Power House-strategie, belangrijke parameters en Single/Duo-gedrag.

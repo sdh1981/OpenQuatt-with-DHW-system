@@ -77,6 +77,7 @@ Begin hier:
 Belangrijkste pagina's voor gebruikers:
 
 - [Installatie en ingebruikname](docs/installatie-en-ingebruikname.md) voor installeren en controle na de eerste start
+- [Hardwarebeschrijving Duo + DHW (LilyGO)](docs/hardware-dhw-lilygo.md) voor complete hardwarelijst, GPIO-mapping en bekabeling
 - [Hoe OpenQuatt werkt](docs/hoe-openquatt-werkt.md) voor de rolverdeling tussen thermostaat, OpenQuatt, warmtepomp en Home Assistant
 - [Dashboardoverzicht](docs/dashboardoverzicht.md) voor gebruik en diagnose van de dashboardweergaven
 - [Dashboard installeren](docs/dashboard/README.md) voor het importeren van dashboards
