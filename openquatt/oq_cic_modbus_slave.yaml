@@ -1,0 +1,596 @@
+# ==============================================================================
+# OpenQuatt - CIC Modbus Slave Gateway (RS485 #2)
+# ==============================================================================
+# Revision:
+# - v1.3.7 (2026-03-31)
+#   - Dimmed LED1/LED2 status brightness for lower glare while keeping LED3/LED4 OFF.
+# - v1.3.6 (2026-03-29)
+#   - LED3/LED4 forced OFF for setups using only RS485 port 1 and 2.
+#   - LED1=RS485-1 health, LED2=RS485-2 health (green OK, red error).
+# - v1.3.5 (2026-03-28)
+#   - Added LilyGO T-Connect LED1..LED4 Modbus health indication:
+#     LED1=RS485-1 health, LED2=RS485-2 health, LED3=HP1 data, LED4=HP2 data.
+#     Green=OK, Red=Error/no data.
+# - v1.3.4 (2026-03-28)
+#   - Added Modbus write ACK support for fn 0x06 and 0x10 on RS485 #2 (no forwarding to HP bus).
+#   - Active push is now fallback-only (suppressed while CIC is actively polling) to reduce bus collisions.
+#
+# Purpose:
+# - RS485 #1 stays OpenQuatt Modbus master toward HP1/HP2.
+# - RS485 #2 exposes selected HP1/HP2 telemetry as a Modbus RTU slave for CIC.
+# - No forwarding/writing from RS485 #2 to HP bus.
+#
+# Register map (holding/input style, served on fn 0x03 and 0x04):
+#   0  hp1_working_mode              raw
+#   1  hp1_water_in_temp             degC * 100 (signed int16)
+#   2  hp1_water_out_temp            degC * 100 (signed int16)
+#   3  hp1_flow                      L/h * 1
+#   4  hp1_outside_temp              degC * 100 (signed int16)
+#   5  hp1_voltage                   V * 10
+#   6  hp1_current                   A * 100
+#   8  hp2_working_mode              raw
+#   9  hp2_water_in_temp             degC * 100 (signed int16)
+#   10 hp2_water_out_temp            degC * 100 (signed int16)
+#   11 hp2_flow                      L/h * 1
+#   12 hp2_outside_temp              degC * 100 (signed int16)
+#   13 hp2_voltage                   V * 10
+#   14 hp2_current                   A * 100
+# ==============================================================================
+
+substitutions:
+  cic_modbus_slave_address: "3"                         # CIC-facing Modbus slave address on RS485 #2.
+  cic_modbus_push_interval_ms: "300"                   # Active push interval on RS485 #2.
+  # APA102 physical index mapping on LilyGO T-Connect:
+  # center LED = 4, side LEDs = 0..3
+  cic_led_idx_bus1: "0"
+  cic_led_idx_bus2: "1"
+  cic_led_idx_off1: "2"
+  cic_led_idx_off2: "3"
+  cic_led_idx_center: "4"
+
+debug:
+
+globals:
+  - id: cic_slave_requests
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: cic_slave_responses
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: cic_slave_crc_errors
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: cic_push_frames
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: cic_last_master_request_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: cic_led_bus1_ok
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: cic_led_bus2_ok
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: cic_led_system_ok
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+switch:
+  - platform: template
+    id: cic_modbus_push_enable
+    name: "CIC - Modbus Active Push Enable"
+    icon: mdi:transmission-tower
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    web_server:
+      sorting_group_id: oq_cic
+
+spi:
+  - id: cic_led_spi
+    clk_pin: GPIO3
+    mosi_pin: GPIO8
+
+light:
+  - platform: spi_led_strip
+    id: cic_rs485_ledbar
+    spi_id: cic_led_spi
+    num_leds: 5
+    data_rate: 1MHz
+    internal: true
+    default_transition_length: 0s
+    restore_mode: ALWAYS_ON
+
+uart:
+  - id: cic_rs485_slave_uart
+    tx_pin: ${cic_rs4852_tx_pin}
+    rx_pin: ${cic_rs4852_rx_pin}
+    baud_rate: 19200
+    data_bits: 8
+    parity: EVEN
+    stop_bits: 1
+    rx_full_threshold: 1
+    rx_timeout: 2
+    debug:
+      direction: RX
+      dummy_receiver: true
+      after:
+        timeout: 12ms
+      sequence:
+        - lambda: |-
+            if (bytes.size() < 8) {
+              return;
+            }
+
+            auto modbus_crc = [](const uint8_t *data, size_t len) -> uint16_t {
+              uint16_t crc = 0xFFFF;
+              for (size_t i = 0; i < len; i++) {
+                crc ^= data[i];
+                for (uint8_t b = 0; b < 8; b++) {
+                  if (crc & 0x0001) {
+                    crc = (crc >> 1) ^ 0xA001;
+                  } else {
+                    crc >>= 1;
+                  }
+                }
+              }
+              return crc;
+            };
+
+            const uint8_t addr = bytes[0];
+            const uint8_t extra_addr = static_cast<uint8_t>(atoi("${cic_modbus_slave_address}"));
+            const bool addr_supported = (addr == 0x01) || (addr == 0x02) || (addr == extra_addr);
+            if (!addr_supported) {
+              return;
+            }
+
+            const uint16_t req_crc = static_cast<uint16_t>(bytes[bytes.size() - 2]) |
+                                     (static_cast<uint16_t>(bytes[bytes.size() - 1]) << 8);
+            const uint16_t calc_crc = modbus_crc(bytes.data(), bytes.size() - 2);
+            if (req_crc != calc_crc) {
+              id(cic_slave_crc_errors)++;
+              id(cic_slave_crc_error_count).publish_state((float) id(cic_slave_crc_errors));
+              return;
+            }
+
+            id(cic_slave_requests)++;
+            id(cic_slave_request_count).publish_state((float) id(cic_slave_requests));
+            id(cic_last_master_request_ms) = millis();
+
+            const uint8_t fn = bytes[1];
+            auto send_exception = [&](uint8_t exception_code) {
+              std::vector<uint8_t> out;
+              out.reserve(5);
+              out.push_back(addr);
+              out.push_back(static_cast<uint8_t>(fn | 0x80));
+              out.push_back(exception_code);
+              const uint16_t crc = modbus_crc(out.data(), out.size());
+              out.push_back(static_cast<uint8_t>(crc & 0xFF));
+              out.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
+              id(cic_rs485_slave_uart).write_array(out.data(), out.size());
+              id(cic_rs485_slave_uart).flush();
+              id(cic_slave_responses)++;
+              id(cic_slave_response_count).publish_state((float) id(cic_slave_responses));
+            };
+
+            if (fn == 0x06) {
+              if (bytes.size() != 8) {
+                send_exception(0x03);  // Illegal data value
+                return;
+              }
+              std::vector<uint8_t> out;
+              out.reserve(8);
+              out.push_back(addr);
+              out.push_back(fn);
+              out.push_back(bytes[2]);
+              out.push_back(bytes[3]);
+              out.push_back(bytes[4]);
+              out.push_back(bytes[5]);
+              const uint16_t crc = modbus_crc(out.data(), out.size());
+              out.push_back(static_cast<uint8_t>(crc & 0xFF));
+              out.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
+              id(cic_rs485_slave_uart).write_array(out.data(), out.size());
+              id(cic_rs485_slave_uart).flush();
+              id(cic_slave_responses)++;
+              id(cic_slave_response_count).publish_state((float) id(cic_slave_responses));
+              return;
+            }
+
+            if (fn == 0x10) {
+              if (bytes.size() < 9) {
+                send_exception(0x03);  // Illegal data value
+                return;
+              }
+              const uint16_t start_addr = (static_cast<uint16_t>(bytes[2]) << 8) | bytes[3];
+              const uint16_t quantity = (static_cast<uint16_t>(bytes[4]) << 8) | bytes[5];
+              const uint8_t byte_count = bytes[6];
+              if (quantity == 0 || quantity > 32 || byte_count != quantity * 2) {
+                send_exception(0x03);  // Illegal data value
+                return;
+              }
+              if (bytes.size() != static_cast<size_t>(9 + byte_count)) {
+                send_exception(0x03);  // Illegal data value
+                return;
+              }
+
+              // ACK only: accept CIC writes locally so CIC stays healthy,
+              // but never forward/write anything to HP bus on RS485 #1.
+              std::vector<uint8_t> out;
+              out.reserve(8);
+              out.push_back(addr);
+              out.push_back(fn);
+              out.push_back(static_cast<uint8_t>((start_addr >> 8) & 0xFF));
+              out.push_back(static_cast<uint8_t>(start_addr & 0xFF));
+              out.push_back(static_cast<uint8_t>((quantity >> 8) & 0xFF));
+              out.push_back(static_cast<uint8_t>(quantity & 0xFF));
+              const uint16_t crc = modbus_crc(out.data(), out.size());
+              out.push_back(static_cast<uint8_t>(crc & 0xFF));
+              out.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
+              id(cic_rs485_slave_uart).write_array(out.data(), out.size());
+              id(cic_rs485_slave_uart).flush();
+              id(cic_slave_responses)++;
+              id(cic_slave_response_count).publish_state((float) id(cic_slave_responses));
+              return;
+            }
+
+            if (fn != 0x03 && fn != 0x04) {
+              send_exception(0x01);  // Illegal function
+              return;
+            }
+
+            const uint16_t start_addr = (static_cast<uint16_t>(bytes[2]) << 8) | bytes[3];
+            const uint16_t quantity = (static_cast<uint16_t>(bytes[4]) << 8) | bytes[5];
+            if (quantity == 0 || quantity > 32) {
+              send_exception(0x03);  // Illegal data value
+              return;
+            }
+
+            auto encode_s16 = [](float value, float scale) -> uint16_t {
+              if (isnan(value)) return 0x8000;
+              int32_t raw = static_cast<int32_t>(lroundf(value * scale));
+              if (raw < -32768) raw = -32768;
+              if (raw > 32767) raw = 32767;
+              return static_cast<uint16_t>(static_cast<int16_t>(raw));
+            };
+
+            auto encode_u16 = [](float value, float scale) -> uint16_t {
+              if (isnan(value)) return 0;
+              int32_t raw = static_cast<int32_t>(lroundf(value * scale));
+              if (raw < 0) raw = 0;
+              if (raw > 65535) raw = 65535;
+              return static_cast<uint16_t>(raw);
+            };
+
+            auto get_hp_register_compact = [&](bool hp1, uint16_t reg) -> uint16_t {
+              switch (reg) {
+                case 0: return hp1
+                  ? (id(hp1_working_mode).has_state() ? encode_u16(id(hp1_working_mode).state, 1.0f) : static_cast<uint16_t>(0))
+                  : (id(hp2_working_mode).has_state() ? encode_u16(id(hp2_working_mode).state, 1.0f) : static_cast<uint16_t>(0));
+                case 1: return hp1
+                  ? (id(hp1_water_in_temp).has_state() ? encode_s16(id(hp1_water_in_temp).state, 100.0f) : static_cast<uint16_t>(0x8000))
+                  : (id(hp2_water_in_temp).has_state() ? encode_s16(id(hp2_water_in_temp).state, 100.0f) : static_cast<uint16_t>(0x8000));
+                case 2: return hp1
+                  ? (id(hp1_water_out_temp).has_state() ? encode_s16(id(hp1_water_out_temp).state, 100.0f) : static_cast<uint16_t>(0x8000))
+                  : (id(hp2_water_out_temp).has_state() ? encode_s16(id(hp2_water_out_temp).state, 100.0f) : static_cast<uint16_t>(0x8000));
+                case 3: return hp1
+                  ? (id(hp1_flow).has_state() ? encode_u16(id(hp1_flow).state, 1.0f) : static_cast<uint16_t>(0))
+                  : (id(hp2_flow).has_state() ? encode_u16(id(hp2_flow).state, 1.0f) : static_cast<uint16_t>(0));
+                case 4: return hp1
+                  ? (id(hp1_outside_temp).has_state() ? encode_s16(id(hp1_outside_temp).state, 100.0f) : static_cast<uint16_t>(0x8000))
+                  : (id(hp2_outside_temp).has_state() ? encode_s16(id(hp2_outside_temp).state, 100.0f) : static_cast<uint16_t>(0x8000));
+                case 5: return hp1
+                  ? (id(hp1_voltage).has_state() ? encode_u16(id(hp1_voltage).state, 10.0f) : static_cast<uint16_t>(0))
+                  : (id(hp2_voltage).has_state() ? encode_u16(id(hp2_voltage).state, 10.0f) : static_cast<uint16_t>(0));
+                case 6: return hp1
+                  ? (id(hp1_current).has_state() ? encode_u16(id(hp1_current).state, 100.0f) : static_cast<uint16_t>(0))
+                  : (id(hp2_current).has_state() ? encode_u16(id(hp2_current).state, 100.0f) : static_cast<uint16_t>(0));
+                default: return 0;
+              }
+            };
+
+            auto get_hp_register_native = [&](bool hp1, uint16_t reg) -> uint16_t {
+              switch (reg) {
+                case 2099: return hp1
+                  ? (id(hp1_working_mode).has_state() ? encode_u16(id(hp1_working_mode).state, 1.0f) : static_cast<uint16_t>(0))
+                  : (id(hp2_working_mode).has_state() ? encode_u16(id(hp2_working_mode).state, 1.0f) : static_cast<uint16_t>(0));
+                case 2100: return hp1
+                  ? (id(hp1_voltage).has_state() ? encode_u16(id(hp1_voltage).state, 1.0f) : static_cast<uint16_t>(0))
+                  : (id(hp2_voltage).has_state() ? encode_u16(id(hp2_voltage).state, 1.0f) : static_cast<uint16_t>(0));
+                case 2101: return hp1
+                  ? (id(hp1_current).has_state() ? encode_u16(id(hp1_current).state, 10.0f) : static_cast<uint16_t>(0))
+                  : (id(hp2_current).has_state() ? encode_u16(id(hp2_current).state, 10.0f) : static_cast<uint16_t>(0));
+                case 2110: return hp1
+                  ? (id(hp1_outside_temp).has_state() ? encode_u16(id(hp1_outside_temp).state, 100.0f) + static_cast<uint16_t>(3000) : static_cast<uint16_t>(0))
+                  : (id(hp2_outside_temp).has_state() ? encode_u16(id(hp2_outside_temp).state, 100.0f) + static_cast<uint16_t>(3000) : static_cast<uint16_t>(0));
+                case 2133: return hp1
+                  ? (id(hp1_water_in_temp).has_state() ? encode_u16(id(hp1_water_in_temp).state, 100.0f) + static_cast<uint16_t>(3000) : static_cast<uint16_t>(0))
+                  : (id(hp2_water_in_temp).has_state() ? encode_u16(id(hp2_water_in_temp).state, 100.0f) + static_cast<uint16_t>(3000) : static_cast<uint16_t>(0));
+                case 2134: return hp1
+                  ? (id(hp1_water_out_temp).has_state() ? encode_u16(id(hp1_water_out_temp).state, 100.0f) + static_cast<uint16_t>(3000) : static_cast<uint16_t>(0))
+                  : (id(hp2_water_out_temp).has_state() ? encode_u16(id(hp2_water_out_temp).state, 100.0f) + static_cast<uint16_t>(3000) : static_cast<uint16_t>(0));
+                case 2138: return hp1
+                  ? (id(hp1_flow).has_state() ? encode_u16(id(hp1_flow).state, 1.0f / 0.618f) : static_cast<uint16_t>(0))
+                  : (id(hp2_flow).has_state() ? encode_u16(id(hp2_flow).state, 1.0f / 0.618f) : static_cast<uint16_t>(0));
+                default: return 0;
+              }
+            };
+
+            auto get_register = [&](uint16_t reg) -> uint16_t {
+              if (addr == 0x01) {
+                const uint16_t native = get_hp_register_native(true, reg);
+                if (native != 0) return native;
+                return get_hp_register_compact(true, reg);
+              }
+              if (addr == 0x02) {
+                const uint16_t native = get_hp_register_native(false, reg);
+                if (native != 0) return native;
+                return get_hp_register_compact(false, reg);
+              }
+              switch (reg) {
+                case 0:  return id(hp1_working_mode).has_state() ? encode_u16(id(hp1_working_mode).state, 1.0f) : 0;
+                case 1:  return id(hp1_water_in_temp).has_state() ? encode_s16(id(hp1_water_in_temp).state, 100.0f) : 0x8000;
+                case 2:  return id(hp1_water_out_temp).has_state() ? encode_s16(id(hp1_water_out_temp).state, 100.0f) : 0x8000;
+                case 3:  return id(hp1_flow).has_state() ? encode_u16(id(hp1_flow).state, 1.0f) : 0;
+                case 4:  return id(hp1_outside_temp).has_state() ? encode_s16(id(hp1_outside_temp).state, 100.0f) : 0x8000;
+                case 5:  return id(hp1_voltage).has_state() ? encode_u16(id(hp1_voltage).state, 10.0f) : 0;
+                case 6:  return id(hp1_current).has_state() ? encode_u16(id(hp1_current).state, 100.0f) : 0;
+                case 8:  return id(hp2_working_mode).has_state() ? encode_u16(id(hp2_working_mode).state, 1.0f) : 0;
+                case 9:  return id(hp2_water_in_temp).has_state() ? encode_s16(id(hp2_water_in_temp).state, 100.0f) : 0x8000;
+                case 10: return id(hp2_water_out_temp).has_state() ? encode_s16(id(hp2_water_out_temp).state, 100.0f) : 0x8000;
+                case 11: return id(hp2_flow).has_state() ? encode_u16(id(hp2_flow).state, 1.0f) : 0;
+                case 12: return id(hp2_outside_temp).has_state() ? encode_s16(id(hp2_outside_temp).state, 100.0f) : 0x8000;
+                case 13: return id(hp2_voltage).has_state() ? encode_u16(id(hp2_voltage).state, 10.0f) : 0;
+                case 14: return id(hp2_current).has_state() ? encode_u16(id(hp2_current).state, 100.0f) : 0;
+                default: return 0;
+              }
+            };
+
+            std::vector<uint8_t> out;
+            out.reserve(5 + quantity * 2);
+            out.push_back(addr);
+            out.push_back(fn);
+            out.push_back(static_cast<uint8_t>(quantity * 2));
+
+            for (uint16_t i = 0; i < quantity; i++) {
+              const uint16_t value = get_register(start_addr + i);
+              out.push_back(static_cast<uint8_t>((value >> 8) & 0xFF));
+              out.push_back(static_cast<uint8_t>(value & 0xFF));
+            }
+
+            const uint16_t crc = modbus_crc(out.data(), out.size());
+            out.push_back(static_cast<uint8_t>(crc & 0xFF));
+            out.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
+
+            id(cic_rs485_slave_uart).write_array(out.data(), out.size());
+            id(cic_rs485_slave_uart).flush();
+
+            id(cic_slave_responses)++;
+            id(cic_slave_response_count).publish_state((float) id(cic_slave_responses));
+
+sensor:
+  - platform: internal_temperature
+    id: cic_esp32_internal_temp
+    name: "CIC - ESP32S3 Internal Temperature"
+    icon: mdi:thermometer
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+
+  - platform: debug
+    free:
+      id: cic_esp32_free_heap
+      name: "CIC - ESP32 Free Heap"
+      icon: mdi:memory
+      web_server:
+        sorting_group_id: oq_system_diagnostics
+    block:
+      id: cic_esp32_max_heap_block
+      name: "CIC - ESP32 Max Heap Block"
+      icon: mdi:memory-arrow-down
+      web_server:
+        sorting_group_id: oq_system_diagnostics
+    loop_time:
+      id: cic_esp32_loop_time
+      name: "CIC - ESP32 Loop Time"
+      icon: mdi:speedometer
+      web_server:
+        sorting_group_id: oq_system_diagnostics
+    cpu_frequency:
+      id: cic_esp32_cpu_freq
+      name: "CIC - ESP32 CPU Frequency"
+      icon: mdi:cpu-64-bit
+      web_server:
+        sorting_group_id: oq_system_diagnostics
+
+  - platform: template
+    id: cic_slave_request_count
+    name: "CIC - Modbus Slave Requests"
+    icon: mdi:counter
+    state_class: total_increasing
+    accuracy_decimals: 0
+    lambda: |-
+      return (float) id(cic_slave_requests);
+    web_server:
+      sorting_group_id: oq_cic
+
+  - platform: template
+    id: cic_slave_response_count
+    name: "CIC - Modbus Slave Responses"
+    icon: mdi:counter
+    state_class: total_increasing
+    accuracy_decimals: 0
+    lambda: |-
+      return (float) id(cic_slave_responses);
+    web_server:
+      sorting_group_id: oq_cic
+
+  - platform: template
+    id: cic_slave_crc_error_count
+    name: "CIC - Modbus Slave CRC Errors"
+    icon: mdi:alert-circle-outline
+    state_class: total_increasing
+    accuracy_decimals: 0
+    lambda: |-
+      return (float) id(cic_slave_crc_errors);
+    web_server:
+      sorting_group_id: oq_cic
+
+  - platform: template
+    id: cic_push_frame_count
+    name: "CIC - Modbus Push Frames"
+    icon: mdi:counter
+    state_class: total_increasing
+    accuracy_decimals: 0
+    lambda: |-
+      return (float) id(cic_push_frames);
+    web_server:
+      sorting_group_id: oq_cic
+
+interval:
+  - interval: 1s
+    then:
+      - lambda: |-
+          const uint32_t now = millis();
+          const bool hp1_ok = id(hp1_working_mode).has_state();
+          const bool hp2_ok = id(hp2_working_mode).has_state();
+          const bool bus1_ok = hp1_ok && hp2_ok;
+          const bool bus2_ok = (now - id(cic_last_master_request_ms)) < 3000U;
+          const bool system_ok = bus1_ok && bus2_ok;
+
+          id(cic_led_bus1_ok) = bus1_ok;
+          id(cic_led_bus2_ok) = bus2_ok;
+          id(cic_led_system_ok) = system_ok;
+      - light.addressable_set:
+          id: cic_rs485_ledbar
+          range_from: ${cic_led_idx_center}
+          range_to: ${cic_led_idx_center}
+          red: !lambda "return id(cic_led_system_ok) ? 0.0f : 0.20f;"
+          green: !lambda "return id(cic_led_system_ok) ? 0.20f : 0.0f;"
+          blue: 0%
+      - light.addressable_set:
+          id: cic_rs485_ledbar
+          range_from: ${cic_led_idx_bus1}
+          range_to: ${cic_led_idx_bus1}
+          red: !lambda "return id(cic_led_bus1_ok) ? 0.0f : 0.20f;"
+          green: !lambda "return id(cic_led_bus1_ok) ? 0.20f : 0.0f;"
+          blue: 0%
+      - light.addressable_set:
+          id: cic_rs485_ledbar
+          range_from: ${cic_led_idx_bus2}
+          range_to: ${cic_led_idx_bus2}
+          red: !lambda "return id(cic_led_bus2_ok) ? 0.0f : 0.20f;"
+          green: !lambda "return id(cic_led_bus2_ok) ? 0.20f : 0.0f;"
+          blue: 0%
+      - light.addressable_set:
+          id: cic_rs485_ledbar
+          range_from: ${cic_led_idx_off1}
+          range_to: ${cic_led_idx_off1}
+          red: 0%
+          green: 0%
+          blue: 0%
+      - light.addressable_set:
+          id: cic_rs485_ledbar
+          range_from: ${cic_led_idx_off2}
+          range_to: ${cic_led_idx_off2}
+          red: 0%
+          green: 0%
+          blue: 0%
+
+  - interval: ${cic_modbus_push_interval_ms}ms
+    then:
+      - lambda: |-
+          if (!id(cic_modbus_push_enable).state) {
+            return;
+          }
+          const uint32_t now = millis();
+          // Fallback push only when there is no active CIC polling.
+          if ((now - id(cic_last_master_request_ms)) < 1500U) {
+            return;
+          }
+
+          auto modbus_crc = [](const uint8_t *data, size_t len) -> uint16_t {
+            uint16_t crc = 0xFFFF;
+            for (size_t i = 0; i < len; i++) {
+              crc ^= data[i];
+              for (uint8_t b = 0; b < 8; b++) {
+                if (crc & 0x0001) crc = (crc >> 1) ^ 0xA001;
+                else crc >>= 1;
+              }
+            }
+            return crc;
+          };
+
+          auto encode_s16 = [](float value, float scale) -> uint16_t {
+            if (isnan(value)) return 0x8000;
+            int32_t raw = static_cast<int32_t>(lroundf(value * scale));
+            if (raw < -32768) raw = -32768;
+            if (raw > 32767) raw = 32767;
+            return static_cast<uint16_t>(static_cast<int16_t>(raw));
+          };
+
+          auto encode_u16 = [](float value, float scale) -> uint16_t {
+            if (isnan(value)) return 0;
+            int32_t raw = static_cast<int32_t>(lroundf(value * scale));
+            if (raw < 0) raw = 0;
+            if (raw > 65535) raw = 65535;
+            return static_cast<uint16_t>(raw);
+          };
+
+          auto build_hp_payload = [&](uint8_t hp_addr) -> std::vector<uint8_t> {
+            std::vector<uint8_t> out;
+            out.reserve(3 + 14 + 2);
+            out.push_back(hp_addr);
+            out.push_back(0x03);
+            out.push_back(14);  // 7 registers payload
+
+            const bool hp1 = (hp_addr == 0x01);
+            const uint16_t r0 = hp1
+              ? (id(hp1_working_mode).has_state() ? encode_u16(id(hp1_working_mode).state, 1.0f) : static_cast<uint16_t>(0))
+              : (id(hp2_working_mode).has_state() ? encode_u16(id(hp2_working_mode).state, 1.0f) : static_cast<uint16_t>(0));
+            const uint16_t r1 = hp1
+              ? (id(hp1_water_in_temp).has_state() ? encode_s16(id(hp1_water_in_temp).state, 100.0f) : static_cast<uint16_t>(0x8000))
+              : (id(hp2_water_in_temp).has_state() ? encode_s16(id(hp2_water_in_temp).state, 100.0f) : static_cast<uint16_t>(0x8000));
+            const uint16_t r2 = hp1
+              ? (id(hp1_water_out_temp).has_state() ? encode_s16(id(hp1_water_out_temp).state, 100.0f) : static_cast<uint16_t>(0x8000))
+              : (id(hp2_water_out_temp).has_state() ? encode_s16(id(hp2_water_out_temp).state, 100.0f) : static_cast<uint16_t>(0x8000));
+            const uint16_t r3 = hp1
+              ? (id(hp1_flow).has_state() ? encode_u16(id(hp1_flow).state, 1.0f) : static_cast<uint16_t>(0))
+              : (id(hp2_flow).has_state() ? encode_u16(id(hp2_flow).state, 1.0f) : static_cast<uint16_t>(0));
+            const uint16_t r4 = hp1
+              ? (id(hp1_outside_temp).has_state() ? encode_s16(id(hp1_outside_temp).state, 100.0f) : static_cast<uint16_t>(0x8000))
+              : (id(hp2_outside_temp).has_state() ? encode_s16(id(hp2_outside_temp).state, 100.0f) : static_cast<uint16_t>(0x8000));
+            const uint16_t r5 = hp1
+              ? (id(hp1_voltage).has_state() ? encode_u16(id(hp1_voltage).state, 10.0f) : static_cast<uint16_t>(0))
+              : (id(hp2_voltage).has_state() ? encode_u16(id(hp2_voltage).state, 10.0f) : static_cast<uint16_t>(0));
+            const uint16_t r6 = hp1
+              ? (id(hp1_current).has_state() ? encode_u16(id(hp1_current).state, 100.0f) : static_cast<uint16_t>(0))
+              : (id(hp2_current).has_state() ? encode_u16(id(hp2_current).state, 100.0f) : static_cast<uint16_t>(0));
+            const uint16_t regs[7] = {r0, r1, r2, r3, r4, r5, r6};
+
+            for (uint8_t i = 0; i < 7; i++) {
+              out.push_back(static_cast<uint8_t>((regs[i] >> 8) & 0xFF));
+              out.push_back(static_cast<uint8_t>(regs[i] & 0xFF));
+            }
+
+            const uint16_t crc = modbus_crc(out.data(), out.size());
+            out.push_back(static_cast<uint8_t>(crc & 0xFF));
+            out.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
+            return out;
+          };
+
+          const std::vector<uint8_t> hp1_frame = build_hp_payload(0x01);
+          id(cic_rs485_slave_uart).write_array(hp1_frame.data(), hp1_frame.size());
+          id(cic_rs485_slave_uart).flush();
+
+          const std::vector<uint8_t> hp2_frame = build_hp_payload(0x02);
+          id(cic_rs485_slave_uart).write_array(hp2_frame.data(), hp2_frame.size());
+          id(cic_rs485_slave_uart).flush();
+
+          id(cic_push_frames) += 2;

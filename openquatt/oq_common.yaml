@@ -1,0 +1,473 @@
+# ==============================================================================
+# OpenQuatt - Common Platform Runtime
+# ==============================================================================
+# Shared, board-independent runtime blocks:
+# - Core runtime services (logging/API/OTA)
+# - Network fallback + HTTP client
+# - RS485 Modbus transport
+# - Generic diagnostics entities
+# - Runtime debug level controls
+# ==============================================================================
+
+# ==============================================================================
+# CORE RUNTIME SERVICES
+# ==============================================================================
+logger:
+  level: DEBUG
+  initial_level: INFO
+  baud_rate: 115200
+  runtime_tag_levels: true
+
+api:
+  reboot_timeout: 0s
+
+ota:
+  - platform: esphome
+    on_begin:
+      then:
+        - lambda: |-
+            id(oq_ota_phase_code) = 1;
+            id(oq_ota_progress_pct) = 0.0f;
+            id(oq_firmware_update_status).publish_state("Starting");
+            id(oq_firmware_update_progress).publish_state(0.0f);
+    on_progress:
+      then:
+        - lambda: |-
+            id(oq_ota_phase_code) = 2;
+            id(oq_ota_progress_pct) = x;
+            id(oq_firmware_update_status).publish_state("Uploading");
+            id(oq_firmware_update_progress).publish_state(x);
+    on_end:
+      then:
+        - lambda: |-
+            id(oq_ota_phase_code) = 3;
+            id(oq_ota_progress_pct) = 100.0f;
+            id(oq_firmware_update_status).publish_state("Rebooting");
+            id(oq_firmware_update_progress).publish_state(100.0f);
+    on_error:
+      then:
+        - lambda: |-
+            id(oq_ota_phase_code) = 5;
+            id(oq_firmware_update_status).publish_state("Error");
+    on_abort:
+      then:
+        - lambda: |-
+            id(oq_ota_phase_code) = 6;
+            id(oq_firmware_update_status).publish_state("Aborted");
+  - platform: http_request
+    on_begin:
+      then:
+        - lambda: |-
+            id(oq_ota_phase_code) = 1;
+            id(oq_ota_progress_pct) = 0.0f;
+            id(oq_firmware_update_status).publish_state("Starting");
+            id(oq_firmware_update_progress).publish_state(0.0f);
+    on_progress:
+      then:
+        - lambda: |-
+            id(oq_ota_phase_code) = 2;
+            id(oq_ota_progress_pct) = x;
+            id(oq_firmware_update_status).publish_state("Uploading");
+            id(oq_firmware_update_progress).publish_state(x);
+    on_end:
+      then:
+        - lambda: |-
+            id(oq_ota_phase_code) = 3;
+            id(oq_ota_progress_pct) = 100.0f;
+            id(oq_firmware_update_status).publish_state("Rebooting");
+            id(oq_firmware_update_progress).publish_state(100.0f);
+    on_error:
+      then:
+        - lambda: |-
+            id(oq_ota_phase_code) = 5;
+            id(oq_firmware_update_status).publish_state("Error");
+    on_abort:
+      then:
+        - lambda: |-
+            id(oq_ota_phase_code) = 6;
+            id(oq_firmware_update_status).publish_state("Aborted");
+
+# ==============================================================================
+# NETWORK + RECOVERY
+# ==============================================================================
+wifi:
+  min_auth_mode: wpa2
+  ap:
+    ssid: "OpenQuatt"
+    password: "openquatt"
+
+captive_portal:
+
+# Enable ESP Web Tools Wi-Fi provisioning while keeping AP fallback available.
+improv_serial:
+  next_url: "http://{{ip_address}}/"
+
+# ==============================================================================
+# HTTP REQUEST (shared CIC + OTA update)
+# ==============================================================================
+http_request:
+  id: req
+  useragent: esphome/openquatt
+  timeout: 2s
+  follow_redirects: true
+  redirect_limit: 3
+  buffer_size_rx: 2048
+  buffer_size_tx: 1024
+
+# ==============================================================================
+# MODBUS (RS485)
+# ==============================================================================
+uart:
+  - id: uart_bus
+    tx_pin: ${uart_tx_pin}
+    rx_pin: ${uart_rx_pin}
+    baud_rate: 19200
+    data_bits: 8
+    stop_bits: 1
+    parity: EVEN
+    rx_full_threshold: 1
+    rx_timeout: 1
+
+modbus:
+  - uart_id: uart_bus
+    id: mod_bus
+    flow_control_pin: ${uart_rts_pin}
+    send_wait_time: 100ms
+
+# ==============================================================================
+# SHARED RUNTIME STATE
+# ==============================================================================
+globals:
+  - id: oq_fw_check_last_request_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: oq_boot_startup_inhibit_until_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: oq_boot_startup_inhibit_active
+    type: bool
+    restore_value: false
+    initial_value: 'true'
+  - id: oq_ota_progress_pct
+    type: float
+    restore_value: false
+    initial_value: '0.0f'
+  - id: oq_ota_phase_code
+    type: int
+    restore_value: false
+    initial_value: '0'
+
+# ==============================================================================
+# DIAGNOSTIC ENTITIES
+# ==============================================================================
+select:
+  - platform: template
+    name: "Firmware Update Channel"
+    id: oq_firmware_update_channel
+    icon: mdi:source-branch
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    options: ["main", "dev"]
+    initial_option: "${release_channel}"
+    on_value:
+      then:
+        - lambda: |-
+            if (x == "dev") {
+              id(oq_firmware_update).set_source_url("${dev_release_manifest_url}");
+            } else {
+              id(oq_firmware_update).set_source_url("${main_release_manifest_url}");
+            }
+        - if:
+            condition:
+              lambda: |-
+                constexpr uint32_t fw_check_cooldown_ms = 1000UL;
+                const uint32_t now_ms = (uint32_t) millis();
+                const uint32_t last_request_ms = id(oq_fw_check_last_request_ms);
+                if (last_request_ms > 0 && now_ms >= last_request_ms &&
+                    (now_ms - last_request_ms) < fw_check_cooldown_ms) {
+                  ESP_LOGW("oq_fw", "Skip firmware update check: cooldown active after a recent request.");
+                  return false;
+                }
+                id(oq_fw_check_last_request_ms) = now_ms;
+                return true;
+            then:
+              - update.check:
+                  id: oq_firmware_update
+
+  - platform: template
+    name: "Debug Level"
+    id: debug_level_select
+    disabled_by_default: true
+    icon: mdi:lan
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+    entity_category: diagnostic
+    optimistic: true
+    restore_value: true
+    options: [NONE, ERROR, WARN, INFO, CONFIG, DEBUG]
+    initial_option: INFO
+    on_value:
+      then:
+        - lambda: |-
+            int lvl =
+              (x == "NONE")    ? 0 :
+              (x == "ERROR")   ? 1 :
+              (x == "WARN")    ? 2 :
+              (x == "INFO")    ? 3 :
+              (x == "CONFIG")  ? 4 :
+                                 5;  // DEBUG
+
+            esphome::logger::global_logger->set_log_level(lvl);
+
+  - platform: template
+    name: "Debug Level Modbus"
+    id: debug_level_modbus_master
+    disabled_by_default: true
+    icon: mdi:lan
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+    entity_category: diagnostic
+    optimistic: true
+    restore_value: true
+    options: [NONE, ERROR, WARN, INFO, CONFIG, DEBUG]
+    initial_option: WARN
+    on_value:
+      then:
+        - lambda: |-
+            int lvl =
+              (x == "NONE")    ? 0 :
+              (x == "ERROR")   ? 1 :
+              (x == "WARN")    ? 2 :
+              (x == "INFO")    ? 3 :
+              (x == "CONFIG")  ? 4 :
+                                 5;  // DEBUG
+
+            auto *logger = esphome::logger::global_logger;
+
+            logger->set_log_level("modbus", lvl);
+            logger->set_log_level("modbus_controller", lvl);
+
+button:
+  - platform: restart
+    name: Restart
+    icon: mdi:restart
+    id: restart_switch
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+
+  - platform: safe_mode
+    name: Safe mode
+    icon: mdi:shield-alert
+    id: safe_mode_button
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+
+  - platform: template
+    id: oq_check_firmware_updates
+    name: Check Firmware Updates
+    icon: mdi:update
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+    on_press:
+      - if:
+          condition:
+            lambda: |-
+              constexpr uint32_t fw_check_cooldown_ms = 1000UL;
+              const uint32_t now_ms = (uint32_t) millis();
+              const uint32_t last_request_ms = id(oq_fw_check_last_request_ms);
+              if (last_request_ms > 0 && now_ms >= last_request_ms &&
+                  (now_ms - last_request_ms) < fw_check_cooldown_ms) {
+                ESP_LOGW("oq_fw", "Skip firmware update check: cooldown active after a recent request.");
+                return false;
+              }
+              id(oq_fw_check_last_request_ms) = now_ms;
+              return true;
+          then:
+            - update.check:
+                id: oq_firmware_update
+
+binary_sensor:
+  - platform: status
+    name: Status
+    icon: mdi:check-circle-outline
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+
+sensor:
+  - platform: template
+    name: Firmware Update Progress
+    id: oq_firmware_update_progress
+    icon: mdi:progress-upload
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    update_interval: 1s
+    entity_category: diagnostic
+    lambda: |-
+      return id(oq_ota_progress_pct);
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+
+  - platform: uptime
+    name: Uptime
+    id: uptime_sensor
+    internal: true
+    icon: mdi:timer-outline
+    update_interval: 60s
+    device_class: duration
+    unit_of_measurement: s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+
+  - platform: template
+    name: Uptime
+    id: uptime_hours_sensor
+    icon: mdi:timer-outline
+    update_interval: 60s
+    device_class: duration
+    unit_of_measurement: h
+    accuracy_decimals: 2
+    state_class: total_increasing
+    entity_category: diagnostic
+    lambda: |-
+      if (isnan(id(uptime_sensor).state)) {
+        return NAN;
+      }
+      return id(uptime_sensor).state / 3600.0f;
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+
+  - platform: internal_temperature
+    name: ESP Internal Temperature
+    icon: mdi:thermometer
+    update_interval: 60s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+
+  - platform: wifi_signal
+    name: WiFi Signal
+    icon: mdi:wifi-arrow-left-right
+    update_interval: 300s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: IP Address
+      icon: mdi:ip-network-outline
+      entity_category: diagnostic
+      web_server:
+        sorting_group_id: oq_system_diagnostics
+    ssid:
+      name: WiFi SSID
+      icon: mdi:wifi
+      entity_category: diagnostic
+      web_server:
+        sorting_group_id: oq_system_diagnostics
+  - platform: template
+    id: oq_firmware_update_status
+    name: Firmware Update Status
+    icon: mdi:upload-network-outline
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      // Expose a compact OTA phase label for dashboards and the local web UI.
+      switch (id(oq_ota_phase_code)) {
+        case 1:
+          return {"Starting"};
+        case 2:
+          return {"Uploading"};
+        case 3:
+          return {"Rebooting"};
+        case 4:
+          return {"Complete"};
+        case 5:
+          return {"Error"};
+        case 6:
+          return {"Aborted"};
+        default:
+          return {"Idle"};
+      }
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+  - platform: template
+    id: oq_project_version_text
+    name: OpenQuatt Version
+    icon: mdi:tag-text-outline
+    entity_category: diagnostic
+    update_interval: never
+    lambda: |-
+      return {"${project_version}"};
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+  - platform: template
+    id: oq_release_channel_text
+    name: OpenQuatt Release Channel
+    icon: mdi:source-branch
+    entity_category: diagnostic
+    update_interval: never
+    lambda: |-
+      return {"${release_channel}"};
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+  - platform: version
+    name: ESPHome Version
+    icon: mdi:information-outline
+    hide_timestamp: true
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+  - platform: template
+    id: uptime_readable_text
+    name: Uptime readable
+    internal: true
+    icon: mdi:timer-outline
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: |-
+      // Read the raw uptime and bail out early when the source is unavailable.
+      if (isnan(id(uptime_sensor).state)) {
+        return {"unknown"};
+      }
+
+      const uint32_t total_seconds = static_cast<uint32_t>(id(uptime_sensor).state);
+      const uint32_t days = total_seconds / 86400U;
+      const uint32_t hours = (total_seconds % 86400U) / 3600U;
+      const uint32_t minutes = (total_seconds % 3600U) / 60U;
+      const uint32_t seconds = total_seconds % 60U;
+
+      // Format the most compact readable representation for the dashboard.
+      char buffer[32];
+      if (days > 0U) {
+        snprintf(buffer, sizeof(buffer), "%ud %uh %um", days, hours, minutes);
+      } else if (hours > 0U) {
+        snprintf(buffer, sizeof(buffer), "%uh %um", hours, minutes);
+      } else if (minutes > 0U) {
+        snprintf(buffer, sizeof(buffer), "%um", minutes);
+      } else {
+        snprintf(buffer, sizeof(buffer), "%us", seconds);
+      }
+      return {buffer};
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+
+update:
+  - platform: http_request
+    id: oq_firmware_update
+    name: Firmware Update
+    source: ${release_manifest_url}
+    update_interval: 4h
+    icon: mdi:update
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_system_diagnostics

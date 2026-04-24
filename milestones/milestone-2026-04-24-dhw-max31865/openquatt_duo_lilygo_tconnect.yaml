@@ -1,0 +1,25 @@
+# ==============================================================================
+# OpenQuatt - Duo Topology Main Config (LilyGO T-Connect)
+# ==============================================================================
+# Revision management:
+# - Bump `config_revision` for each functional change.
+# - Add one line to `config_revision_log` describing what changed.
+# config_revision: v1.0.0
+# config_revision_date: 2026-03-27
+# config_revision_log:
+#   - v1.0.0 (2026-03-27): Initial LilyGO T-Connect config created from waveshare template.
+substitutions:
+  <<: !include openquatt/oq_substitutions_common.yaml
+  # Force explicit MAX31865 pin mapping on LilyGO T-Connect (ESP32-S3).
+  max31865_spi_sck_pin: "GPIO41"
+  max31865_spi_mosi_pin: "GPIO39"
+  max31865_spi_miso_pin: "GPIO38"
+  max31865_1_cs_pin: "GPIO47"
+  max31865_2_cs_pin: "GPIO2"
+
+esphome:
+  build_path: build/openquatt_duo_lilygo_tconnect
+
+packages:
+  openquatt_hw_profile: !include openquatt/profiles/oq_substitutions_lilygo_tconnect.yaml
+  openquatt_base: !include openquatt_base.yaml

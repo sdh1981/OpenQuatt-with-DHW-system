@@ -1,0 +1,110 @@
+# ==============================================================================
+# OpenQuatt - Local Sensors (on-device)
+# ==============================================================================
+#
+# Scope:
+# - Optional dual MAX31865 for PT1000 coil sensors.
+# - Existing placeholder water_supply_temp_esp remains for backward compatibility.
+#
+# Wiring:
+# - Shared SPI: SCK/MOSI/MISO via substitutions.
+# - Dedicated CS per MAX board:
+#   * MAX #1 => DHW coil in
+#   * MAX #2 => DHW coil out
+#
+# ==============================================================================
+
+spi:
+  - id: oq_max31865_spi
+    clk_pin: ${max31865_spi_sck_pin}
+    mosi_pin: ${max31865_spi_mosi_pin}
+    miso_pin: ${max31865_spi_miso_pin}
+
+sensor:
+  - platform: max31865
+    id: dhw_pt1000_coil_in_c
+    name: "DHW PT1000 coil in"
+    icon: mdi:thermometer-chevron-up
+    cs_pin: ${max31865_1_cs_pin}
+    spi_id: oq_max31865_spi
+    reference_resistance: ${oq_max31865_ref_res_ohm}
+    rtd_nominal_resistance: ${oq_max31865_rtd_nominal_ohm}
+    rtd_wires: ${oq_max31865_wires}
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: ${oq_max31865_update_s}s
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: max31865
+    id: dhw_pt1000_coil_out_c
+    name: "DHW PT1000 coil out"
+    icon: mdi:thermometer-chevron-down
+    cs_pin: ${max31865_2_cs_pin}
+    spi_id: oq_max31865_spi
+    reference_resistance: ${oq_max31865_ref_res_ohm}
+    rtd_nominal_resistance: ${oq_max31865_rtd_nominal_ohm}
+    rtd_wires: ${oq_max31865_wires}
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: ${oq_max31865_update_s}s
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: dhw_pt1000_delta_c
+    name: "DHW PT1000 delta in-out"
+    icon: mdi:delta
+    unit_of_measurement: "°C"
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: ${oq_max31865_update_s}s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      if (!id(dhw_pt1000_coil_in_c).has_state() || !id(dhw_pt1000_coil_out_c).has_state()) {
+        return NAN;
+      }
+      const float in_c = id(dhw_pt1000_coil_in_c).state;
+      const float out_c = id(dhw_pt1000_coil_out_c).state;
+      if (isnan(in_c) || isnan(out_c)) return NAN;
+      return in_c - out_c;
+
+  - platform: template
+    id: water_supply_temp_esp
+    name: "Water Supply Temp"
+    icon: mdi:thermometer
+    unit_of_measurement: "C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: never
+    lambda: |-
+      return NAN;
+    web_server:
+      sorting_group_id: oq_temperatures
+
+binary_sensor:
+  - platform: template
+    id: dhw_pt1000_data_valid
+    name: "DHW PT1000 data valid"
+    icon: mdi:database-check
+    device_class: connectivity
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      if (!id(dhw_pt1000_coil_in_c).has_state() || !id(dhw_pt1000_coil_out_c).has_state()) {
+        return false;
+      }
+      const float in_c = id(dhw_pt1000_coil_in_c).state;
+      const float out_c = id(dhw_pt1000_coil_out_c).state;
+      if (isnan(in_c) || isnan(out_c)) return false;
+      const bool in_range = (in_c >= -30.0f && in_c <= 130.0f);
+      const bool out_range = (out_c >= -30.0f && out_c <= 130.0f);
+      return in_range && out_range;

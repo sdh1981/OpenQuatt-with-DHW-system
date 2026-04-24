@@ -1,0 +1,892 @@
+﻿# ============================================================================== 
+# OpenQuatt - DHW Controller (Quatt Duo + 3-way valve + 3 kW element)
+# ============================================================================== 
+# Assumptions:
+# - Tank/coil/feedback sensors are supplied from Home Assistant proxy entities.
+# - Fallback "DHW source *" entities are exposed so users can manually map/drive
+#   DHW inputs when external HA proxies are missing.
+# - LilyGO valve aux feedback can be wired as a dry contact between 2 GPIOs:
+#   one drive GPIO (held HIGH) and one sense GPIO (input with pulldown).
+# - `valve_aux` raw semantics: ON=true means valve reports DHW/boiler position (AB->A).
+#   Internally we convert this to `valve_feedback_cv` by inverting the raw bit.
+# - OpenQuatt is currently controlled through published DHW request entities
+#   (`oq_dhw_hp_request_active`, `oq_dhw_target_flow_temp`, `oq_dhw_block_cv_priority`).
+#   This keeps the controller modular; an HA automation can map these to strategy setpoints.
+# - Boiler relay output is used for the 3 kW element contactor.
+# ============================================================================== 
+
+output:
+  - platform: gpio
+    id: dhw_valve_relay_out
+    pin:
+      number: ${oq_dhw_valve_relay_pin}
+      inverted: true
+
+  - platform: gpio
+    id: dhw_valve_aux_feedback_drive_out
+    pin: ${oq_dhw_valve_aux_drive_pin}
+
+  - platform: gpio
+    id: boiler_relay_out
+    pin:
+      number: ${oq_boiler_relay_pin}
+      inverted: true
+
+globals:
+  - id: oq_dhw_hp_request_active
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+  - id: oq_dhw_target_flow_temp
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+
+  - id: oq_dhw_block_cv_priority
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+  - id: oq_dhw_hp_level_request
+    type: int
+    restore_value: false
+    initial_value: '4'
+
+  - id: oq_dhw_state_code
+    type: int
+    restore_value: false
+    initial_value: '0'
+
+  - id: oq_dhw_fault_code
+    type: int
+    restore_value: false
+    initial_value: '0'
+
+  - id: oq_dhw_clear_fault_req
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+  # Wallclock-based legionella bookkeeping (reboot persistent).
+  - id: oq_dhw_legionella_last_done_epoch_s
+    type: int64_t
+    restore_value: true
+    initial_value: '0'
+
+  - id: oq_dhw_legionella_anchor_epoch_s
+    type: int64_t
+    restore_value: true
+    initial_value: '0'
+
+switch:
+  - platform: output
+    id: dhw_valve_relay
+    name: "DHW valve relay"
+    output: dhw_valve_relay_out
+    icon: mdi:valve
+    restore_mode: ALWAYS_OFF
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: output
+    id: boiler_relay
+    name: "DHW element contactor"
+    output: boiler_relay_out
+    icon: mdi:water-boiler
+    restore_mode: ALWAYS_OFF
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: output
+    id: dhw_valve_aux_feedback_drive
+    name: "DHW valve aux feedback drive"
+    output: dhw_valve_aux_feedback_drive_out
+    icon: mdi:transmission-tower
+    restore_mode: ALWAYS_ON
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_lockout
+    name: "DHW lockout"
+    icon: mdi:lock-alert
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action: []
+    turn_off_action: []
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_src_valve_aux_cv
+    name: "DHW source valve aux DHW"
+    icon: mdi:valve
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    turn_on_action: []
+    turn_off_action: []
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_src_hp_fault
+    name: "DHW source HP fault"
+    icon: mdi:alert
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action: []
+    turn_off_action: []
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_src_lockout
+    name: "DHW source lockout"
+    icon: mdi:lock
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action: []
+    turn_off_action: []
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_src_solar_boost
+    name: "DHW source solar boost"
+    icon: mdi:solar-power
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action: []
+    turn_off_action: []
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_src_legionella_force
+    name: "DHW source legionella force"
+    icon: mdi:bacteria
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action: []
+    turn_off_action: []
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_manual_test_mode
+    name: "DHW manual test mode"
+    icon: mdi:hand-back-right
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action: []
+    turn_off_action: []
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_manual_valve_cmd
+    name: "DHW manual valve relay"
+    icon: mdi:valve
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action: []
+    turn_off_action: []
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_manual_element_cmd
+    name: "DHW manual element relay"
+    icon: mdi:water-boiler
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action: []
+    turn_off_action: []
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+button:
+  - platform: template
+    id: oq_dhw_clear_fault
+    name: "DHW clear fault"
+    icon: mdi:alert-remove
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    on_press:
+      - lambda: |-
+          id(oq_dhw_clear_fault_req) = true;
+
+number:
+  - platform: template
+    id: oq_dhw_boost_target_c
+    name: "DHW boost target"
+    icon: mdi:thermometer-chevron-up
+    unit_of_measurement: "°C"
+    min_value: 55
+    max_value: 58
+    step: 0.5
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 56
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_legionella_target_c
+    name: "DHW legionella target"
+    icon: mdi:bacteria
+    unit_of_measurement: "°C"
+    min_value: 60
+    max_value: 62
+    step: 0.5
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 61
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_hp_level
+    name: "DHW HP level"
+    icon: mdi:stairs
+    unit_of_measurement: "lvl"
+    min_value: 1
+    max_value: 10
+    step: 1
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 4
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_flow_min_lph
+    name: "DHW flow min"
+    icon: mdi:waves-arrow-up
+    unit_of_measurement: "l/h"
+    min_value: 300
+    max_value: 1300
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 750
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_flow_max_lph
+    name: "DHW flow max"
+    icon: mdi:waves-arrow-down
+    unit_of_measurement: "l/h"
+    min_value: 600
+    max_value: 1800
+    step: 10
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 1300
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_src_tank_top_c
+    name: "DHW source tank top"
+    icon: mdi:thermometer
+    unit_of_measurement: "°C"
+    min_value: 0
+    max_value: 90
+    step: 0.1
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 50
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_src_tank_bottom_c
+    name: "DHW source tank bottom"
+    icon: mdi:thermometer
+    unit_of_measurement: "°C"
+    min_value: 0
+    max_value: 90
+    step: 0.1
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 45
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_src_coil_in_c
+    name: "DHW source coil in"
+    icon: mdi:thermometer-chevron-up
+    unit_of_measurement: "°C"
+    min_value: 0
+    max_value: 90
+    step: 0.1
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 35
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_src_coil_out_c
+    name: "DHW source coil out"
+    icon: mdi:thermometer-chevron-down
+    unit_of_measurement: "°C"
+    min_value: 0
+    max_value: 90
+    step: 0.1
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 30
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+sensor:
+  - platform: homeassistant
+    id: dhw_tank_top_ha
+    name: "DHW source tank top (HA)"
+    entity_id: ${ha_dhw_tank_top_entity_id}
+    internal: true
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: homeassistant
+    id: dhw_tank_bottom_ha
+    name: "DHW source tank bottom (HA)"
+    entity_id: ${ha_dhw_tank_bottom_entity_id}
+    internal: true
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: homeassistant
+    id: dhw_coil_in_ha
+    name: "DHW source coil in (HA)"
+    entity_id: ${ha_dhw_coil_in_entity_id}
+    internal: true
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: homeassistant
+    id: dhw_coil_out_ha
+    name: "DHW source coil out (HA)"
+    entity_id: ${ha_dhw_coil_out_entity_id}
+    internal: true
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: dhw_tank_top_input
+    name: "DHW tank top"
+    icon: mdi:water-thermometer
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 5s
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      if (id(dhw_mb_tank_top_c).has_state() && !isnan(id(dhw_mb_tank_top_c).state)) {
+        return id(dhw_mb_tank_top_c).state;
+      }
+      if (id(dhw_tank_top_ha).has_state() && !isnan(id(dhw_tank_top_ha).state)) {
+        return id(dhw_tank_top_ha).state;
+      }
+      return id(oq_dhw_src_tank_top_c).state;
+
+  - platform: template
+    id: dhw_tank_bottom_input
+    name: "DHW tank bottom"
+    icon: mdi:water-thermometer
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 5s
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      if (id(dhw_mb_tank_bottom_c).has_state() && !isnan(id(dhw_mb_tank_bottom_c).state)) {
+        return id(dhw_mb_tank_bottom_c).state;
+      }
+      if (id(dhw_tank_bottom_ha).has_state() && !isnan(id(dhw_tank_bottom_ha).state)) {
+        return id(dhw_tank_bottom_ha).state;
+      }
+      return id(oq_dhw_src_tank_bottom_c).state;
+
+  - platform: template
+    id: dhw_coil_in_input
+    name: "DHW coil in"
+    icon: mdi:water-thermometer
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 5s
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      if (id(dhw_pt1000_coil_in_c).has_state() && !isnan(id(dhw_pt1000_coil_in_c).state)) {
+        return id(dhw_pt1000_coil_in_c).state;
+      }
+      if (id(dhw_coil_in_ha).has_state() && !isnan(id(dhw_coil_in_ha).state)) {
+        return id(dhw_coil_in_ha).state;
+      }
+      return id(oq_dhw_src_coil_in_c).state;
+
+  - platform: template
+    id: dhw_coil_out_input
+    name: "DHW coil out"
+    icon: mdi:water-thermometer
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 5s
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      if (id(dhw_pt1000_coil_out_c).has_state() && !isnan(id(dhw_pt1000_coil_out_c).state)) {
+        return id(dhw_pt1000_coil_out_c).state;
+      }
+      if (id(dhw_coil_out_ha).has_state() && !isnan(id(dhw_coil_out_ha).state)) {
+        return id(dhw_coil_out_ha).state;
+      }
+      return id(oq_dhw_src_coil_out_c).state;
+
+  - platform: template
+    id: oq_dhw_state_code_sensor
+    name: "DHW state code"
+    icon: mdi:counter
+    accuracy_decimals: 0
+    update_interval: 5s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      return (float) id(oq_dhw_state_code);
+
+  - platform: template
+    id: oq_dhw_fault_code_sensor
+    name: "DHW fault code"
+    icon: mdi:counter
+    accuracy_decimals: 0
+    update_interval: 5s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      return (float) id(oq_dhw_fault_code);
+
+  - platform: template
+    id: oq_dhw_target_flow_temp_sensor
+    name: "DHW target flow temp"
+    icon: mdi:target
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 5s
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      return id(oq_dhw_target_flow_temp);
+
+  - platform: template
+    id: boiler_heat_power
+    name: "Boiler Heat Power"
+    icon: mdi:radiator
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 5s
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      return id(boiler_relay).state ? 3000.0f : 0.0f;
+
+binary_sensor:
+  - platform: gpio
+    id: dhw_valve_aux_raw_gpio
+    name: "DHW valve aux feedback raw (GPIO)"
+    pin:
+      number: ${oq_dhw_valve_aux_sense_pin}
+      mode:
+        input: true
+        pulldown: true
+    filters:
+      - delayed_on: 30ms
+      - delayed_off: 30ms
+    internal: true
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: homeassistant
+    id: dhw_valve_aux_cv_ha
+    name: "DHW source valve aux DHW (HA raw)"
+    entity_id: ${ha_dhw_valve_aux_entity_id}
+    internal: true
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: homeassistant
+    id: dhw_lockout_ha
+    name: "HA DHW lockout"
+    entity_id: ${ha_dhw_lockout_entity_id}
+    internal: true
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: homeassistant
+    id: dhw_solar_boost_ha
+    name: "HA DHW solar boost"
+    entity_id: ${ha_dhw_solar_boost_entity_id}
+    internal: true
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: homeassistant
+    id: dhw_legionella_force_ha
+    name: "HA DHW legionella force"
+    entity_id: ${ha_dhw_legionella_force_entity_id}
+    internal: true
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: homeassistant
+    id: dhw_hp_fault_ha
+    name: "HA DHW HP fault"
+    entity_id: ${ha_dhw_hp_fault_entity_id}
+    internal: true
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: dhw_valve_aux_cv_input
+    name: "DHW valve aux (DHW position)"
+    icon: mdi:valve
+    device_class: running
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      bool raw_dhw_pos = false;
+      if (id(dhw_valve_aux_raw_gpio).has_state()) {
+        raw_dhw_pos = id(dhw_valve_aux_raw_gpio).state;
+      } else if (id(dhw_valve_aux_cv_ha).has_state()) {
+        raw_dhw_pos = id(dhw_valve_aux_cv_ha).state;
+      } else {
+        raw_dhw_pos = id(oq_dhw_src_valve_aux_cv).state;
+      }
+      // Expose raw contact state in HA: ON means DHW position.
+      return raw_dhw_pos;
+
+  - platform: template
+    id: boiler_active
+    name: "Boiler active"
+    icon: mdi:fire
+    device_class: heat
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      return id(boiler_relay).state;
+
+  - platform: template
+    id: oq_dhw_hp_request_active_sensor
+    name: "DHW HP request active"
+    icon: mdi:heat-pump
+    device_class: heat
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      return id(oq_dhw_hp_request_active);
+
+  - platform: template
+    id: oq_dhw_block_cv_priority_sensor
+    name: "DHW block CV priority"
+    icon: mdi:home-off-outline
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      return id(oq_dhw_block_cv_priority);
+
+text_sensor:
+  - platform: template
+    id: oq_dhw_state_text
+    name: "DHW state"
+    icon: mdi:state-machine
+    update_interval: never
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      return std::string("IDLE_CV");
+
+  - platform: template
+    id: oq_dhw_fault_text
+    name: "DHW fault"
+    icon: mdi:alert-circle-outline
+    update_interval: never
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      return std::string("NONE");
+
+  - platform: template
+    id: oq_dhw_legionella_last_run_text
+    name: "DHW legionella laatste run"
+    icon: mdi:history
+    update_interval: never
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      return std::string("Nog niet uitgevoerd");
+
+  - platform: template
+    id: oq_dhw_legionella_next_run_text
+    name: "DHW legionella volgende run"
+    icon: mdi:calendar-clock
+    update_interval: never
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      return std::string("Onbekend");
+
+interval:
+  - interval: ${oq_dhw_loop_s}s
+    startup_delay: 4600ms
+    then:
+      - lambda: |-
+          static oq_dhw::Controller controller;
+          auto fmt_eta_s = [](int64_t delta_s) -> std::string {
+            if (delta_s < 0) delta_s = 0;
+            const uint32_t total_min = (uint32_t) (delta_s / 60LL);
+            const uint32_t days = total_min / (24UL * 60UL);
+            const uint32_t rem_min_after_days = total_min % (24UL * 60UL);
+            const uint32_t hours = rem_min_after_days / 60UL;
+            const uint32_t mins = rem_min_after_days % 60UL;
+            char buf[48];
+            if (days > 0) {
+              snprintf(buf, sizeof(buf), "%lud %luh", (unsigned long) days, (unsigned long) hours);
+            } else if (hours > 0) {
+              snprintf(buf, sizeof(buf), "%luh %lum", (unsigned long) hours, (unsigned long) mins);
+            } else {
+              snprintf(buf, sizeof(buf), "%lum", (unsigned long) mins);
+            }
+            return std::string(buf);
+          };
+          auto fmt_epoch_local = [](int64_t epoch_s) -> std::string {
+            if (epoch_s <= 0) return std::string("Onbekend");
+            time_t tt = (time_t) epoch_s;
+            struct tm tmbuf;
+            if (localtime_r(&tt, &tmbuf) == nullptr) return std::string("Onbekend");
+            char buf[32];
+            if (strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M", &tmbuf) == 0) return std::string("Onbekend");
+            return std::string(buf);
+          };
+
+          if (id(oq_dhw_clear_fault_req)) {
+            controller.clear_fault_latch();
+            id(oq_dhw_clear_fault_req) = false;
+          }
+
+          oq_dhw::Config cfg;
+          cfg.start_top_c = 46.0f;
+          cfg.hp_stop_top_c = 49.0f;
+          cfg.boost_target_c = id(oq_dhw_boost_target_c).state;
+          cfg.legionella_target_c = id(oq_dhw_legionella_target_c).state;
+          cfg.hp_target_flow_c = 55.0f;
+          const float flow_min_cfg = id(oq_dhw_flow_min_lph).state;
+          const float flow_max_cfg = id(oq_dhw_flow_max_lph).state;
+          cfg.flow_min_lph = fminf(flow_min_cfg, flow_max_cfg);
+          cfg.flow_max_lph = fmaxf(flow_min_cfg, flow_max_cfg);
+
+          oq_dhw::Inputs in;
+          in.now_ms = (uint32_t) millis();
+          in.tank_top_c = id(dhw_tank_top_input).state;
+          in.tank_bottom_c = id(dhw_tank_bottom_input).state;
+          in.coil_in_c = id(dhw_coil_in_input).state;
+          in.coil_out_c = id(dhw_coil_out_input).state;
+
+          in.valve_feedback_valid = true;
+          // Raw aux contact closes in DHW position; controller expects CV=true.
+          in.valve_feedback_cv = !id(dhw_valve_aux_cv_input).state;
+
+          in.flow_valid = id(flow_rate_selected).has_state() && !isnan(id(flow_rate_selected).state);
+          in.flow_lph = in.flow_valid ? id(flow_rate_selected).state : NAN;
+
+          const bool hp_fault_from_ha = id(dhw_hp_fault_ha).has_state() ? id(dhw_hp_fault_ha).state : id(oq_dhw_src_hp_fault).state;
+          in.hp_fault_active = hp_fault_from_ha || id(oq_water_temp_hard_trip_active);
+
+          const bool lockout_ha = id(dhw_lockout_ha).has_state() ? id(dhw_lockout_ha).state : id(oq_dhw_src_lockout).state;
+          in.lockout_active = id(oq_dhw_lockout).state || lockout_ha;
+
+          in.solar_boost_request = id(dhw_solar_boost_ha).has_state() ? id(dhw_solar_boost_ha).state : id(oq_dhw_src_solar_boost).state;
+          in.legionella_force_request = id(dhw_legionella_force_ha).has_state() ? id(dhw_legionella_force_ha).state : id(oq_dhw_src_legionella_force).state;
+
+          const auto out = controller.tick(in, cfg);
+
+          const bool manual_test = id(oq_dhw_manual_test_mode).state;
+          if (manual_test) {
+            if (id(oq_dhw_manual_valve_cmd).state) {
+              if (!id(dhw_valve_relay).state) id(dhw_valve_relay).turn_on();
+            } else {
+              if (id(dhw_valve_relay).state) id(dhw_valve_relay).turn_off();
+            }
+
+            if (id(oq_dhw_manual_element_cmd).state) {
+              if (!id(boiler_relay).state) id(boiler_relay).turn_on();
+            } else {
+              if (id(boiler_relay).state) id(boiler_relay).turn_off();
+            }
+
+            id(oq_dhw_hp_request_active) = false;
+            id(oq_dhw_target_flow_temp) = NAN;
+            id(oq_dhw_block_cv_priority) = false;
+          } else {
+            if (out.valve_to_boiler) {
+              if (!id(dhw_valve_relay).state) id(dhw_valve_relay).turn_on();
+            } else {
+              if (id(dhw_valve_relay).state) id(dhw_valve_relay).turn_off();
+            }
+
+            const bool valve_boiler_confirmed = !in.valve_feedback_valid || !in.valve_feedback_cv;
+            const bool element_drive = out.element_on && valve_boiler_confirmed;
+
+            if (element_drive) {
+              if (!id(boiler_relay).state) id(boiler_relay).turn_on();
+            } else {
+              if (id(boiler_relay).state) id(boiler_relay).turn_off();
+            }
+
+            id(oq_dhw_hp_request_active) = out.hp_dhw_request;
+            id(oq_dhw_target_flow_temp) = out.target_flow_temp_c;
+            id(oq_dhw_block_cv_priority) = out.block_cv_priority;
+          }
+          id(oq_dhw_hp_level_request) = (int) roundf(id(oq_dhw_hp_level).state);
+          id(oq_dhw_state_code) = (int) out.state;
+          id(oq_dhw_fault_code) = (int) out.fault;
+
+          if (out.state_changed) {
+            id(oq_dhw_state_text).publish_state(oq_dhw::state_name(out.state));
+            ESP_LOGI("oq_dhw", "state -> %s", oq_dhw::state_name(out.state));
+          }
+
+          if (out.fault_changed) {
+            id(oq_dhw_fault_text).publish_state(oq_dhw::fault_name(out.fault));
+            if (out.fault != oq_dhw::Fault::NONE) {
+              ESP_LOGE("oq_dhw", "fault -> %s", oq_dhw::fault_name(out.fault));
+            } else {
+              ESP_LOGI("oq_dhw", "fault cleared");
+            }
+          }
+
+          // Legionella run diagnostics on wallclock time (persistent over reboot).
+          {
+            auto now = id(oq_time).now();
+            const bool now_valid = now.is_valid();
+            const int64_t now_epoch_s = now_valid ? (int64_t) now.timestamp : 0;
+            const int64_t interval_s = (int64_t) (cfg.legionella_interval_ms / 1000UL);
+
+            if (now_valid && id(oq_dhw_legionella_anchor_epoch_s) <= 0) {
+              id(oq_dhw_legionella_anchor_epoch_s) = now_epoch_s;
+            }
+
+            static int prev_state_code = (int) oq_dhw::State::IDLE_CV;
+            const int cur_state_code = (int) out.state;
+            const bool legionella_completed =
+                now_valid &&
+                (prev_state_code == (int) oq_dhw::State::LEGIONELLA) &&
+                (cur_state_code == (int) oq_dhw::State::IDLE_CV) &&
+                (out.fault == oq_dhw::Fault::NONE);
+            if (legionella_completed) {
+              id(oq_dhw_legionella_last_done_epoch_s) = now_epoch_s;
+            }
+            prev_state_code = cur_state_code;
+
+            std::string last_run = "Nog niet uitgevoerd";
+            const int64_t last_done_epoch = id(oq_dhw_legionella_last_done_epoch_s);
+            if (last_done_epoch > 0) {
+              last_run = fmt_epoch_local(last_done_epoch);
+              if (now_valid && now_epoch_s >= last_done_epoch) {
+                last_run += std::string(" (") + "geleden " + fmt_eta_s(now_epoch_s - last_done_epoch) + ")";
+              }
+            }
+
+            std::string next_run = "Uitgeschakeld";
+            if (interval_s > 0) {
+              const int64_t base_epoch =
+                  (last_done_epoch > 0) ? last_done_epoch : id(oq_dhw_legionella_anchor_epoch_s);
+              if (base_epoch > 0) {
+                const int64_t due_epoch = base_epoch + interval_s;
+                next_run = fmt_epoch_local(due_epoch);
+                if (now_valid) {
+                  if (now_epoch_s >= due_epoch) {
+                    next_run += std::string(" (nu verschuldigd)");
+                  } else {
+                    next_run += std::string(" (over ") + fmt_eta_s(due_epoch - now_epoch_s) + ")";
+                  }
+                }
+              } else {
+                next_run = "Wachten op tijdsync";
+              }
+            }
+
+            static std::string last_pub_last = "";
+            static std::string last_pub_next = "";
+            if (last_run != last_pub_last) {
+              id(oq_dhw_legionella_last_run_text).publish_state(last_run.c_str());
+              last_pub_last = last_run;
+            }
+            if (next_run != last_pub_next) {
+              id(oq_dhw_legionella_next_run_text).publish_state(next_run.c_str());
+              last_pub_next = next_run;
+            }
+          }
+
