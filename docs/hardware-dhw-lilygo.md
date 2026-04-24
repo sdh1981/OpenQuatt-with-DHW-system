@@ -97,6 +97,42 @@ Belangrijk:
 - `openquatt/oq_local_sensors.yaml`
 - `openquatt/oq_dhw_modbus_bridge.yaml`
 
+## Hoe DHW werkt
+
+De DHW-regeling draait als finite state machine (FSM) met veilige interlocks.
+
+### States
+
+- `IDLE_CV`: klep in CV-stand, element uit, normale ruimteverwarming.
+- `DHW_PREPARE`: klep naar boilerpad schakelen en feedback controleren.
+- `DHW_HEAT_PUMP`: DHW laden met warmtepomp.
+- `DHW_BOOST`: naverwarmen met elektrisch element (bijv. boost/solar).
+- `LEGIONELLA`: periodieke cyclus naar hogere temperatuur.
+- `FAULT`: veilige toestand bij fout.
+
+### Normale DHW-cyclus
+
+1. Startvoorwaarde: `tank_top < startdrempel` (typisch 46 C), geen lockout/fout.
+2. Klep schakelt naar DHW-pad (boiler), daarna pas warmtepompaanvraag.
+3. Warmtepomp laadt tot stopdrempel (`tank_top >= 49 C`) of timeout.
+4. Indien nodig volgt `DHW_BOOST` met element naar hogere doelwaarde (55-58 C).
+5. Daarna terug naar `IDLE_CV`.
+
+### Legionella-cyclus
+
+- Periodiek (typisch wekelijks).
+- Eerst maximaal bruikbaar opwarmen met warmtepomp.
+- Daarna element bijschakelen naar 60-62 C.
+- Run wordt gelogd (laatste/volgende run in diagnostiek).
+
+### Veiligheid en interlocks
+
+- Element alleen toegestaan als DHW-pad bevestigd is.
+- Bij reboot: veilige defaults (klep naar rust/CV, element uit).
+- Sensor-plausibiliteitschecks en flow-grenzen.
+- Valve mismatch/feedbackfouten leiden naar `FAULT`.
+- In `FAULT`: DHW-aanvraag uit, element uit, foutcode gepubliceerd.
+
 ## Veiligheidsnotities
 
 - Element wordt alleen aangestuurd in DHW-pad met interlocks in de FSM.
