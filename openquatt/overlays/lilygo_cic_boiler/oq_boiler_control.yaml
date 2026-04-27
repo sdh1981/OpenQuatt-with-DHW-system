@@ -507,8 +507,8 @@ sensor:
     web_server:
       sorting_group_id: oq_boiler
     lambda: |-
-      if (id(dhw_pt1000_coil_in_c).has_state() && !isnan(id(dhw_pt1000_coil_in_c).state)) {
-        return id(dhw_pt1000_coil_in_c).state;
+      if (id(dhw_pt1000_coil_in_cal_c).has_state() && !isnan(id(dhw_pt1000_coil_in_cal_c).state)) {
+        return id(dhw_pt1000_coil_in_cal_c).state;
       }
       if (id(dhw_coil_in_ha).has_state() && !isnan(id(dhw_coil_in_ha).state)) {
         return id(dhw_coil_in_ha).state;
@@ -527,8 +527,8 @@ sensor:
     web_server:
       sorting_group_id: oq_boiler
     lambda: |-
-      if (id(dhw_pt1000_coil_out_c).has_state() && !isnan(id(dhw_pt1000_coil_out_c).state)) {
-        return id(dhw_pt1000_coil_out_c).state;
+      if (id(dhw_pt1000_coil_out_cal_c).has_state() && !isnan(id(dhw_pt1000_coil_out_cal_c).state)) {
+        return id(dhw_pt1000_coil_out_cal_c).state;
       }
       if (id(dhw_coil_out_ha).has_state() && !isnan(id(dhw_coil_out_ha).state)) {
         return id(dhw_coil_out_ha).state;
@@ -947,4 +947,5 @@ interval:
               last_pub_next = next_run;
             }
           }
+
 
