@@ -2960,6 +2960,12 @@ views:
                 name: DHW fout
               - entity: switch.openquatt_dhw_lockout
                 name: DHW lockout
+              - entity: switch.openquatt_dhw_solar_boost_auto
+                name: Boiler solar boost auto
+              - entity: sensor.openquatt_dhw_electricity_tariff
+                name: Stroomtarief (EUR/kWh)
+              - entity: binary_sensor.openquatt_dhw_tariff_negative
+                name: Tarief negatief
               - entity: button.openquatt_dhw_clear_fault
                 name: Reset DHW fout
               - entity: number.openquatt_dhw_boost_target

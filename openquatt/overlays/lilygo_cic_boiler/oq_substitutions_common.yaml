@@ -194,6 +194,7 @@ ha_dhw_hp_fault_entity_id: "binary_sensor.openquatt_ext_dhw_hp_fault" # HA proxy
 ha_dhw_lockout_entity_id: "binary_sensor.openquatt_ext_dhw_lockout" # HA proxy manual lockout for DHW.
 ha_dhw_solar_boost_entity_id: "binary_sensor.openquatt_ext_dhw_solar_boost" # HA proxy: solar surplus boost request.
 ha_dhw_legionella_force_entity_id: "binary_sensor.openquatt_ext_dhw_legionella_force" # HA proxy: force legionella cycle.
+ha_electricity_tariff_entity_id: "sensor.zonneplan_current_electricity_tariff" # HA electricity tariff sensor [EUR/kWh]; negative enables solar-boost auto trigger.
 
 # ----------------------------
 # HP IO (MODBUS POLLING)

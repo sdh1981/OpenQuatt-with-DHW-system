@@ -170,6 +170,18 @@ switch:
       sorting_group_id: oq_boiler
 
   - platform: template
+    id: oq_dhw_solar_boost_auto
+    name: "DHW solar boost auto"
+    icon: mdi:cash-minus
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action: []
+    turn_off_action: []
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
     id: oq_dhw_src_legionella_force
     name: "DHW source legionella force"
     icon: mdi:bacteria
@@ -416,6 +428,33 @@ sensor:
     web_server:
       sorting_group_id: oq_boiler
 
+  - platform: homeassistant
+    id: dhw_tariff_ha
+    name: "HA electricity tariff"
+    entity_id: ${ha_electricity_tariff_entity_id}
+    internal: true
+    unit_of_measurement: "EUR/kWh"
+    state_class: measurement
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_electricity_tariff
+    name: "DHW electricity tariff"
+    icon: mdi:cash
+    unit_of_measurement: "EUR/kWh"
+    state_class: measurement
+    accuracy_decimals: 4
+    update_interval: 5s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      if (id(dhw_tariff_ha).has_state() && !isnan(id(dhw_tariff_ha).state)) {
+        return id(dhw_tariff_ha).state;
+      }
+      return NAN;
+
   - platform: template
     id: dhw_tank_top_input
     name: "DHW tank top"
@@ -605,6 +644,18 @@ binary_sensor:
       sorting_group_id: oq_boiler
 
   - platform: template
+    id: oq_dhw_tariff_negative
+    name: "DHW tariff negative"
+    icon: mdi:cash-minus
+    device_class: running
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      if (!id(dhw_tariff_ha).has_state() || isnan(id(dhw_tariff_ha).state)) return false;
+      return id(dhw_tariff_ha).state < 0.0f;
+
+  - platform: template
     id: dhw_valve_aux_cv_input
     name: "DHW valve aux (DHW position)"
     icon: mdi:valve
@@ -767,7 +818,14 @@ interval:
           const bool lockout_ha = id(dhw_lockout_ha).has_state() ? id(dhw_lockout_ha).state : id(oq_dhw_src_lockout).state;
           in.lockout_active = id(oq_dhw_lockout).state || lockout_ha;
 
-          in.solar_boost_request = id(dhw_solar_boost_ha).has_state() ? id(dhw_solar_boost_ha).state : id(oq_dhw_src_solar_boost).state;
+          const bool solar_boost_ha =
+              id(dhw_solar_boost_ha).has_state() ? id(dhw_solar_boost_ha).state : id(oq_dhw_src_solar_boost).state;
+          const bool solar_boost_auto_negative_tariff =
+              id(oq_dhw_solar_boost_auto).state &&
+              id(dhw_tariff_ha).has_state() &&
+              !isnan(id(dhw_tariff_ha).state) &&
+              (id(dhw_tariff_ha).state < 0.0f);
+          in.solar_boost_request = solar_boost_ha || solar_boost_auto_negative_tariff;
           in.legionella_force_request = id(dhw_legionella_force_ha).has_state() ? id(dhw_legionella_force_ha).state : id(oq_dhw_src_legionella_force).state;
 
           const auto out = controller.tick(in, cfg);
