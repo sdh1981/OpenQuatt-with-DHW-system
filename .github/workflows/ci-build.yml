@@ -15,18 +15,12 @@ jobs:
       fail-fast: false
       matrix:
         profile:
-          - id: duo-waveshare
-            config: openquatt_duo_waveshare.yaml
-            build_path: .esphome/build/openquatt_duo_waveshare
-          - id: duo-heatpump-listener
-            config: openquatt_duo_heatpump_listener.yaml
-            build_path: .esphome/build/openquatt_duo_heatpump_listener
-          - id: single-waveshare
-            config: openquatt_single_waveshare.yaml
-            build_path: .esphome/build/openquatt_single_waveshare
-          - id: single-heatpump-listener
-            config: openquatt_single_heatpump_listener.yaml
-            build_path: .esphome/build/openquatt_single_heatpump_listener
+          - id: duo-lilygo-tconnect-cic
+            config: openquatt_duo_lilygo_tconnect+cic.yaml
+            build_path: .esphome/build/openquatt_duo_lilygo_tconnect_cic
+          - id: duo-lilygo-tconnect
+            config: openquatt_duo_lilygo_tconnect.yaml
+            build_path: .esphome/build/openquatt_duo_lilygo_tconnect
 
     steps:
       - name: Checkout
@@ -65,6 +59,6 @@ jobs:
           name: openquatt-${{ matrix.profile.id }}-firmware-${{ github.sha }}
           if-no-files-found: error
           path: |
-            ${{ matrix.profile.build_path }}/.pioenvs/openquatt/firmware.bin
-            ${{ matrix.profile.build_path }}/.pioenvs/openquatt/firmware.ota.bin
-            ${{ matrix.profile.build_path }}/.pioenvs/openquatt/firmware.factory.bin
+            ${{ matrix.profile.build_path }}/.pioenvs/*/firmware.bin
+            ${{ matrix.profile.build_path }}/.pioenvs/*/firmware.ota.bin
+            ${{ matrix.profile.build_path }}/.pioenvs/*/firmware.factory.bin
