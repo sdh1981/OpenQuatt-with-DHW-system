@@ -205,6 +205,30 @@ binary_sensor:
     web_server:
       sorting_group_id: oq_sensor_selection
 
+  - platform: template
+    id: oq_pt1000_supply_fallback
+    name: "T-Aanvoer PT1000 fallback actief"
+    icon: mdi:alert-circle-outline
+    device_class: problem
+    entity_category: diagnostic
+    update_interval: 10s
+    lambda: return id(oq_pt1000_supply_fallback_active);
+    on_press:
+      - homeassistant.service:
+          service: persistent_notification.create
+          data:
+            notification_id: oq_pt1000_supply_fallback
+            title: "OpenQuatt — T-Aanvoer sensor fallback"
+            message: >-
+              PT1000 Ch5 (T-Aanvoer) geeft geen geldige meting.
+              De regeling gebruikt HP2 uitlaattemperatuur als tijdelijke vervanging.
+              Controleer de PT1000-sensor en de Modbus-verbinding van de CWT-module.
+    on_release:
+      - homeassistant.service:
+          service: persistent_notification.dismiss
+          data:
+            notification_id: oq_pt1000_supply_fallback
+
 text_sensor:
   - platform: template
     id: oq_room_temperature_effective_source
@@ -551,27 +575,3 @@ sensor:
     web_server:
       sorting_group_id: oq_temperatures
 
-binary_sensor:
-  - platform: template
-    id: oq_pt1000_supply_fallback
-    name: "T-Aanvoer PT1000 fallback actief"
-    icon: mdi:alert-circle-outline
-    device_class: problem
-    entity_category: diagnostic
-    update_interval: 10s
-    lambda: return id(oq_pt1000_supply_fallback_active);
-    on_press:
-      - homeassistant.service:
-          service: persistent_notification.create
-          data:
-            notification_id: oq_pt1000_supply_fallback
-            title: "OpenQuatt — T-Aanvoer sensor fallback"
-            message: >-
-              PT1000 Ch5 (T-Aanvoer) geeft geen geldige meting.
-              De regeling gebruikt HP2 uitlaattemperatuur als tijdelijke vervanging.
-              Controleer de PT1000-sensor en de Modbus-verbinding van de CWT-module.
-    on_release:
-      - homeassistant.service:
-          service: persistent_notification.dismiss
-          data:
-            notification_id: oq_pt1000_supply_fallback
