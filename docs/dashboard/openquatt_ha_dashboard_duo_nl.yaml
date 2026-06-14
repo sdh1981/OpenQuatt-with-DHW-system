@@ -83,6 +83,12 @@ views:
             features:
               - type: trend-graph
             features_position: bottom
+          - type: markdown
+            content: >-
+              {% set p_w = states('sensor.openquatt_total_power_input') | float(0) %}
+              {% set t = states('sensor.openquatt_dhw_electricity_tariff') | float(0) %}
+              **Kosten: {{ ((p_w / 1000) * t) | round(3) }} EUR/uur** ({{ p_w | int }} W x {{ t }} EUR/kWh)
+            text_only: true
       - type: grid
         cards:
           - type: heading
@@ -105,7 +111,8 @@ views:
               - `Verwarmingsstrategie`: bron van de warmtevraag (bijv. Power
               House/curve).
 
-              - `Ketel actief`: geeft aan of ketel-assist actief is.
+              - `DHW Element Actief`: 3 kW element in de tank wordt aangestuurd
+              (gebruikt tijdens DHW boost en legionella element-fase).
 
               - `Stille modus actief`: toont of het stil-venster nu van kracht
               is.
@@ -129,8 +136,8 @@ views:
             vertical: false
             features_position: bottom
           - type: tile
-            entity: binary_sensor.openquatt_boiler_active
-            name: Ketel actief
+            entity: binary_sensor.openquatt_dhw_element_active
+            name: DHW Element Actief
             vertical: false
             features_position: bottom
           - type: tile
@@ -196,33 +203,7 @@ views:
             entity: select.openquatt_silent_mode_override
             name: Stille modus override
             vertical: false
-          - type: heading
-            icon: mdi:stethoscope
-            heading: Debug
-            heading_style: title
-          - type: markdown
-            content: >-
-              <details>
 
-              <summary><strong>Uitleg</strong></summary><ha-alert
-              alert-type="warning">Pas op, dit overruled de ControlMode van
-              OpenQuatt!</ha-alert>
-
-
-              `CM override`: handmatige mode-override; normaal op `Auto` laten.
-
-
-              </details>
-            text_only: true
-          - type: tile
-            entity: select.openquatt_cm_override
-            name:
-              type: entity
-            hide_state: true
-            vertical: false
-            features:
-              - type: select-options
-            features_position: inline
       - type: grid
         cards:
           - type: heading
@@ -270,59 +251,49 @@ views:
             hour24: true
             height: 80
             decimals: 1
+
+      - type: grid
+        cards:
           - type: heading
+            icon: mdi:heat-pump-outline
+            heading: HP1 vs HP2
             heading_style: title
-            heading: Instellingen stille modus
-            icon: mdi:volume-off
-          - type: markdown
-            content: >-
-              <details>
-
-              <summary><strong>Uitleg</strong></summary>
-
-
-              Dagelijkse instellingen die direct gedrag begrenzen:
-
-              - `Silent end/start time`: tijdvenster voor stille modus.
-
-              - `Day max level`: bovengrens compressorlevel buiten silent-uren.
-
-              - `Silent max level`: bovengrens compressorlevel tijdens
-              silent-uren.
-
-
-              </details>
-            text_only: true
           - type: tile
-            entity: time.openquatt_silent_end_time
-            name:
-              type: entity
-            vertical: false
-          - type: tile
-            entity: time.openquatt_silent_start_time
-            name:
-              type: entity
-            vertical: false
-          - type: tile
-            entity: number.openquatt_day_max_level
-            name:
-              type: entity
-            hide_state: false
+            entity: sensor.openquatt_hp1_power_input
+            name: HP1 Vermogen
             vertical: false
             features:
-              - style: slider
-                type: numeric-input
-            features_position: inline
+              - type: trend-graph
+            features_position: bottom
           - type: tile
-            entity: number.openquatt_silent_max_level
-            name:
-              type: entity
-            hide_state: false
+            entity: sensor.openquatt_hp2_power_input
+            name: HP2 Vermogen
             vertical: false
             features:
-              - style: slider
-                type: numeric-input
-            features_position: inline
+              - type: trend-graph
+            features_position: bottom
+          - type: tile
+            entity: sensor.openquatt_hp1_cop
+            name: HP1 COP
+            vertical: false
+            features:
+              - type: trend-graph
+            features_position: bottom
+          - type: tile
+            entity: sensor.openquatt_hp2_cop
+            name: HP2 COP
+            vertical: false
+            features:
+              - type: trend-graph
+            features_position: bottom
+          - type: tile
+            entity: sensor.openquatt_hp1_runtime_hours
+            name: HP1 Draaitijd
+            vertical: false
+          - type: tile
+            entity: sensor.openquatt_hp2_runtime_hours
+            name: HP2 Draaitijd
+            vertical: false
       - type: grid
         column_span: 2
         cards:
@@ -430,9 +401,12 @@ views:
       card:
         type: markdown
         content: >-
-          <img
-          src="https://raw.githubusercontent.com/jeroen85/OpenQuatt/main/docs/assets/openquatt_logo.png"
-          width="300" />
+          <div style="text-align:center;">
+            <img src="/local/openenergyos_logo_wide_v6.svg"
+                 alt="Open Energy OS for OpenQuatt"
+                 width="720"
+                 style="max-width:100%;height:auto;display:inline-block;border-radius:16px;" />
+          </div>
 
 
           ## <ha-icon icon="mdi:view-dashboard"></ha-icon> Overzicht
@@ -454,6 +428,194 @@ views:
         state_content:
           - name
           - state
+      - type: entity
+        entity: sensor.openquatt_scop_7d
+        name: SCOP 7d
+        show_name: true
+        show_state: true
+        show_icon: true
+      - type: entity
+        entity: sensor.openquatt_scop_24h
+        name: SCOP 24h
+        show_name: true
+        show_state: true
+        show_icon: true
+  - title: DHW
+    path: dhw
+    icon: mdi:water-boiler
+    type: sections
+    max_columns: 4
+    sections:
+      - type: grid
+        cards:
+          - type: heading
+            icon: mdi:water-boiler
+            heading: DHW regeling
+            heading_style: title
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: sensor.openquatt_dhw_state
+                name: DHW status
+              - entity: sensor.openquatt_dhw_fault
+                name: DHW fout
+              - entity: switch.openquatt_dhw_lockout
+                name: DHW lockout
+              - entity: switch.openquatt_dhw_solar_boost_auto
+                name: Boiler solar boost auto
+              - entity: sensor.openquatt_dhw_electricity_tariff
+                name: Stroomtarief (EUR/kWh)
+              - entity: binary_sensor.openquatt_dhw_tariff_negative
+                name: Tarief negatief
+              - entity: button.openquatt_dhw_clear_fault
+                name: Reset DHW fout
+              - entity: number.openquatt_dhw_boost_target
+                name: Boost doel (degC)
+              - entity: number.openquatt_dhw_legionella_target
+                name: Legionella doel (degC)
+              - entity: number.openquatt_dhw_hp_level
+                name: DHW HP niveau
+              - entity: number.openquatt_dhw_flow_min
+                name: DHW flow min (l/h)
+              - entity: number.openquatt_dhw_flow_max
+                name: DHW flow max (l/h)
+      - type: grid
+        cards:
+          - type: heading
+            icon: mdi:thermometer-water
+            heading: DHW metingen
+            heading_style: title
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: sensor.openquatt_dhw_tank_top
+                name: Tank top (degC)
+              - entity: sensor.openquatt_dhw_tank_bottom
+                name: Tank bottom (degC)
+              - entity: sensor.openquatt_dhw_coil_in
+                name: Spiraal in (degC)
+              - entity: sensor.openquatt_dhw_coil_out
+                name: Spiraal uit (degC)
+              - entity: sensor.openquatt_dhw_target_flow_temp
+                name: Doel aanvoer (degC)
+              - entity: binary_sensor.openquatt_dhw_hp_request_active
+                name: HP aanvraag actief
+              - entity: binary_sensor.openquatt_dhw_block_cv_priority
+                name: CV prioriteit geblokkeerd
+              - entity: sensor.openquatt_boiler_heat_power
+                name: Element thermisch vermogen (W)
+      - type: grid
+        cards:
+          - type: heading
+            icon: mdi:source-branch
+            heading: DHW bron-entiteiten
+            heading_style: title
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: number.openquatt_dhw_source_tank_top
+                name: Bron tank top (degC)
+              - entity: number.openquatt_dhw_source_tank_bottom
+                name: Bron tank bottom (degC)
+              - entity: number.openquatt_dhw_source_coil_in
+                name: Bron spiraal in (degC)
+              - entity: number.openquatt_dhw_source_coil_out
+                name: Bron spiraal uit (degC)
+              - entity: switch.openquatt_dhw_source_valve_aux_dhw
+                name: Bron klepfeedback DHW (aan=DHW)
+              - entity: switch.openquatt_dhw_source_hp_fault
+                name: Bron HP fault
+              - entity: switch.openquatt_dhw_source_lockout
+                name: Bron lockout
+              - entity: switch.openquatt_dhw_source_solar_boost
+                name: Bron solar boost
+              - entity: switch.openquatt_dhw_source_legionella_force
+                name: Bron legionella force
+      - type: grid
+        cards:
+          - type: heading
+            icon: mdi:valve
+            heading: DHW actuatoren
+            heading_style: title
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: switch.openquatt_dhw_valve_relay
+                name: 3-wegklep relais
+              - entity: switch.openquatt_dhw_element_contactor
+                name: Element contactor
+              - entity: binary_sensor.openquatt_boiler_active
+                name: Element actief
+              - entity: binary_sensor.openquatt_dhw_valve_aux_dhw_position
+                name: Klepfeedback (DHW stand)
+              - entity: sensor.openquatt_dhw_state_code
+                name: Statuscode
+              - entity: sensor.openquatt_dhw_fault_code
+                name: Foutcode
+      - type: grid
+        cards:
+          - type: heading
+            icon: mdi:graph-outline
+            heading: DHW regelpad
+            heading_style: title
+          - type: markdown
+            content: |-
+              DHW Regelpad
+
+              Sensoren -> DHW FSM -> CM4 (DHW) -> HP mode Hot water (3) -> Klep + Element
+
+              Ingangen: tank_top, tank_bottom, coil_in, coil_out, valve_aux, flow, hp_fault
+              States: IDLE_CV, DHW_PREPARE, DHW_HEAT_PUMP, DHW_BOOST, LEGIONELLA, FAULT
+              Uitgangen: HP aanvraag, kleprelais, element contactor
+            text_only: true
+      - type: grid
+        cards:
+          - type: heading
+            icon: mdi:thermometer-water
+            heading: Tanktemperatuur
+            heading_style: title
+          - type: gauge
+            entity: sensor.openquatt_dhw_tank_top
+            name: Bovenin tank
+            min: 10
+            max: 75
+            needle: true
+            severity:
+              red: 10
+              yellow: 40
+              green: 55
+          - type: gauge
+            entity: sensor.openquatt_dhw_tank_bottom
+            name: Onderin tank
+            min: 10
+            max: 75
+            needle: true
+            severity:
+              red: 10
+              yellow: 35
+              green: 45
+      - type: grid
+        cards:
+          - type: heading
+            icon: mdi:bacteria-outline
+            heading: Legionella
+            heading_style: title
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: sensor.openquatt_dhw_legionella_laatste_run
+                name: Vorige cyclus
+              - entity: sensor.openquatt_dhw_legionella_volgende_run
+                name: Volgende cyclus
+              - entity: sensor.openquatt_dhw_legionella_eta
+                name: Actief - resterend (min)
+    cards: []
+    header:
+      card:
+        type: markdown
+        content: |-
+          # <ha-icon icon="mdi:water-boiler"></ha-icon> DHW
+          Sanitair warm water regeling, veiligheid en diagnostiek.
   - title: Energie
     path: energy
     icon: mdi:lightning-bolt-circle
@@ -534,6 +696,45 @@ views:
             entities:
               - entity: sensor.openquatt_system_thermal_energy_daily
                 name: Warmte vandaag
+      - type: grid
+        cards:
+          - type: heading
+            icon: mdi:chart-timeline-variant-shimmer
+            heading: Rolling window (SCOP)
+            heading_style: title
+          - type: tile
+            entity: sensor.openquatt_scop_24h
+            name: SCOP 24h
+            vertical: false
+            features:
+              - type: trend-graph
+            features_position: bottom
+          - type: tile
+            entity: sensor.openquatt_scop_7d
+            name: SCOP 7 dagen
+            vertical: false
+            features:
+              - type: trend-graph
+            features_position: bottom
+          - type: tile
+            entity: sensor.openquatt_scop_30d
+            name: SCOP 30 dagen
+            vertical: false
+            features:
+              - type: trend-graph
+            features_position: bottom
+          - type: tile
+            entity: sensor.openquatt_scop_lifetime
+            name: SCOP lifetime
+            vertical: false
+          - type: tile
+            entity: sensor.openquatt_energy_in_24h
+            name: Verbruik 24h
+            vertical: false
+          - type: tile
+            entity: sensor.openquatt_heat_out_24h
+            name: Warmte 24h
+            vertical: false
       - type: grid
         cards:
           - type: heading
@@ -955,8 +1156,18 @@ views:
             entities:
               - entity: sensor.openquatt_flow_average_selected
                 name: Flow
+              - entity: sensor.openquatt_flow_setpoint_active
+                name: Flow setpoint (actief)
+              - entity: number.openquatt_flow_setpoint_heating
+                name: Flow setpoint verwarmen
+              - entity: number.openquatt_flow_setpoint_cooling
+                name: Flow setpoint koelen
+              - entity: number.openquatt_flow_setpoint_dhw
+                name: Flow setpoint DHW
               - entity: number.openquatt_flow_setpoint
-                name: Flow setpoint
+                name: Flow setpoint (legacy fallback)
+              - entity: switch.openquatt_flow_phantom_suppression
+                name: Phantom flow filter (HP1 fix)
             grid_options:
               columns: full
           - type: history-graph
@@ -1214,6 +1425,36 @@ views:
             grid_options:
               columns: full
         column_span: 2
+      - type: grid
+        column_span: 2
+        cards:
+          - type: heading
+            icon: mdi:chart-scatter-plot
+            heading: Stooklijn actueel (24h)
+            heading_style: title
+          - type: custom:mini-graph-card
+            name: Buitentemp vs Aanvoertemperatuur
+            entities:
+              - entity: sensor.openquatt_outside_temperature_selected
+                name: Buitentemperatuur
+                show_legend_state: true
+                color: '#3B82F6'
+              - entity: sensor.openquatt_water_supply_temp_selected
+                name: Aanvoertemperatuur
+                show_legend_state: true
+                color: '#F59E0B'
+            show:
+              icon: true
+              name: true
+              state: true
+              legend: true
+              labels: true
+            points_per_hour: 6
+            hours_to_show: 24
+            line_width: 2
+            hour24: true
+            height: 100
+            decimals: 1
     cards: []
     header:
       card:
@@ -1308,12 +1549,18 @@ views:
                 name: Dauwpunt veiligheidsmarge
               - entity: sensor.openquatt_cooling_minimum_safe_supply_temp
                 name: Minimale veilige aanvoer
-              - entity: sensor.openquatt_cooling_effective_min_supply_temp
+              - entity: sensor.openquatt_cooling_effective_minimum_supply_temp
                 name: Actieve minimale aanvoer
-              - entity: sensor.openquatt_cooling_fallback_min_supply_temp
+              - entity: sensor.openquatt_cooling_fallback_minimum_supply_temp
                 name: Fallback minimale aanvoer
-              - entity: sensor.openquatt_cooling_fallback_night_min_outdoor_temp
+              - entity: sensor.openquatt_cooling_fallback_night_minimum_outdoor_temp
                 name: Nachtminimum buitentemperatuur
+              - entity: sensor.openquatt_cooling_dew_point_trend
+                name: Dauwpunttrend (°C/u)
+              - entity: sensor.openquatt_cooling_dynamic_safety_margin
+                name: Dynamische veiligheidsmarge
+              - entity: binary_sensor.openquatt_cooling_night_free_cooling_active
+                name: Nachtkoeling actief
       - type: grid
         cards:
           - type: heading
@@ -1338,10 +1585,16 @@ views:
               - entity: select.openquatt_cooling_emitter_profile
                 name: Koelafgifte type
               - entity: number.openquatt_cooling_hp2_assist_level
-                name: 2e compressor bijschakelen (cooling)
+                name: 2e compressor bijschakelen (handmatig)
               - entity: number.openquatt_cooling_safety_margin
                 name: Cooling safety margin
                 icon: mdi:delta
+              - entity: number.openquatt_cooling_minimum_runtime
+                name: Minimale koellooptijd (s)
+              - entity: number.openquatt_cooling_auto_dual_hp_demand_threshold
+                name: Auto dual-HP drempel
+              - entity: number.openquatt_cooling_night_free_cooling_threshold
+                name: Nachtkoeling drempel (°C)
               - entity: sensor.openquatt_cooling_stop_reason
                 name: Cooling stop reason
               - entity: sensor.openquatt_cooling_stop_reason_code
@@ -1970,8 +2223,7 @@ views:
                     name: Geselecteerde kamertemperatuur
                   - entity: sensor.openquatt_cic_room_temperature
                     name: Kamertemperatuur (CIC)
-                  - entity: sensor.openquatt_ot_room_temperature
-                    name: Kamertemperatuur (OT-thermostaat)
+                  # v0.40: OT thermostat entity verwijderd (OT package weggehaald)
                   - entity: sensor.openquatt_ha_thermostat_room_temperature
                     name: Kamertemperatuur (HA-invoer)
           - type: vertical-stack
@@ -2064,8 +2316,7 @@ views:
                     name: Geselecteerd kamer setpoint
                   - entity: sensor.openquatt_cic_room_setpoint
                     name: Kamer setpoint (CIC)
-                  - entity: sensor.openquatt_ot_room_setpoint
-                    name: Kamer setpoint (OT-thermostaat)
+                  # v0.40: OT thermostat entity verwijderd (OT package weggehaald)
                   - entity: sensor.openquatt_ha_thermostat_setpoint
                     name: Kamer setpoint (HA-invoer)
           - type: vertical-stack
@@ -2464,49 +2715,7 @@ views:
                 entity: input_number.openquatt_cooling_room_count
                 above: 5
         column_span: 3
-      - type: grid
-        cards:
-          - type: heading
-            icon: mdi:thermostat-box
-            heading: OpenTherm-thermostaat
-            heading_style: title
-          - type: markdown
-            content: |-
-              <details>
-              <summary><strong>Uitleg</strong></summary>
-
-              Dit blok toont de directe OpenTherm-thermostaatkoppeling.
-              Gebruik het om te controleren dat OpenQuatt warmtevraag,
-              koelvraag en kamerwaarden rechtstreeks van de thermostaat ziet,
-              dus buiten CIC of Home Assistant om.
-
-              Controleer bij afwijkingen eerst:
-              - `OpenTherm Enabled`
-              - `OT link problem`
-              - `Thermostaat CH enable`
-              - `Control setpoint`
-              - `Room setpoint`
-              - `Room temperature`
-
-              </details>
-            text_only: true
-          - type: entities
-            show_header_toggle: false
-            entities:
-              - entity: switch.openquatt_opentherm_enabled
-                name: OpenTherm Enabled
-              - entity: binary_sensor.openquatt_ot_link_problem
-                name: OT link problem
-              - entity: binary_sensor.openquatt_ot_thermostat_ch_enable
-                name: Thermostaat CH enable
-              - entity: binary_sensor.openquatt_ot_thermostat_cooling_enable
-                name: Thermostaat cooling enable
-              - entity: sensor.openquatt_ot_control_setpoint
-                name: Control setpoint
-              - entity: sensor.openquatt_ot_room_setpoint
-                name: Room setpoint
-              - entity: sensor.openquatt_ot_room_temperature
-                name: Room temperature
+      # v0.40: OpenTherm-thermostaat sectie verwijderd (OT package weggehaald)
       - type: grid
         cards:
           - type: heading
@@ -2662,6 +2871,148 @@ views:
                 name: PH opbouwtijd
               - entity: number.openquatt_power_house_demand_fall_time
                 name: PH afbouwtijd
+              - entity: switch.openquatt_power_house_solar_gain_enable
+                name: Zonnewinst correctie aan
+              - entity: number.openquatt_power_house_solar_gain_correction
+                name: Zonnewinst sterkte (0..1)
+              - entity: number.openquatt_power_house_frost_zone_derate
+                name: Frost-zone derating (0..0.30)
+              - entity: number.openquatt_power_house_design_supply_dt
+                name: Design aanvoer ΔT (K)
+              - entity: number.openquatt_power_house_preheat_gain
+                name: Voorconditioneer gain (0..1)
+              - entity: switch.openquatt_power_house_ua_learning_enable
+                name: UA leerroutine aan
+              - entity: number.openquatt_power_house_ua_learn_time_constant
+                name: UA leer tijdconstante (h)
+              - entity: button.openquatt_power_house_apply_ua_estimate
+                name: Pas UA-schatting toe
+              - entity: button.openquatt_power_house_reset_ua_learning
+                name: Reset UA leerstatus
+              - entity: sensor.openquatt_power_house_ua_estimate
+                name: UA-schatting (W/K)
+              - entity: sensor.openquatt_power_house_estimated_rated_power
+                name: Geschat rated power (W)
+              - entity: sensor.openquatt_power_house_live_heat_loss
+                name: Live warmteverlies (W)
+              - entity: sensor.openquatt_power_house_effective_ua
+                name: Effectieve UA (W/K)
+              - entity: sensor.openquatt_power_house_ua_samples
+                name: UA samples
+              - entity: sensor.openquatt_power_house_ua_skip_reason
+                name: UA skip reden
+              - entity: sensor.openquatt_power_house_solar_gain_estimate
+                name: Zonnewinst-schatting (W)
+              - entity: switch.openquatt_power_house_tariff_shift_enable
+                name: Tariefshift aan
+              - entity: number.openquatt_power_house_tariff_preheat_max
+                name: Tarief preheat max (°C)
+              - entity: number.openquatt_power_house_tariff_throttle_max
+                name: Tarief throttle max (°C)
+              - entity: number.openquatt_power_house_tariff_cheap_ratio
+                name: Tarief drempel goedkoop
+              - entity: number.openquatt_power_house_tariff_expensive_ratio
+                name: Tarief drempel duur
+              - entity: sensor.openquatt_power_house_tariff_setpoint_shift
+                name: Tarief setpoint shift (°C)
+              - entity: switch.openquatt_power_house_pv_self_consumption_enable
+                name: PV self-consumption aan
+              - entity: number.openquatt_power_house_pv_export_threshold
+                name: PV export drempel (W)
+              - entity: number.openquatt_power_house_pv_boost_max
+                name: PV boost max (W)
+              - entity: number.openquatt_power_house_pv_assumed_cop
+                name: PV aangenomen COP
+              - entity: sensor.openquatt_power_house_pv_boost
+                name: PV boost actueel (W)
+              - entity: switch.openquatt_power_house_window_open_detection
+                name: Window-open detectie
+              - entity: number.openquatt_power_house_window_open_temp_drop
+                name: Window drop drempel (K)
+              - entity: number.openquatt_power_house_window_open_pause
+                name: Window pause (min)
+              - entity: binary_sensor.openquatt_power_house_window_open_active
+                name: Window actief
+              - entity: switch.openquatt_power_house_adaptive_kp_enable
+                name: Adaptieve Kp aan
+              - entity: number.openquatt_power_house_kp_learn_time_constant
+                name: Kp leer tijdconstante (h)
+              - entity: button.openquatt_power_house_apply_kp_estimate
+                name: Pas Kp-schatting toe
+              - entity: button.openquatt_power_house_reset_kp_learning
+                name: Reset Kp leerstatus
+              - entity: sensor.openquatt_power_house_adaptive_kp_estimate
+                name: Adaptieve Kp (W/K)
+              - entity: sensor.openquatt_power_house_kp_skip_reason
+                name: Kp skip reden
+      - type: grid
+        cards:
+          - type: heading
+            icon: mdi:chart-bell-curve
+            heading: SCOP & Health (v0.32)
+            heading_style: title
+          - type: entities
+            entities:
+              - entity: sensor.openquatt_scop_24h
+                name: SCOP 24h
+              - entity: sensor.openquatt_scop_7d
+                name: SCOP 7 dagen
+              - entity: sensor.openquatt_scop_30d
+                name: SCOP 30 dagen
+              - entity: sensor.openquatt_scop_lifetime
+                name: SCOP lifetime
+              - entity: sensor.openquatt_energy_in_24h
+                name: Stroom in 24h (kWh)
+              - entity: sensor.openquatt_heat_out_24h
+                name: Warmte uit 24h (kWh)
+              - entity: sensor.openquatt_dhw_active_power_input
+                name: DHW live ingangsvermogen (W)
+              - entity: sensor.openquatt_dhw_active_heat_power
+                name: DHW live warmtevermogen (W)
+              - entity: sensor.openquatt_dhw_energy_input_24h
+                name: DHW energie in 24h (kWh)
+              - entity: sensor.openquatt_dhw_heat_output_24h
+                name: DHW warmte uit 24h (kWh)
+              - entity: sensor.openquatt_dhw_energy_input_lifetime
+                name: DHW energie totaal (kWh)
+              - entity: sensor.openquatt_dhw_heat_output_lifetime
+                name: DHW warmte totaal (kWh)
+              - entity: sensor.openquatt_dhw_cop_24h
+                name: DHW COP 24h
+              - entity: sensor.openquatt_dhw_cop_lifetime
+                name: DHW COP lifetime
+              - entity: sensor.openquatt_dhw_cycles_24h
+                name: DHW cycli 24h
+              - entity: sensor.openquatt_dhw_cycles_lifetime
+                name: DHW cycli totaal
+              - entity: sensor.openquatt_dhw_gemiddelde_kwh_per_cyclus
+                name: Gemiddelde kWh per cyclus
+              - entity: button.openquatt_dhw_energy_reset_24h
+                name: Reset DHW 24h
+              - entity: button.openquatt_dhw_energy_reset_lifetime
+                name: Reset DHW lifetime
+              - entity: button.openquatt_scop_reset_rolling_windows
+                name: Reset rolling SCOP
+              - entity: button.openquatt_scop_reset_lifetime
+                name: Reset lifetime SCOP
+              - entity: sensor.openquatt_health_short_cycles_24h
+                name: Korte cycli (24h)
+              - entity: sensor.openquatt_health_defrost_cycles_24h
+                name: Defrost-cycli (24h)
+              - entity: sensor.openquatt_health_cop_deviation
+                name: COP afwijking
+              - entity: binary_sensor.openquatt_health_short_cycle_warning
+                name: Waarschuwing korte cycli
+              - entity: binary_sensor.openquatt_health_high_defrost_warning
+                name: Waarschuwing veel defrost
+              - entity: binary_sensor.openquatt_health_cop_anomaly
+                name: Waarschuwing COP-afwijking
+              - entity: button.openquatt_health_counters_reset
+                name: Reset health counters
+              - entity: sensor.openquatt_room_heat_up_rate
+                name: Kamer opwarmsnelheid (K/h)
+              - entity: sensor.openquatt_estimated_time_to_setpoint
+                name: Geschatte tijd tot setpoint (min)
       - type: grid
         cards:
           - type: heading
@@ -2939,142 +3290,6 @@ views:
           Structurele regelinstellingen voor limieten, huismodel, stooklijn,
           heat-allocation en flow.
     cards: []
-  - title: DHW
-    path: dhw
-    icon: mdi:water-boiler
-    type: sections
-    max_columns: 4
-    sections:
-      - type: grid
-        cards:
-          - type: heading
-            icon: mdi:water-boiler
-            heading: DHW regeling
-            heading_style: title
-          - type: entities
-            show_header_toggle: false
-            entities:
-              - entity: sensor.openquatt_dhw_state
-                name: DHW status
-              - entity: sensor.openquatt_dhw_fault
-                name: DHW fout
-              - entity: switch.openquatt_dhw_lockout
-                name: DHW lockout
-              - entity: switch.openquatt_dhw_solar_boost_auto
-                name: Boiler solar boost auto
-              - entity: sensor.openquatt_dhw_electricity_tariff
-                name: Stroomtarief (EUR/kWh)
-              - entity: binary_sensor.openquatt_dhw_tariff_negative
-                name: Tarief negatief
-              - entity: button.openquatt_dhw_clear_fault
-                name: Reset DHW fout
-              - entity: number.openquatt_dhw_boost_target
-                name: Boost doel (degC)
-              - entity: number.openquatt_dhw_legionella_target
-                name: Legionella doel (degC)
-              - entity: number.openquatt_dhw_hp_level
-                name: DHW HP niveau
-              - entity: number.openquatt_dhw_flow_min
-                name: DHW flow min (l/h)
-              - entity: number.openquatt_dhw_flow_max
-                name: DHW flow max (l/h)
-      - type: grid
-        cards:
-          - type: heading
-            icon: mdi:thermometer-water
-            heading: DHW metingen
-            heading_style: title
-          - type: entities
-            show_header_toggle: false
-            entities:
-              - entity: sensor.openquatt_dhw_tank_top
-                name: Tank top (degC)
-              - entity: sensor.openquatt_dhw_tank_bottom
-                name: Tank bottom (degC)
-              - entity: sensor.openquatt_dhw_coil_in
-                name: Spiraal in (degC)
-              - entity: sensor.openquatt_dhw_coil_out
-                name: Spiraal uit (degC)
-              - entity: sensor.openquatt_dhw_target_flow_temp
-                name: Doel aanvoer (degC)
-              - entity: binary_sensor.openquatt_dhw_hp_request_active
-                name: HP aanvraag actief
-              - entity: binary_sensor.openquatt_dhw_block_cv_priority
-                name: CV prioriteit geblokkeerd
-              - entity: sensor.openquatt_boiler_heat_power
-                name: Element thermisch vermogen (W)
-      - type: grid
-        cards:
-          - type: heading
-            icon: mdi:source-branch
-            heading: DHW bron-entiteiten
-            heading_style: title
-          - type: entities
-            show_header_toggle: false
-            entities:
-              - entity: number.openquatt_dhw_source_tank_top
-                name: Bron tank top (degC)
-              - entity: number.openquatt_dhw_source_tank_bottom
-                name: Bron tank bottom (degC)
-              - entity: number.openquatt_dhw_source_coil_in
-                name: Bron spiraal in (degC)
-              - entity: number.openquatt_dhw_source_coil_out
-                name: Bron spiraal uit (degC)
-              - entity: switch.openquatt_dhw_source_valve_aux_dhw
-                name: Bron klepfeedback DHW (aan=DHW)
-              - entity: switch.openquatt_dhw_source_hp_fault
-                name: Bron HP fault
-              - entity: switch.openquatt_dhw_source_lockout
-                name: Bron lockout
-              - entity: switch.openquatt_dhw_source_solar_boost
-                name: Bron solar boost
-              - entity: switch.openquatt_dhw_source_legionella_force
-                name: Bron legionella force
-      - type: grid
-        cards:
-          - type: heading
-            icon: mdi:valve
-            heading: DHW actuatoren
-            heading_style: title
-          - type: entities
-            show_header_toggle: false
-            entities:
-              - entity: switch.openquatt_dhw_valve_relay
-                name: 3-wegklep relais
-              - entity: switch.openquatt_dhw_element_contactor
-                name: Element contactor
-              - entity: binary_sensor.openquatt_boiler_active
-                name: Element actief
-              - entity: binary_sensor.openquatt_dhw_valve_aux_dhw_position
-                name: Klepfeedback (DHW stand)
-              - entity: sensor.openquatt_dhw_state_code
-                name: Statuscode
-              - entity: sensor.openquatt_dhw_fault_code
-                name: Foutcode
-      - type: grid
-        cards:
-          - type: heading
-            icon: mdi:graph-outline
-            heading: DHW regelpad
-            heading_style: title
-          - type: markdown
-            content: |-
-              DHW Regelpad
-
-              Sensoren -> DHW FSM -> CM4 (DHW) -> HP mode Hot water (3) -> Klep + Element
-
-              Ingangen: tank_top, tank_bottom, coil_in, coil_out, valve_aux, flow, hp_fault
-              States: IDLE_CV, DHW_PREPARE, DHW_HEAT_PUMP, DHW_BOOST, LEGIONELLA, FAULT
-              Uitgangen: HP aanvraag, kleprelais, element contactor
-            text_only: true
-    cards: []
-    header:
-      card:
-        type: markdown
-        content: |-
-          # <ha-icon icon="mdi:water-boiler"></ha-icon> DHW
-          Sanitair warm water regeling, veiligheid en diagnostiek.
-
   - title: Service en test
     path: service-test
     icon: mdi:toolbox-outline
@@ -3168,6 +3383,61 @@ views:
                 name: Autotune Ki voorstel
               - entity: sensor.openquatt_flow_autotune_status
                 name: Autotune status
+      - type: grid
+        cards:
+          - type: heading
+            icon: mdi:stethoscope
+            heading: Debug
+            heading_style: title
+          - type: markdown
+            content: >-
+              <details>
+
+              <summary><strong>Uitleg</strong></summary><ha-alert
+              alert-type="warning">Pas op, dit overruled de ControlMode van
+              OpenQuatt!</ha-alert>
+
+
+              `CM override`: handmatige mode-override; normaal op `Auto` laten.
+
+
+              </details>
+            text_only: true
+          - type: tile
+            entity: select.openquatt_cm_override
+            name:
+              type: entity
+            hide_state: true
+            vertical: false
+            features:
+              - type: select-options
+            features_position: inline
+          - type: entities
+            title: Element Only Heating (CM6)
+            show_header_toggle: false
+            entities:
+              - entity: switch.openquatt_dhw_element_only_heating
+                name: Element Only Heating aan
+              - entity: number.openquatt_dhw_element_only_target
+                name: Doel tank bottom (°C)
+              - entity: number.openquatt_dhw_element_only_off_delta
+                name: Hysterese (°C)
+              - entity: sensor.openquatt_dhw_element_only_state
+                name: Status
+              - entity: sensor.openquatt_dhw_element_only_elapsed
+                name: Verstreken (min)
+          - type: entities
+            title: Ontluchtingsprotocol (CM97)
+            show_header_toggle: false
+            entities:
+              - entity: number.openquatt_air_purge_duration
+                name: Duur (min)
+              - entity: sensor.openquatt_air_purge_phase
+                name: Fase nummer
+              - entity: sensor.openquatt_air_purge_phase_text
+                name: Fase
+              - entity: sensor.openquatt_air_purge_remaining
+                name: Resterend (s)
     header:
       card:
         type: markdown

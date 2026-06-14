@@ -13,7 +13,7 @@
 device_name: "openquatt"                              # Internal ESPHome device ID / hostname base.
 friendly_name: OpenQuatt                              # Display name in Home Assistant / UI.
 project_name: "openquatt.openquatt"                   # ESPHome project identifier shown in firmware metadata.
-project_version: "v0.29.0"                            # ESPHome project version shown in firmware metadata.
+project_version: "v0.40.0"                            # ESPHome project version shown in firmware metadata.
 release_channel: "main"                               # Firmware release channel shown in diagnostics (`main` or `dev`).
 hp_perf_map_header: "openquatt/includes/hp_perf_map.h" # C++ performance-map header include path.
 thermal_request_logic_header: "openquatt/includes/oq_thermal_request_logic.h" # Shared C++ helper include for request/control glue.
@@ -57,6 +57,7 @@ oq_cm98_diag_max_s: "1800"                            # Maximum duration of diag
 oq_cm3_promote_s: "300"                               # Required deficit duration for CM2 -> CM3 promotion [s].
 oq_cm3_demote_s: "120"                                # Required low-deficit duration for CM3 -> CM2 demotion [s].
 oq_cm3_min_run_s: "300"                               # Minimum dwell time in CM3 before demotion [s].
+oq_cv_boiler_present: "0"                             # 1 = CV boiler hardware present (enable CM2<->CM3 promotion). 0 = removed; CM3 promotion is suppressed.
 oq_cm2_min_run_s: "120"                               # Minimum dwell time in CM2 before promotion [s].
 oq_cm0_sticky_wait_s: "86400"                         # Wait time in CM0 before sticky-pump run starts [s].
 oq_cm0_sticky_run_s: "60"                             # Duration of sticky-pump run in CM0 [s].
@@ -131,15 +132,7 @@ dhw_modbus_baud: "19200"                              # External DHW sensor-node
 dhw_modbus_poll_s: "5"                                # Poll interval for DHW tank temperatures [s].
 dhw_modbus_reg_bottom: "2133"                         # Register for tank bottom (0-based offset of 42134). Try 42134 if your device uses absolute addressing.
 dhw_modbus_reg_top: "2134"                            # Register for tank top (0-based offset of 42135). Try 42135 if your device uses absolute addressing.
-max31865_spi_sck_pin: "GPIO18"                        # Shared SPI SCK for dual MAX31865 (profile may override).
-max31865_spi_mosi_pin: "GPIO23"                       # Shared SPI MOSI for dual MAX31865 (profile may override).
-max31865_spi_miso_pin: "GPIO19"                       # Shared SPI MISO for dual MAX31865 (profile may override).
-max31865_1_cs_pin: "GPIO4"                            # CS pin for MAX31865 #1 (profile may override).
-max31865_2_cs_pin: "GPIO5"                            # CS pin for MAX31865 #2 (profile may override).
-oq_max31865_rtd_nominal_ohm: "1000.0"                 # PT1000 nominal resistance [ohm].
-oq_max31865_ref_res_ohm: "4300.0"                     # MAX31865 reference resistor [ohm] (common breakout value 4k3).
-oq_max31865_wires: "2"                                # PT1000 wiring mode (2/3/4).
-oq_max31865_update_s: "5"                             # Update interval for PT1000 sensors [s].
+# v0.40: MAX31865 substitutions removed (PT1000 coil sensors now via CWT-TM-8PT).
 
 # ----------------------------
 # OPEN THERM SLAVE
@@ -162,6 +155,11 @@ oq_cic_restore_mode_default: "RESTORE_DEFAULT_OFF"    # Default CIC polling stat
 # HA INPUT ENTITY MAPPING
 # ----------------------------
 ha_outside_temp_entity_id: "sensor.openquatt_ext_outdoor_temperature"      # HA proxy entity for outside temperature [degC].
+ha_outside_temp_forecast_entity_id: "sensor.openquatt_ext_outdoor_temperature_forecast" # HA proxy entity for outdoor temperature forecast 1-3h ahead [degC] (optional).
+ha_room_setpoint_next_entity_id: "sensor.openquatt_ext_room_setpoint_next" # HA proxy entity for next-hour room setpoint [degC] (optional, for preheat).
+ha_electricity_tariff_now_entity_id: "sensor.openquatt_ext_electricity_tariff_now" # HA proxy entity for current dynamic electricity tariff [EUR/kWh] (optional).
+ha_electricity_tariff_avg24_entity_id: "sensor.openquatt_ext_electricity_tariff_avg24" # HA proxy entity for 24h average dynamic tariff [EUR/kWh] (optional, used as reference).
+ha_grid_net_power_entity_id: "sensor.openquatt_ext_grid_net_power"        # HA proxy entity for grid net power [W], negative = export to grid (optional, PV self-consumption).
 ha_water_supply_temp_entity_id: "sensor.openquatt_ext_water_supply_temperature" # HA proxy entity for water supply temperature [degC].
 ha_room_setpoint_entity_id: "sensor.openquatt_ext_room_setpoint"           # HA proxy entity for thermostat room setpoint [degC].
 ha_room_temp_entity_id: "sensor.openquatt_ext_room_temperature"             # HA proxy entity for thermostat room temperature [degC].
@@ -194,6 +192,11 @@ ha_dhw_hp_fault_entity_id: "binary_sensor.openquatt_ext_dhw_hp_fault" # HA proxy
 ha_dhw_lockout_entity_id: "binary_sensor.openquatt_ext_dhw_lockout" # HA proxy manual lockout for DHW.
 ha_dhw_solar_boost_entity_id: "binary_sensor.openquatt_ext_dhw_solar_boost" # HA proxy: solar surplus boost request.
 ha_dhw_legionella_force_entity_id: "binary_sensor.openquatt_ext_dhw_legionella_force" # HA proxy: force legionella cycle.
+ha_dhw_legionella_cheap_window_entity_id: "binary_sensor.openquatt_ext_dhw_legionella_cheap_window" # v0.40: HA proxy boolean (optioneel, fallback).
+ha_dhw_legionella_cheap_start_entity_id: "input_datetime.house_battery_strategy_dynamic_cheapest_start" # v0.40: HA datetime — start goedkoopste tariefvenster.
+ha_dhw_legionella_cheap_end_entity_id: "input_datetime.house_battery_strategy_dynamic_cheapest_end"     # v0.40: HA datetime — einde goedkoopste tariefvenster.
+ha_dhw_expensive_start_entity_id: "input_datetime.house_battery_strategy_dynamic_expensive_start"      # v0.40: HA datetime — start van duurste tariefvenster vandaag.
+ha_dhw_expensive_end_entity_id: "input_datetime.house_battery_strategy_dynamic_expensive_end"          # v0.40: HA datetime — einde van duurste tariefvenster vandaag.
 ha_electricity_tariff_entity_id: "sensor.zonneplan_current_electricity_tariff" # HA electricity tariff sensor [EUR/kWh]; negative enables solar-boost auto trigger.
 
 # ----------------------------

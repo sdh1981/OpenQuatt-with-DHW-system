@@ -24,6 +24,12 @@
 # Safety / fail-safe:
 #   - Actuators are only controlled by the owner packages (heat-control/supervisory).
 #
+# Calibration offsets (v0.40+):
+#   - water_in_temp and water_out_temp include a final lambda filter that adds
+#     oq_cal_${hp_id}_in_offset / oq_cal_${hp_id}_out_offset (defined in
+#     oq_sensor_calibration.yaml, must be loaded first).
+#   - Default offset = 0.0 → no effect until calibration is applied.
+#
 # ==============================================================================
 
 # ----------------------------
@@ -107,9 +113,10 @@ select:
     value_type: U_WORD
     optimistic: true
     optionsmap:
-      "Standby": 0
-      "Cooling": 1
-      "Heating": 2
+      "Standby":   0
+      "Cooling":   1
+      "Heating":   2
+      "Hot water": 3
     skip_updates: ${oq_skip_10s}
     web_server:
       sorting_group_id: oq_${hp_id}
@@ -512,6 +519,7 @@ sensor:
 
   - platform: modbus_controller
     modbus_controller_id: ${hp_id}
+    id: ${hp_id}_condenser_pressure
     name: "${prefix}Condenser pressure"
     icon: mdi:gauge
     register_type: holding
@@ -606,6 +614,9 @@ sensor:
     web_server:
       sorting_group_id: oq_${hp_id}
 
+  # ── Water in temperature ────────────────────────────────────────────────────
+  # Lambda-filter past kalibratie-offset toe (oq_sensor_calibration.yaml).
+  # Standaard offset = 0.0 → geen effect.
   - platform: modbus_controller
     modbus_controller_id: ${hp_id}
     id: ${hp_id}_water_in_temp
@@ -625,9 +636,13 @@ sensor:
           min_value: -10
           max_value: 100
           ignore_out_of_range: true
+      - lambda: return x + id(oq_cal_${hp_id}_in_offset);
     web_server:
       sorting_group_id: oq_${hp_id}
 
+  # ── Water out temperature ───────────────────────────────────────────────────
+  # Lambda-filter past kalibratie-offset toe (oq_sensor_calibration.yaml).
+  # Standaard offset = 0.0 → geen effect.
   - platform: modbus_controller
     modbus_controller_id: ${hp_id}
     id: ${hp_id}_water_out_temp
@@ -647,6 +662,7 @@ sensor:
           min_value: -10
           max_value: 100
           ignore_out_of_range: true
+      - lambda: return x + id(oq_cal_${hp_id}_out_offset);
     web_server:
       sorting_group_id: oq_${hp_id}
 
@@ -704,6 +720,17 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.618
+      # Phantom flow suppression (v0.40):
+      # De Quatt flow-sensor rapporteert in CM0 soms een kleine niet-nul waarde
+      # door natuurlijke convectie of sensor-offset ("phantom flow"). Dit leidt
+      # tot valse mismatch-detecies tussen HP1 en HP2. Wanneer phantom suppression
+      # actief is en het systeem in CM0 staat (pomp gestopt), wordt de waarde
+      # naar 0 geforceerd. Schakelaar oq_flow_phantom_suppression_enable (in
+      # oq_flow_control.yaml) maakt runtime terugschakelen naar raw mogelijk.
+      - lambda: |-
+          if (!id(oq_flow_phantom_suppression_enable).state) return x;
+          if (id(oq_control_mode_code) == 0) return 0.0f;
+          return x;
     on_value:
       then:
         - lambda: |-
@@ -779,9 +806,12 @@ sensor:
     web_server:
       sorting_group_id: oq_performance
     lambda: |-
-      // Heat power follows measured HP working mode (2 = Heating), not supervisory CM.
+      // Heat power follows measured HP working mode, not supervisory CM.
+      // Mode 2 = Heating, mode 3 = Hot water (DHW) — beide leveren warmte naar
+      // de waterzijde, dus dezelfde thermische berekening geldt.
       const float working_mode = id(${hp_id}_working_mode).state;
-      if (working_mode != 2.0f) return 0.0f;
+      const int wm = (int) roundf(working_mode);
+      if (isnan(working_mode) || (wm != 2 && wm != 3)) return 0.0f;
 
       const float t_in_c = id(${hp_id}_water_in_temp).state;
       const float t_out_c = id(${hp_id}_water_out_temp).state;
@@ -1095,6 +1125,8 @@ text_sensor:
           return std::string("Cooling");
         case 2:
           return std::string("Heating");
+        case 3:
+          return std::string("Hot water");
         default: {
           char buf[24];
           snprintf(buf, sizeof(buf), "Unknown (%d)", working_mode);
@@ -1204,7 +1236,6 @@ text_sensor:
       if (has_bit(status_2121, 0x2000u)) add("DC water pump failure");
 
       return s.empty() ? std::string("None") : s;
-
 
   - platform: template
     id: ${hp_id}_pcb_firmware_version

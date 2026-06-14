@@ -19,7 +19,11 @@ substitutions:
 packages:
   <<: !include openquatt/oq_packages_common.yaml
   <<: !include openquatt/topology/oq_topology_packages_duo.yaml
-  oq_dhw_modbus_bridge: !include openquatt/oq_dhw_modbus_bridge.yaml
+  # v0.40: replaced external ESP32 Dallas-bridge with CWT-TM-8PT 8-channel
+  # PT1000 module on the same RS485 bus (now 9600 8N1 instead of 19200 8E1).
+  # The old oq_dhw_modbus_bridge.yaml is kept in the repo for rollback but
+  # is no longer included.
+  oq_cwt_pt_module: !include openquatt/oq_cwt_pt_module.yaml
 
 # ==============================================================================
 # ESPHOME CORE
@@ -70,3 +74,30 @@ esp32:
     sdkconfig_options:
       COMPILER_OPTIMIZATION_SIZE: y
       CONFIG_BT_ENABLED: n
+      # ---- Stack sizing ----
+      # The DHW controller tick lambda and cooling strategy lambdas grew large
+      # with v0.32 smart features + recent additions (coil-in mapping, legionella
+      # ETA, slew limiter, etc.). The default ESP main task stack (3584 bytes)
+      # is too tight for those lambdas, causing intermittent
+      # `vApplicationStackOverflowHook` crashes on core 1. Bumping to 32 kB gives
+      # generous headroom for nested lambdas + ESPHome scheduler overhead.
+      # The ESP32-S3 has 512 kB SRAM so the ~28 kB extra is negligible.
+      CONFIG_ESP_MAIN_TASK_STACK_SIZE: "32768"
+      # Timer task runs ESPHome scheduled callbacks (interval lambdas).
+      # Raised omdat zware lambdas op core 1 stack-overflow gaven:
+      #  - legionella hold-handler (DHW controller logic)
+      #  - cooling slew limiter
+      #  - DHW state machine tick (Config + Inputs + Outputs op stack)
+      #  - sensor calibration state machine
+      # 12 kB was te krap zodra Hot Water mode + nieuwe legionella hold actief
+      # waren. 20 kB was daarna voldoende tot v0.42.1 (juni 2026): extra code
+      # in cooling/supervisory lambdas deed de canary sneuvelen. 32 kB = zelfde
+      # headroom als de main task; ESP32-S3 512 kB SRAM maakt dit verwaarloosbaar.
+      CONFIG_ESP_TIMER_TASK_STACK_SIZE: "32768"
+      # FreeRTOS stack-overflow detection: full-stack-canary detection so future
+      # overflows are caught with a clear backtrace instead of silent corruption.
+      CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY: y
+      # HTTP server task stack. Default is 4096 bytes, which causes stack overflow
+      # when serving the large OpenQuatt web bundle. 8192 bytes gives enough room
+      # while leaving ~4 KB more heap than the previous hardcoded 12288 in web_server_idf.cpp.
+      CONFIG_HTTPD_TASK_STACKSIZE: "8192"

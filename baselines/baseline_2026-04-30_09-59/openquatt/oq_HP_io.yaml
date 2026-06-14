@@ -1,0 +1,1229 @@
+# ==============================================================================
+# OpenQuatt – Per-HP Modbus Control & Entities
+# ==============================================================================
+#
+# Goal:
+#   Defines per-heat-pump Modbus registers, sensors, and actuators used by other packages.
+#
+# Role in architecture:
+#   Hardware abstraction layer: exposes consistent entities for heat/flow/supervisory/power.
+#
+# What this package DOES do:
+#   - Defines Modbus entities for HP1/HP2 (temperatures, pressures, status bits, etc.)
+#   - Defines actuators (set_working_mode, compressor level select, etc.)
+#   - Groups diagnostic entities for web_server/HA
+#
+# What this package DOES NOT do:
+#   - Implements no system logic (no CM state machine, no split, no interlocks)
+#   - Implements no PID/climate control
+#
+# Key assumptions:
+#   - Modbus mapping matches the Quatt firmware/registers
+#   - Entities are correctly used with their expected types elsewhere (select vs sensor vs text_sensor)
+#
+# Safety / fail-safe:
+#   - Actuators are only controlled by the owner packages (heat-control/supervisory).
+#
+# ==============================================================================
+
+# ----------------------------
+# MODBUS CONTROLLER
+# ----------------------------
+modbus_controller:
+  - id: ${hp_id}
+    address: ${device_address}
+    modbus_id: mod_bus
+    update_interval: ${oq_modbus_update_interval_s}s
+    command_throttle: ${oq_modbus_command_throttle_ms}ms
+    max_cmd_retries: ${oq_modbus_max_cmd_retries}
+    offline_skip_updates: 5
+    setup_priority: -10
+    on_offline:
+      then:
+        - lambda: |-
+            id(${hp_id}_is_online) = false;
+        - logger.log: "${prefix}Modbus OFFLINE"
+    on_online:
+      then:
+        - lambda: |-
+            id(${hp_id}_is_online) = true;
+        - logger.log: "${prefix}Modbus ONLINE"
+
+# ----------------------------
+# GLOBALS
+# ----------------------------
+globals:
+  # Runtime counter (minutes)
+  - id: ${hp_id}_minutes
+    type: int
+    restore_value: true
+    initial_value: '0'
+
+  # Last stop timestamp (millis since boot) for min-runtime logic
+  - id: ${hp_id}_last_stop_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+  # Last start timestamp (millis since boot) for min-runtime logic
+  - id: ${hp_id}_last_start_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+  # Last applied levels (for start/stop logging)
+  - id: ${hp_id}_last_applied_level
+    type: int
+    restore_value: false
+    initial_value: '0'
+
+  - id: ${hp_id}_outside_temp_last_change_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+  - id: ${hp_id}_outside_temp_activity_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+  # Modbus controller online/offline
+  - id: ${hp_id}_is_online
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+# ----------------------------
+# SELECT
+# ----------------------------
+select:
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    id: ${hp_id}_set_working_mode
+    name: "${prefix}Set Working Mode"
+    disabled_by_default: true
+    icon: "mdi:heat-pump-outline"
+    address: 3999
+    value_type: U_WORD
+    optimistic: true
+    optionsmap:
+      "Standby": 0
+      "Cooling": 1
+      "Heating": 2
+    skip_updates: ${oq_skip_10s}
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    id: ${hp_id}_compressor_level
+    name: "${prefix}Set Compressor Level"
+    disabled_by_default: true
+    icon: "mdi:sine-wave"
+    address: 1999
+    value_type: U_WORD
+    optimistic: true
+    optionsmap:
+      "0": 0
+      "1": 1
+      "2": 2
+      "3": 3
+      "4": 4
+      "5": 5
+      "6": 6
+      "7": 7
+      "8": 8
+      "9": 9
+      "10": 10
+    skip_updates: ${oq_skip_10s}
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    id: ${hp_id}_low_noise_mode
+    name: "${prefix}Silent Mode"
+    disabled_by_default: true
+    icon: mdi:weather-night
+    address: 2006
+    value_type: U_WORD
+    optimistic: true
+    optionsmap:
+      "Off": 0
+      "On": 1
+    skip_updates: ${oq_skip_10s}
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    id: ${hp_id}_set_pump_mode
+    name: "${prefix}Set Pump Mode"
+    disabled_by_default: true
+    icon: "mdi:pump"
+    address: 2010
+    value_type: U_WORD
+    optimistic: true
+    optionsmap:
+      "Off": 0
+      "On": 4096
+    skip_updates: ${oq_skip_10s}
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+# Per-HP compressor level exclusions are modeled as up to two explicit blocked levels.
+  - platform: template
+    id: ${hp_id}_excluded_level_a
+    name: "${prefix}Excluded compressor level A"
+    icon: mdi:speedometer-slow
+    optimistic: true
+    restore_value: true
+    initial_option: "None"
+    options:
+      - "None"
+      - "L1 (H30/C30)"
+      - "L2 (H39/C36)"
+      - "L3 (H49/C42)"
+      - "L4 (H55/C47)"
+      - "L5 (H61/C52)"
+      - "L6 (H67/C56)"
+      - "L7 (H72/C61)"
+      - "L8 (H79/C66)"
+      - "L9 (H85/C71)"
+      - "L10 (H90/C74)"
+    web_server:
+      sorting_group_id: oq_advanced_hp_levels
+      sorting_weight: 41
+
+  - platform: template
+    id: ${hp_id}_excluded_level_b
+    name: "${prefix}Excluded compressor level B"
+    icon: mdi:speedometer-slow
+    optimistic: true
+    restore_value: true
+    initial_option: "None"
+    options:
+      - "None"
+      - "L1 (H30/C30)"
+      - "L2 (H39/C36)"
+      - "L3 (H49/C42)"
+      - "L4 (H55/C47)"
+      - "L5 (H61/C52)"
+      - "L6 (H67/C56)"
+      - "L7 (H72/C61)"
+      - "L8 (H79/C66)"
+      - "L9 (H85/C71)"
+      - "L10 (H90/C74)"
+    web_server:
+      sorting_group_id: oq_advanced_hp_levels
+      sorting_weight: 42
+
+# ----------------------------
+# NUMBER
+# ----------------------------
+number:
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    id: ${hp_id}_pump_speed
+    name: "${prefix}Set Pump Speed"
+    icon: "mdi:speedometer"
+    register_type: holding
+    address: 2015
+    value_type: U_WORD
+    min_value: 0
+    max_value: 1000
+    mode: slider
+    skip_updates: ${oq_skip_10s}
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+# ----------------------------
+# SENSOR
+# ----------------------------
+sensor:
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    id: ${hp_id}_working_mode
+    name: "${prefix}Working Mode"
+    icon: mdi:heat-pump-outline
+    state_class: measurement
+    register_type: holding
+    address: 2099
+    #skip_updates: 0
+    on_value:
+      then:
+        - lambda: |-
+            id(${hp_id}_outside_temp_activity_ms) = millis();
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    id: ${hp_id}_voltage
+    name: "${prefix}AC voltage"
+    icon: mdi:flash
+    register_type: holding
+    address: 2100
+    unit_of_measurement: "V"
+    device_class: "voltage"
+    state_class: "measurement"
+    accuracy_decimals: 1
+    filters:
+      - multiply: 1
+      - clamp:
+          min_value: 0
+          max_value: 300
+          ignore_out_of_range: true
+    #skip_updates: 0
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    id: ${hp_id}_current
+    name: "${prefix}AC current"
+    icon: mdi:current-ac
+    register_type: holding
+    address: 2101
+    unit_of_measurement: "A"
+    device_class: "current"
+    state_class: "measurement"
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.1
+      - clamp:
+          min_value: 0
+          max_value: 16
+          ignore_out_of_range: true
+    #skip_updates: 0
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    name: "${prefix}Compressor frequency demand"
+    icon: mdi:sine-wave
+    register_type: holding
+    address: 2102
+    unit_of_measurement: "Hz"
+    device_class: "frequency"
+    state_class: "measurement"
+    accuracy_decimals: 0
+    filters:
+      - multiply: 1
+      - clamp:
+          min_value: 0
+          max_value: 100
+          ignore_out_of_range: true
+    skip_updates: ${oq_skip_10s}
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    name: "${prefix}Compressor frequency"
+    icon: mdi:sine-wave
+    register_type: holding
+    address: 2103
+    unit_of_measurement: "Hz"
+    device_class: "frequency"
+    state_class: "measurement"
+    accuracy_decimals: 0
+    filters:
+      - multiply: 1
+      - clamp:
+          min_value: 0
+          max_value: 100
+          ignore_out_of_range: true
+    skip_updates: ${oq_skip_10s}
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    name: "${prefix}Fan speed max"
+    icon: mdi:fan
+    register_type: holding
+    address: 2104
+    unit_of_measurement: "RPM"
+    state_class: "measurement"
+    accuracy_decimals: 0
+    filters:
+      - multiply: 1
+      - clamp:
+          min_value: 0
+          max_value: 1000
+          ignore_out_of_range: true
+    skip_updates: ${oq_skip_30s}
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    id: ${hp_id}_fan_speed
+    name: "${prefix}Fan speed"
+    icon: mdi:fan
+    register_type: holding
+    address: 2105
+    unit_of_measurement: "RPM"
+    state_class: "measurement"
+    accuracy_decimals: 0
+    # register_count: 2  # 2105 - 2106
+    filters:
+      - multiply: 1
+      - clamp:
+          min_value: 0
+          max_value: 1000
+          ignore_out_of_range: true
+    #skip_updates: 0
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    name: "${prefix}EEV steps"
+    icon: mdi:valve
+    register_type: holding
+    address: 2107
+    unit_of_measurement: "p"
+    state_class: "measurement"
+    accuracy_decimals: 0
+    filters:
+      - multiply: 1
+      - clamp:
+          min_value: 0
+          max_value: 1000
+          ignore_out_of_range: true
+    skip_updates: ${oq_skip_10s}
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    id: ${hp_id}_outside_temp
+    name: "${prefix}Outside temperature"
+    icon: mdi:thermometer
+    register_type: holding
+    address: 2110
+    #skip_updates: 0
+    unit_of_measurement: "°C"
+    device_class: "temperature"
+    state_class: "measurement"
+    accuracy_decimals: 2
+    filters:
+      - offset: -3000
+      - multiply: 0.01
+      - clamp:
+          min_value: -30
+          max_value: 100
+          ignore_out_of_range: true
+    on_value:
+      then:
+        - lambda: |-
+            const uint32_t now_ms = millis();
+            id(${hp_id}_outside_temp_last_change_ms) = now_ms;
+            id(${hp_id}_outside_temp_activity_ms) = now_ms;
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    name: "${prefix}Evaporator coil temperature"
+    icon: mdi:thermometer
+    register_type: holding
+    address: 2111
+    unit_of_measurement: "°C"
+    device_class: "temperature"
+    state_class: "measurement"
+    accuracy_decimals: 2
+    filters:
+      - offset: -3000
+      - multiply: 0.01
+      - clamp:
+          min_value: -30
+          max_value: 100
+          ignore_out_of_range: true
+    skip_updates: ${oq_skip_30s}
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    name: "${prefix}Gas discharge temperature"
+    icon: mdi:thermometer
+    register_type: holding
+    address: 2112
+    unit_of_measurement: "°C"
+    device_class: "temperature"
+    state_class: "measurement"
+    accuracy_decimals: 2
+    filters:
+      - offset: -3000
+      - multiply: 0.01
+      - clamp:
+          min_value: -30
+          max_value: 150
+          ignore_out_of_range: true
+    skip_updates: ${oq_skip_30s}
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    name: "${prefix}Gas return temperature"
+    icon: mdi:thermometer
+    register_type: holding
+    address: 2113
+    unit_of_measurement: "°C"
+    device_class: "temperature"
+    state_class: "measurement"
+    accuracy_decimals: 2
+    register_count: 2  # 2113 - 2114
+    filters:
+      - offset: -3000
+      - multiply: 0.01
+      - clamp:
+          min_value: -30
+          max_value: 100
+          ignore_out_of_range: true
+    skip_updates: ${oq_skip_30s}
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    name: "${prefix}Evaporator pressure"
+    icon: mdi:gauge
+    register_type: holding
+    address: 2116
+    unit_of_measurement: "bar"
+    device_class: "pressure"
+    state_class: "measurement"
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.1
+      - clamp:
+          min_value: 0
+          max_value: 20
+          ignore_out_of_range: true
+    skip_updates: ${oq_skip_30s}
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    name: "${prefix}Condenser pressure"
+    icon: mdi:gauge
+    register_type: holding
+    address: 2117
+    unit_of_measurement: "bar"
+    device_class: "pressure"
+    state_class: "measurement"
+    accuracy_decimals: 2
+    # register_count: 5  # 2117 - 2121
+    filters:
+      - multiply: 0.1
+      - clamp:
+          min_value: 0
+          max_value: 60
+          ignore_out_of_range: true
+    skip_updates: ${oq_skip_30s}
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    id: ${hp_id}_pcb_firmware_raw
+    register_type: holding
+    address: 2122
+    skip_updates: ${oq_skip_30s}
+    value_type: U_WORD
+    internal: true
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    name: "${prefix}Firmware EEPROM"
+    disabled_by_default: true
+    icon: mdi:memory
+    register_type: holding
+    register_count: 4  # 2123 - 2127
+    address: 2123
+    skip_updates: ${oq_skip_30s}
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    name: "${prefix}Control board item number"
+    disabled_by_default: true
+    icon: mdi:identifier
+    register_type: holding
+    register_count: 4  # 2127 - 2131
+    address: 2127
+    skip_updates: ${oq_skip_30s}
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    name: "${prefix}Condensing temperature"
+    icon: mdi:thermometer
+    register_type: holding
+    address: 2131
+    unit_of_measurement: "°C"
+    device_class: "temperature"
+    state_class: "measurement"
+    accuracy_decimals: 2
+    filters:
+      - offset: -3000
+      - multiply: 0.01
+      - clamp:
+          min_value: -30
+          max_value: 100
+          ignore_out_of_range: true
+    skip_updates: ${oq_skip_30s}
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    name: "${prefix}Evaporating temperature"
+    icon: mdi:thermometer
+    register_type: holding
+    address: 2132
+    unit_of_measurement: "°C"
+    device_class: "temperature"
+    state_class: "measurement"
+    accuracy_decimals: 2
+    filters:
+      - offset: -3000
+      - multiply: 0.01
+      - clamp:
+          min_value: -30
+          max_value: 100
+          ignore_out_of_range: true
+    skip_updates: ${oq_skip_30s}
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    id: ${hp_id}_water_in_temp
+    name: "${prefix}Water in temperature"
+    icon: mdi:thermometer-water
+    register_type: holding
+    address: 2133
+    #skip_updates: 0
+    unit_of_measurement: "°C"
+    device_class: "temperature"
+    state_class: "measurement"
+    accuracy_decimals: 2
+    filters:
+      - offset: -3000
+      - multiply: 0.01
+      - clamp:
+          min_value: -10
+          max_value: 100
+          ignore_out_of_range: true
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    id: ${hp_id}_water_out_temp
+    name: "${prefix}Water out temperature"
+    icon: mdi:thermometer-water
+    register_type: holding
+    address: 2134
+    #skip_updates: 0
+    unit_of_measurement: "°C"
+    device_class: "temperature"
+    state_class: "measurement"
+    accuracy_decimals: 2
+    filters:
+      - offset: -3000
+      - multiply: 0.01
+      - clamp:
+          min_value: -10
+          max_value: 100
+          ignore_out_of_range: true
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    name: "${prefix}Inner coil temperature"
+    icon: mdi:thermometer
+    register_type: holding
+    address: 2135
+    unit_of_measurement: "°C"
+    device_class: "temperature"
+    state_class: "measurement"
+    accuracy_decimals: 2
+    # register_count: 2  # 2135 - 2137
+    filters:
+      - offset: -3000
+      - multiply: 0.01
+      - clamp:
+          min_value: -30
+          max_value: 100
+          ignore_out_of_range: true
+    skip_updates: ${oq_skip_30s}
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    id: ${hp_id}_pump_power
+    name: "${prefix}Pump Power"
+    icon: mdi:pump
+    register_type: holding
+    address: 2137
+    # force_new_range: true
+    unit_of_measurement: "W"
+    device_class: "power"
+    state_class: "measurement"
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.1
+    #skip_updates: 0
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    id: ${hp_id}_flow
+    name: "${prefix}Flow"
+    icon: mdi:water-pump
+    register_type: holding
+    address: 2138
+    #skip_updates: 0
+    unit_of_measurement: "L/h"
+    device_class: "volume_flow_rate"
+    state_class: "measurement"
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.618
+    on_value:
+      then:
+        - lambda: |-
+            id(${hp_id}_outside_temp_activity_ms) = millis();
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: template
+    id: ${hp_id}_runtime_hours
+    name: "${prefix}Runtime Hours"
+    unit_of_measurement: "h"
+    accuracy_decimals: 1
+    device_class: "duration"
+    state_class: total_increasing
+    icon: mdi:timer-outline
+    lambda: |-
+      return static_cast<float>(id(${hp_id}_minutes)) / 60.0f;
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: template
+    id: ${hp_id}_power_input
+    name: "${prefix}Power Input"
+    icon: mdi:flash
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 10s
+    web_server:
+      sorting_group_id: oq_performance
+    lambda: |-
+      // Keep model coefficients exactly as before; only readability/safety is improved.
+      const float standby_power_w = 5.150232354845286f;
+      const float compressor_calibration = 1.1240096401010435f;
+      const float fan_calibration = -0.04858859969715763f;
+      const float bottom_plate_heater_w = 150.06430841218332f;
+      const float crankcase_heater_w = 40.0f;
+
+      auto nz = [](float value) -> float { return isnan(value) ? 0.0f : value; };
+
+      const float voltage_v = nz(id(${hp_id}_voltage).state);
+      const float current_a = nz(id(${hp_id}_current).state);
+      const float fan_speed = nz(id(${hp_id}_fan_speed).state);
+
+      float pump_power_w = 0.0f;
+      if (id(${hp_id}_pump_relay).state) {
+        pump_power_w = nz(id(${hp_id}_pump_power).state);
+      }
+
+      const float bottom_plate_w = id(${hp_id}_bottom_plate_heater).state ? bottom_plate_heater_w : 0.0f;
+      const float crankcase_w = id(${hp_id}_crankcase_heater).state ? crankcase_heater_w : 0.0f;
+
+      const float p_input_w = standby_power_w
+                            + (voltage_v * current_a * compressor_calibration)
+                            + (fan_speed * fan_calibration)
+                            + pump_power_w
+                            + bottom_plate_w
+                            + crankcase_w;
+
+      // Physical lower bound: electrical input power cannot be negative.
+      return (p_input_w < 0.0f) ? 0.0f : p_input_w;
+
+  - platform: template
+    id: ${hp_id}_heat_power
+    name: "${prefix}Heat Power"
+    icon: mdi:radiator
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 10s
+    web_server:
+      sorting_group_id: oq_performance
+    lambda: |-
+      // Heat power follows measured HP working mode (2 = Heating), not supervisory CM.
+      const float working_mode = id(${hp_id}_working_mode).state;
+      if (working_mode != 2.0f) return 0.0f;
+
+      const float t_in_c = id(${hp_id}_water_in_temp).state;
+      const float t_out_c = id(${hp_id}_water_out_temp).state;
+      const float flow_lph = id(flow_rate_selected).state;
+
+      if (isnan(t_in_c) || isnan(t_out_c) || isnan(flow_lph)) return 0.0f;
+
+      const float water_cp_j_per_kgk = ${oq_water_cp_j_per_kgk};  // J/(kg·K)
+      const float mass_flow_kgps = flow_lph / 3600.0f;  // kg/s (≈ L/h)
+      const float delta_t_k = t_out_c - t_in_c;         // K
+      return mass_flow_kgps * water_cp_j_per_kgk * delta_t_k;
+
+  - platform: template
+    id: ${hp_id}_cooling_power
+    name: "${prefix}Cooling Power"
+    icon: mdi:snowflake
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 10s
+    web_server:
+      sorting_group_id: oq_performance
+    lambda: |-
+      // Cooling power follows measured HP working mode (1 = Cooling), not supervisory CM.
+      const float working_mode = id(${hp_id}_working_mode).state;
+      if (working_mode != 1.0f) return 0.0f;
+
+      const float t_in_c = id(${hp_id}_water_in_temp).state;
+      const float t_out_c = id(${hp_id}_water_out_temp).state;
+      const float flow_lph = id(flow_rate_selected).state;
+
+      if (isnan(t_in_c) || isnan(t_out_c) || isnan(flow_lph)) return 0.0f;
+
+      const float water_cp_j_per_kgk = ${oq_water_cp_j_per_kgk};  // J/(kg·K)
+      const float mass_flow_kgps = flow_lph / 3600.0f;            // kg/s (≈ L/h)
+      const float delta_t_k = t_in_c - t_out_c;                   // K, positive while cooling
+      return mass_flow_kgps * water_cp_j_per_kgk * delta_t_k;
+
+  - platform: template
+    id: ${hp_id}_eer
+    name: "${prefix}EER"
+    icon: mdi:snowflake-thermometer
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 10s
+    web_server:
+      sorting_group_id: oq_performance
+    lambda: |-
+      const float p_el_w = id(${hp_id}_power_input).state;
+      const float p_cool_w = id(${hp_id}_cooling_power).state;
+      const float min_valid_input_w = 5.0f;
+
+      if (isnan(p_el_w) || isnan(p_cool_w)) return NAN;
+      if (fabsf(p_el_w) < min_valid_input_w) return NAN;
+
+      return p_cool_w / p_el_w;
+
+  - platform: template
+    id: ${hp_id}_cop
+    name: "${prefix}COP"
+    icon: mdi:chart-bell-curve
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 10s
+    web_server:
+      sorting_group_id: oq_performance
+    lambda: |-
+      const float p_el_w = id(${hp_id}_power_input).state;
+      const float p_th_w = id(${hp_id}_heat_power).state;
+      const float min_valid_input_w = 5.0f;
+
+      if (isnan(p_el_w) || isnan(p_th_w)) return NAN;
+
+      // Avoid extreme COP values at (near) 0 W electrical input.
+      if (fabsf(p_el_w) < min_valid_input_w) return NAN;
+
+      return p_th_w / p_el_w;
+
+  # Internal raw diagnostic words. We keep these hidden and derive the compact
+  # diagnostics we actually use from them instead of exposing dozens of
+  # individual Modbus bit entities per heat pump.
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    id: ${hp_id}_status_2119_raw
+    register_type: holding
+    address: 2119
+    value_type: U_WORD
+    skip_updates: ${oq_skip_30s}
+    internal: true
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    id: ${hp_id}_status_2120_raw
+    register_type: holding
+    address: 2120
+    value_type: U_WORD
+    skip_updates: ${oq_skip_30s}
+    internal: true
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    id: ${hp_id}_status_2121_raw
+    register_type: holding
+    address: 2121
+    value_type: U_WORD
+    skip_updates: ${oq_skip_30s}
+    internal: true
+
+  # ----------------------------
+  # BINARY SENSOR
+  # ----------------------------
+binary_sensor:
+  # At least bits 0,2,4,5,6,11 are used for status in R2108.
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    name: "${prefix}Fan Low Speed Mode"
+    disabled_by_default: true
+    icon: mdi:fan-speed-1
+    device_class: running
+    register_type: holding
+    address: 2108
+    bitmask: 0x1
+    skip_updates: ${oq_skip_10s}
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    id: ${hp_id}_bottom_plate_heater
+    name: "${prefix}Bottom plate heater"
+    icon: mdi:radiator
+    device_class: heat
+    register_type: holding
+    address: 2108
+    bitmask: 0x4
+    skip_updates: ${oq_skip_10s}
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    id: ${hp_id}_crankcase_heater
+    name: "${prefix}Crankcase heater"
+    icon: mdi:radiator
+    device_class: heat
+    register_type: holding
+    address: 2108
+    bitmask: 0x8
+    skip_updates: ${oq_skip_10s}
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    name: "${prefix}Fan Defrost Mode"
+    disabled_by_default: true
+    icon: mdi:snowflake-melt
+    device_class: running
+    register_type: holding
+    address: 2108
+    bitmask: 0x10
+    skip_updates: ${oq_skip_10s}
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    name: "${prefix}Fan High Speed Mode"
+    disabled_by_default: true
+    icon: mdi:fan-speed-3
+    device_class: running
+    register_type: holding
+    address: 2108
+    bitmask: 0x20
+    skip_updates: ${oq_skip_10s}
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    id: ${hp_id}_4_way_valve
+    name: "${prefix}4-Way valve"
+    icon: mdi:valve
+    device_class: running
+    register_type: holding
+    address: 2108
+    bitmask: 0x40
+    skip_updates: ${oq_skip_10s}
+    on_state:
+      then:
+        - lambda: |-
+            id(${hp_id}_outside_temp_activity_ms) = millis();
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    id: ${hp_id}_pump_relay
+    name: "${prefix}DC Pump Relay"
+    icon: mdi:electric-switch
+    device_class: running
+    register_type: holding
+    address: 2108
+    bitmask: 0x800
+    skip_updates: ${oq_skip_10s}
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    id: ${hp_id}_defrost
+    name: "${prefix}Defrost"
+    icon: mdi:snowflake
+    device_class: running
+    register_type: holding
+    address: 2118
+    #skip_updates: 0
+    on_state:
+      then:
+        - lambda: |-
+            id(${hp_id}_outside_temp_activity_ms) = millis();
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  # Derived from the raw 2119 status word; this one remains a standalone binary
+  # sensor because it is used by the heating strategies.
+  - platform: template
+    id: ${hp_id}_prot_oil_return
+    name: "${prefix}Protection - Compressor oil return"
+    icon: mdi:alert-circle-outline
+    device_class: problem
+    disabled_by_default: true
+    entity_category: diagnostic
+    lambda: |-
+      const float raw = id(${hp_id}_status_2119_raw).state;
+      if (isnan(raw)) {
+        return false;
+      }
+      return (static_cast<uint16_t>(lroundf(raw)) & 0x0008u) != 0;
+    web_server:
+      sorting_group_id: oq_hp_diagnostics
+
+  - platform: template
+    id: ${hp_id}_ot_fault_active
+    name: "${prefix}OT fault active"
+    internal: true
+    device_class: problem
+    lambda: |-
+      // OT fault should only reflect explicit failure bits, not protection or cycle states.
+      auto has_bit = [](float raw, uint16_t bitmask) -> bool {
+        return !isnan(raw) && ((static_cast<uint16_t>(lroundf(raw)) & bitmask) != 0);
+      };
+
+      const float status_2120 = id(${hp_id}_status_2120_raw).state;
+      const float status_2121 = id(${hp_id}_status_2121_raw).state;
+
+      return
+          has_bit(status_2120, 0x0001u) ||
+          has_bit(status_2120, 0x0002u) ||
+          has_bit(status_2120, 0x0004u) ||
+          has_bit(status_2120, 0x0008u) ||
+          has_bit(status_2120, 0x0010u) ||
+          has_bit(status_2120, 0x0020u) ||
+          has_bit(status_2120, 0x0040u) ||
+          has_bit(status_2120, 0x0080u) ||
+          has_bit(status_2120, 0x0100u) ||
+          has_bit(status_2120, 0x0400u) ||
+          has_bit(status_2120, 0x0800u) ||
+          has_bit(status_2120, 0x2000u) ||
+          has_bit(status_2120, 0x4000u) ||
+          has_bit(status_2120, 0x8000u) ||
+          has_bit(status_2121, 0x0001u) ||
+          has_bit(status_2121, 0x0002u) ||
+          has_bit(status_2121, 0x0004u) ||
+          has_bit(status_2121, 0x0008u) ||
+          has_bit(status_2121, 0x0010u) ||
+          has_bit(status_2121, 0x0020u) ||
+          has_bit(status_2121, 0x0040u) ||
+          has_bit(status_2121, 0x0080u) ||
+          has_bit(status_2121, 0x0100u) ||
+          has_bit(status_2121, 0x0200u) ||
+          has_bit(status_2121, 0x0400u) ||
+          has_bit(status_2121, 0x0800u) ||
+          has_bit(status_2121, 0x1000u) ||
+          has_bit(status_2121, 0x2000u);
+
+  # ----------------------------
+  # TEXT SENSOR
+  # ----------------------------
+text_sensor:
+  - platform: template
+    id: ${hp_id}_working_mode_label
+    name: "${prefix}Working Mode Label"
+    icon: mdi:state-machine
+    update_interval: 10s
+    web_server:
+      sorting_group_id: oq_${hp_id}
+    lambda: |-
+      // Map the raw numeric Modbus mode to a dashboard-friendly label.
+      const float working_mode_raw = id(${hp_id}_working_mode).state;
+      if (isnan(working_mode_raw)) {
+        return std::string("Unknown");
+      }
+
+      const int working_mode = static_cast<int>(roundf(working_mode_raw));
+      switch (working_mode) {
+        case 0:
+          return std::string("Standby");
+        case 1:
+          return std::string("Cooling");
+        case 2:
+          return std::string("Heating");
+        default: {
+          char buf[24];
+          snprintf(buf, sizeof(buf), "Unknown (%d)", working_mode);
+          return std::string(buf);
+        }
+      }
+
+  - platform: template
+    id: ${hp_id}_excluded_levels_summary
+    name: "${prefix}Excluded compressor levels"
+    icon: mdi:speedometer-slow
+    update_interval: 10s
+    web_server:
+      sorting_group_id: oq_advanced_hp_levels
+      sorting_weight: 43
+    lambda: |-
+      // Summarize the two exclusion selectors into one compact diagnostic label.
+      const std::string a = id(${hp_id}_excluded_level_a).has_state()
+                                ? id(${hp_id}_excluded_level_a).current_option()
+                                : std::string("None");
+      const std::string b = id(${hp_id}_excluded_level_b).has_state()
+                                ? id(${hp_id}_excluded_level_b).current_option()
+                                : std::string("None");
+
+      if (a == "None" && b == "None") {
+        return std::string("None");
+      }
+      if (a == "None") {
+        return b;
+      }
+      if (b == "None" || a == b) {
+        return a;
+      }
+      return a + ", " + b;
+
+  - platform: template
+    id: ${hp_id}_active_failures_list
+    name: "${prefix}Active Failures List"
+    entity_category: diagnostic
+    update_interval: 5s
+    web_server:
+      sorting_group_id: oq_hp_diagnostics
+    icon: mdi:alert-circle-outline
+    lambda: |-
+      std::string s;
+      s.reserve(384);
+
+      auto add = [&](const char *name) -> void {
+        if (!s.empty()) s += ", ";
+        s += name;
+      };
+
+      auto has_bit = [](float raw, uint16_t bitmask) -> bool {
+        return !isnan(raw) && ((static_cast<uint16_t>(lroundf(raw)) & bitmask) != 0);
+      };
+
+      const float status_2119 = id(${hp_id}_status_2119_raw).state;
+      const float status_2120 = id(${hp_id}_status_2120_raw).state;
+      const float status_2121 = id(${hp_id}_status_2121_raw).state;
+
+      // 2119
+      if (has_bit(status_2119, 0x0001u)) add("Main line current");
+      if (has_bit(status_2119, 0x0002u)) add("Compressor phase current");
+      if (has_bit(status_2119, 0x0004u)) add("IPM module");
+      if (has_bit(status_2119, 0x0008u)) add("Compressor oil return");
+      if (has_bit(status_2119, 0x0010u)) add("High pressure switch");
+      if (has_bit(status_2119, 0x0020u)) add("High pressure detected");
+      if (has_bit(status_2119, 0x0040u)) add("1st start pre-heat");
+      if (has_bit(status_2119, 0x0080u)) add("Gas discharge temp sensor");
+      if (has_bit(status_2119, 0x0100u)) add("Evaporator temp sensor");
+      if (has_bit(status_2119, 0x0200u)) add("AC high-low voltage");
+      if (has_bit(status_2119, 0x0400u)) add("Ambient temperature");
+      if (has_bit(status_2119, 0x0800u)) add("Frequency limit ambient");
+      if (has_bit(status_2119, 0x1000u)) add("Low pressure switch");
+      if (has_bit(status_2119, 0x2000u)) add("Low pressure detected");
+
+      // 2120
+      if (has_bit(status_2120, 0x0001u)) add("Outdoor ambient temp sensor failure");
+      if (has_bit(status_2120, 0x0002u)) add("Outdoor evaporator temp sensor failure");
+      if (has_bit(status_2120, 0x0004u)) add("Gas discharge temp sensor failure");
+      if (has_bit(status_2120, 0x0008u)) add("Gas return temp sensor failure");
+      if (has_bit(status_2120, 0x0010u)) add("Evaporator pressure sensor failure");
+      if (has_bit(status_2120, 0x0020u)) add("Condenser pressure sensor failure");
+      if (has_bit(status_2120, 0x0040u)) add("High pressure lock");
+      if (has_bit(status_2120, 0x0080u)) add("Low pressure lock");
+      if (has_bit(status_2120, 0x0100u)) add("DC fan A failure");
+      if (has_bit(status_2120, 0x0400u)) add("Evaporating pressure lock");
+      if (has_bit(status_2120, 0x0800u)) add("Condenser pressure lock");
+      if (has_bit(status_2120, 0x2000u)) add("EVI pressure sensor failure");
+      if (has_bit(status_2120, 0x4000u)) add("EVI inlet temp sensor failure");
+      if (has_bit(status_2120, 0x8000u)) add("EVI outlet temp sensor failure");
+
+      // 2121
+      if (has_bit(status_2121, 0x0001u)) add("Master/slave comm failure");
+      if (has_bit(status_2121, 0x0002u)) add("PCB/module comm failure");
+      if (has_bit(status_2121, 0x0004u)) add("Compressor phase open/short");
+      if (has_bit(status_2121, 0x0008u)) add("Compressor phase overload");
+      if (has_bit(status_2121, 0x0010u)) add("Compressor driver failure");
+      if (has_bit(status_2121, 0x0020u)) add("Module VDC over/under voltage");
+      if (has_bit(status_2121, 0x0040u)) add("AC current failure");
+      if (has_bit(status_2121, 0x0080u)) add("EEPROM failure");
+      if (has_bit(status_2121, 0x0100u)) add("Fan drive PCB failure");
+      if (has_bit(status_2121, 0x0200u)) add("Inlet water temp sensor failure");
+      if (has_bit(status_2121, 0x0400u)) add("Outlet water temp sensor failure");
+      if (has_bit(status_2121, 0x0800u)) add("Inner coil temp sensor failure");
+      if (has_bit(status_2121, 0x1000u)) add("Reserved temp sensor failure");
+      if (has_bit(status_2121, 0x2000u)) add("DC water pump failure");
+
+      return s.empty() ? std::string("None") : s;
+
+
+  - platform: template
+    id: ${hp_id}_pcb_firmware_version
+    name: "${prefix}ODU PCB firmware version"
+    icon: mdi:chip
+    entity_category: diagnostic
+    disabled_by_default: true
+    lambda: |-
+      if (!id(${hp_id}_pcb_firmware_raw).has_state()) {
+        return {};
+      }
+
+      const uint16_t firmware_raw = static_cast<uint16_t>(id(${hp_id}_pcb_firmware_raw).state);
+      const uint8_t major = static_cast<uint8_t>((firmware_raw >> 8) & 0xFF);
+      const uint8_t minor = static_cast<uint8_t>(firmware_raw & 0xFF);
+
+      char buf[8];
+      snprintf(buf, sizeof(buf), "%u.%u", major, minor);
+      return std::string(buf);
+    update_interval: never
+    web_server:
+      sorting_group_id: oq_hp_diagnostics

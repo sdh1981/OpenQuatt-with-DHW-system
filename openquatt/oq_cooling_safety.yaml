@@ -76,7 +76,56 @@ globals:
     restore_value: false
     initial_value: 'false'
 
+  # Dew point trend tracking for dynamic safety margin
+  - id: oq_cooling_dew_point_prev_c
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: oq_cooling_dew_point_prev_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: oq_cooling_dew_point_trend_cph
+    type: float
+    restore_value: false
+    initial_value: '0.0'
+
 number:
+  - platform: template
+    id: cooling_min_outdoor_temp_c
+    name: "Cooling Minimum Outdoor Temperature"
+    # Amitime Heatstart R32 handleiding: koeling mag NIET worden ingeschakeld
+    # bij een buitentemperatuur onder 15 graden Celsius (zie installatiehandleiding,
+    # sectie koelbedrijf / operating limits). Standaard 15.0 graden Celsius.
+    icon: mdi:thermometer-alert
+    unit_of_measurement: "°C"
+    min_value: 5.0
+    max_value: 20.0
+    step: 0.5
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 15.0
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_cooling
+
+  - platform: template
+    id: cooling_night_free_threshold_c
+    name: "Cooling Night Free Cooling Threshold"
+    icon: mdi:weather-night
+    unit_of_measurement: "°C"
+    min_value: 12.0
+    max_value: 24.0
+    step: 0.5
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 20.0
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_cooling
+
   - platform: template
     id: cooling_safety_margin
     name: "Cooling Safety Margin"
@@ -122,7 +171,7 @@ number:
     mode: slider
     optimistic: true
     restore_value: true
-    initial_value: 0.1
+    initial_value: 0.2
     entity_category: config
     web_server:
       sorting_group_id: oq_control
@@ -143,6 +192,30 @@ select:
       sorting_group_id: oq_cooling
 
 binary_sensor:
+  - platform: template
+    id: cooling_night_mode_active
+    name: "Cooling Night Free Cooling Active"
+    icon: mdi:weather-night
+    device_class: running
+    lambda: |-
+      // Suppress HP cooling when outdoor is already cool enough that active cooling adds no value.
+      // Conditions: outdoor below threshold AND below room setpoint - 0.5°C AND room not strongly overheating.
+      if (!id(outside_temp_selected).has_state() || isnan(id(outside_temp_selected).state)) return false;
+      const float outdoor_c = id(outside_temp_selected).state;
+      const float threshold_c = id(cooling_night_free_threshold_c).state;
+      if (outdoor_c >= threshold_c) return false;
+      if (id(room_setpoint_selected).has_state() && !isnan(id(room_setpoint_selected).state)) {
+        if (outdoor_c >= id(room_setpoint_selected).state - 0.5f) return false;
+      }
+      if (id(room_temp_selected).has_state() && !isnan(id(room_temp_selected).state) &&
+          id(room_setpoint_selected).has_state() && !isnan(id(room_setpoint_selected).state)) {
+        const float room_err = id(room_temp_selected).state - id(room_setpoint_selected).state;
+        if (room_err > 1.2f) return false;
+      }
+      return true;
+    web_server:
+      sorting_group_id: oq_cooling
+
   - platform: template
     id: cooling_without_dew_point_enabled
     name: "Cooling Without Dew Point Enabled"
@@ -174,6 +247,13 @@ binary_sensor:
     internal: true
     lambda: |-
       // Core cooling preconditions that are independent from the live flow interlock.
+
+      // Amitime Heatstart R32 handleiding: koeling geblokkeerd onder minimum buitentemperatuur.
+      // Standaard 15 graden Celsius; instelbaar via 'Cooling Minimum Outdoor Temperature'.
+      if (!id(outside_temp_selected).has_state() || isnan(id(outside_temp_selected).state)) return false;
+      const float min_outdoor_c = id(cooling_min_outdoor_temp_c).state;
+      if (id(outside_temp_selected).state < min_outdoor_c) return false;
+
       const bool rooms_configured =
           id(cooling_room_count_selected).has_state() && !isnan(id(cooling_room_count_selected).state) &&
           id(cooling_room_count_selected).state >= 1.0f;
@@ -280,6 +360,19 @@ text_sensor:
     update_interval: 5s
     lambda: |-
       // Report the first blocking condition in operator-friendly terms.
+      // Amitime Heatstart R32: controleer buitentemperatuur als eerste.
+      if (!id(outside_temp_selected).has_state() || isnan(id(outside_temp_selected).state)) {
+        return {"Outside temperature unavailable"};
+      }
+      {
+        const float min_outdoor_c = id(cooling_min_outdoor_temp_c).state;
+        if (id(outside_temp_selected).state < min_outdoor_c) {
+          char buf[64];
+          snprintf(buf, sizeof(buf), "Blocked: outdoor %.1f°C below %.1f°C minimum",
+                   id(outside_temp_selected).state, min_outdoor_c);
+          return {std::string(buf)};
+        }
+      }
       if (!id(cooling_room_count_selected).has_state() || isnan(id(cooling_room_count_selected).state)) {
         return {"Cooling room count unavailable"};
       }
@@ -691,6 +784,39 @@ sensor:
       sorting_group_id: oq_cooling
 
   - platform: template
+    id: cooling_dew_point_trend
+    name: "Cooling Dew Point Trend"
+    icon: mdi:trending-up
+    unit_of_measurement: "°C/h"
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 60s
+    lambda: |-
+      return id(oq_cooling_dew_point_trend_cph);
+    web_server:
+      sorting_group_id: oq_cooling
+
+  - platform: template
+    id: cooling_dynamic_safety_margin
+    name: "Cooling Dynamic Safety Margin"
+    icon: mdi:shield-thermometer
+    unit_of_measurement: "°C"
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 60s
+    lambda: |-
+      // Increase safety margin when dew point is rising (condensation risk increasing).
+      float margin_c = id(cooling_safety_margin).state;
+      if (margin_c < 0.0f) margin_c = 0.0f;
+      const float trend = id(oq_cooling_dew_point_trend_cph);
+      if (trend > 0.8f) margin_c += 0.6f;
+      else if (trend > 0.3f) margin_c += 0.3f;
+      if (margin_c > 4.5f) margin_c = 4.5f;
+      return margin_c;
+    web_server:
+      sorting_group_id: oq_cooling
+
+  - platform: template
     id: minimum_safe_supply_temp
     name: "Cooling Minimum Safe Supply Temp"
     icon: mdi:shield-thermometer
@@ -700,10 +826,15 @@ sensor:
     accuracy_decimals: 2
     update_interval: 10s
     lambda: |-
-      // This is the central cooling guardrail: never target water below dew point + margin.
+      // Central cooling guardrail: never target water below dew point + dynamic margin.
       if (!id(cooling_dew_point_selected).has_state() || isnan(id(cooling_dew_point_selected).state)) return NAN;
       if (!id(cooling_safety_margin_selected).has_state() || isnan(id(cooling_safety_margin_selected).state)) return NAN;
-      return id(cooling_dew_point_selected).state + id(cooling_safety_margin_selected).state;
+      float margin_c = id(cooling_safety_margin_selected).state;
+      const float trend = id(oq_cooling_dew_point_trend_cph);
+      if (trend > 0.8f) margin_c += 0.6f;
+      else if (trend > 0.3f) margin_c += 0.3f;
+      if (margin_c > 4.5f) margin_c = 4.5f;
+      return id(cooling_dew_point_selected).state + margin_c;
     web_server:
       sorting_group_id: oq_cooling
 
@@ -818,3 +949,24 @@ interval:
             id(oq_cooling_fallback_night_min_last_c) = id(oq_cooling_fallback_night_min_current_c);
             id(oq_cooling_fallback_night_min_last_day_key) = id(oq_cooling_fallback_night_window_day_key);
           }
+
+  - interval: 900s
+    then:
+      - lambda: |-
+          // Track dew point trend (°C/h) for dynamic safety margin adjustment.
+          const uint32_t now_ms = (uint32_t) millis();
+          if (!id(cooling_dew_point_selected).has_state() || isnan(id(cooling_dew_point_selected).state)) {
+            id(oq_cooling_dew_point_prev_ms) = 0;
+            id(oq_cooling_dew_point_trend_cph) = 0.0f;
+            return;
+          }
+          const float current_dp_c = id(cooling_dew_point_selected).state;
+          if (id(oq_cooling_dew_point_prev_ms) > 0 && now_ms > id(oq_cooling_dew_point_prev_ms) &&
+              !isnan(id(oq_cooling_dew_point_prev_c))) {
+            const float dt_h = (float)(now_ms - id(oq_cooling_dew_point_prev_ms)) / 3600000.0f;
+            if (dt_h > 0.001f) {
+              id(oq_cooling_dew_point_trend_cph) = (current_dp_c - id(oq_cooling_dew_point_prev_c)) / dt_h;
+            }
+          }
+          id(oq_cooling_dew_point_prev_c) = current_dp_c;
+          id(oq_cooling_dew_point_prev_ms) = now_ms;

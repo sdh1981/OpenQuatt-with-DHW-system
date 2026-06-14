@@ -1,5 +1,6 @@
 #ifdef USE_ESP32
 
+#include <algorithm>
 #include <cstdarg>
 #include <memory>
 #include <cstring>
@@ -122,8 +123,8 @@ void AsyncWebServer::begin() {
     this->end();
   }
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-  // Match upstream ESPHome default: ESP-IDF default plus a small safety margin
-  // for JSON serialization in the web server handlers.
+  // HTTP server task stack. Stack size comes from CONFIG_HTTPD_TASK_STACKSIZE (set in
+  // sdkconfig_options). A small safety margin is added for JSON serialisation overhead.
   config.stack_size = config.stack_size + 256;
   config.server_port = this->port_;
   config.uri_match_fn = [](const char * /*unused*/, const char * /*unused*/, size_t /*unused*/) { return true; };
@@ -200,14 +201,19 @@ esp_err_t AsyncWebServer::request_post_handler(httpd_req_t *r) {
   std::string post_query;
   if (r->content_len > 0) {
     post_query.resize(r->content_len);
-    const int ret = httpd_req_recv(r, &post_query[0], r->content_len + 1);
-    if (ret <= 0) {  // 0 return value indicates connection closed
-      if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
-        httpd_resp_send_err(r, HTTPD_408_REQ_TIMEOUT, nullptr);
-        return ESP_ERR_TIMEOUT;
+    size_t received = 0;
+    while (received < r->content_len) {
+      const size_t remaining = r->content_len - received;
+      const int ret = httpd_req_recv(r, &post_query[received], remaining);
+      if (ret <= 0) {  // 0 indicates connection closed
+        if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+          httpd_resp_send_err(r, HTTPD_408_REQ_TIMEOUT, nullptr);
+          return ESP_ERR_TIMEOUT;
+        }
+        httpd_resp_send_err(r, HTTPD_400_BAD_REQUEST, nullptr);
+        return ESP_FAIL;
       }
-      httpd_resp_send_err(r, HTTPD_400_BAD_REQUEST, nullptr);
-      return ESP_FAIL;
+      received += static_cast<size_t>(ret);
     }
   }
 
@@ -450,24 +456,29 @@ void AsyncResponseStream::print(float value) {
   // Size: sign (1) + digits (10) + decimal (1) + precision (6) + exponent (5) + null (1) = 24, use 32 for safety
   char buf[32];
   int len = snprintf(buf, sizeof(buf), "%f", value);
-  this->content_.append(buf, len);
+  if (len > 0) {
+    this->content_.append(buf, static_cast<size_t>(len));
+  }
 }
 
 void AsyncResponseStream::printf(const char *fmt, ...) {
   va_list args;
-
   va_start(args, fmt);
+  va_list args_copy;
+  va_copy(args_copy, args);
   const int length = vsnprintf(nullptr, 0, fmt, args);
   va_end(args);
 
-  std::string str;
-  str.resize(length);
+  if (length <= 0) {
+    va_end(args_copy);
+    return;
+  }
 
-  va_start(args, fmt);
-  vsnprintf(&str[0], length + 1, fmt, args);
-  va_end(args);
-
-  this->print(str);
+  const size_t start = this->content_.size();
+  this->content_.resize(start + static_cast<size_t>(length) + 1);
+  vsnprintf(&this->content_[start], static_cast<size_t>(length) + 1, fmt, args_copy);
+  this->content_.resize(start + static_cast<size_t>(length));
+  va_end(args_copy);
 }
 
 #ifdef USE_WEBSERVER
@@ -627,7 +638,7 @@ void AsyncEventSourceResponse::process_buffer_() {
     return;
   }
   if (event_bytes_sent_ == event_buffer_.size()) {
-    event_buffer_.resize(0);
+    event_buffer_.clear();
     event_bytes_sent_ = 0;
     return;
   }
@@ -672,7 +683,7 @@ void AsyncEventSourceResponse::process_buffer_() {
   }
 
   if (event_bytes_sent_ == event_buffer_.size()) {
-    event_buffer_.resize(0);
+    event_buffer_.clear();
     event_bytes_sent_ = 0;
   }
 }
@@ -695,6 +706,8 @@ bool AsyncEventSourceResponse::try_send_nodefer(const char *message, const char 
     // there is still pending event data to send first
     return false;
   }
+  event_buffer_.clear();
+  event_buffer_.reserve(128 + (message ? strlen(message) : 0));
 
   // 8 spaces are standing in for the hexidecimal chunk length to print later
   const char chunk_len_header[] = "        " CRLF_STR;
@@ -805,7 +818,7 @@ bool AsyncEventSourceResponse::try_send_nodefer(const char *message, const char 
 
   if (event_buffer_.size() == static_cast<size_t>(chunk_len_header_len)) {
     // Nothing was added, reset buffer
-    event_buffer_.resize(0);
+    event_buffer_.clear();
     return true;
   }
 

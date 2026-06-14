@@ -1066,11 +1066,32 @@ interval:
           #if OQ_TOPOLOGY_DUO
           if (is_dhw_mode) {
             id(oq_duo_request_hold_until_ms) = 0;
-            const int dhw_level = std::max(0, std::min(10, id(oq_dhw_hp_level_request)));
-            hp1_req = id(oq_dhw_hp_request_active) ? dhw_level : 0;
-            hp2_req = id(oq_dhw_hp_request_active) ? dhw_level : 0;
-            request_owner_hp = (hp1_req > 0 || hp2_req > 0) ? 3 : 0;
-            request_reason = (hp1_req > 0 || hp2_req > 0) ? "dhw_duo" : "dhw_idle";
+            int dhw_level = std::max(0, std::min(10, id(oq_dhw_hp_level_request)));
+            // v0.32: optional single-HP mode for DHW. Routes the entire DHW
+            // request to the runtime-lead HP only, with an optional level
+            // bump to compensate for the lost capacity of the second HP.
+            const bool dhw_single_mode = id(oq_dhw_single_hp_mode).state;
+            if (dhw_single_mode && id(oq_dhw_hp_request_active)) {
+              const int level_bump = std::max(0, std::min(3,
+                  (int) roundf(id(oq_dhw_single_hp_level_bump).state)));
+              const int boosted = std::max(1, std::min(10, dhw_level + level_bump));
+              if (lead_is_hp1) {
+                hp1_req = boosted;
+                hp2_req = 0;
+                request_owner_hp = 1;
+                request_reason = "dhw_single_hp1";
+              } else {
+                hp1_req = 0;
+                hp2_req = boosted;
+                request_owner_hp = 2;
+                request_reason = "dhw_single_hp2";
+              }
+            } else {
+              hp1_req = id(oq_dhw_hp_request_active) ? dhw_level : 0;
+              hp2_req = id(oq_dhw_hp_request_active) ? dhw_level : 0;
+              request_owner_hp = (hp1_req > 0 || hp2_req > 0) ? 3 : 0;
+              request_reason = (hp1_req > 0 || hp2_req > 0) ? "dhw_duo" : "dhw_idle";
+            }
           } else if (!is_power_house) {
             id(oq_duo_request_hold_until_ms) = 0;
             publish_optimizer_reason("curve_mode");

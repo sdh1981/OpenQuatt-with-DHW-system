@@ -611,10 +611,13 @@ interval:
           const float min_flow_lph = ${oq_cm_min_flow_lph};
           const uint32_t flow_fault_ms = (uint32_t)(${oq_cm_flow_fault_s}UL * 1000UL);
           const uint32_t flow_recover_ms = (uint32_t)(${oq_cm_flow_recover_s}UL * 1000UL);
+          const bool oq_controls_enabled =
+              !id(oq_control_owner).has_state() || id(oq_control_owner).current_option() == "OpenQuatt";
           // -------------------------------------------------
           // Helpers: minimize Modbus writes (write-on-change)
           // -------------------------------------------------
           auto set_select_option = [&](auto *sel, const char *opt) {
+            if (!oq_controls_enabled) return;
             if (sel == nullptr) return;
             if (!sel->has_state() || sel->current_option() != opt) {
               auto c = sel->make_call();
@@ -624,6 +627,7 @@ interval:
           };
 
           auto set_number_value = [&](auto *num, float value, float tol) {
+            if (!oq_controls_enabled) return;
             if (num == nullptr) return;
             const float cur = num->state;
             if (isnan(cur) || fabsf(cur - value) > tol) {
@@ -1134,18 +1138,12 @@ interval:
                   id(oq_cm1_next_after) = 0;
                 }
 
-                if (cooling_req) {
-                  if (base_target == 5) {
-                    if (strcmp(cur_cm, "CM5") == 0) {
-                      desired_local = 5;
-                    } else {
-                      start_cm1(5);
-                      desired_local = 1;
-                    }
-                  } else {
-                    desired_local = 1; // flow interlock holding state
-                  }
-                } else if (dhw_req) {
+                // Priority order must match base_target assignment above:
+                // DHW (4) > cooling (5) > heating (2) > frost (98) > idle (0).
+                // Checking cooling_req before dhw_req was a bug: when both are active,
+                // base_target==4 (DHW wins) but the cooling branch fell through to
+                // desired_local=1 (CM1), aborting the running DHW cycle.
+                if (dhw_req) {
                   if (base_target == 4) {
                     if (strcmp(cur_cm, "CM4") == 0) {
                       desired_local = 4;
@@ -1156,11 +1154,26 @@ interval:
                   } else {
                     desired_local = 1; // flow interlock holding state
                   }
+                } else if (cooling_req) {
+                  if (base_target == 5) {
+                    // Skip CM1 preflow when the pump is already running (CM2/CM4/CM5).
+                    // CM1 is only needed when starting from a fully idle state (CM0).
+                    if (strcmp(cur_cm, "CM5") == 0 || strcmp(cur_cm, "CM2") == 0 ||
+                        strcmp(cur_cm, "CM4") == 0) {
+                      desired_local = 5;
+                    } else {
+                      start_cm1(5);
+                      desired_local = 1;
+                    }
+                  } else {
+                    desired_local = 1; // flow interlock holding state
+                  }
                 } else if (heating_req) {
                   if (base_target == 2) {
-                    // Keep active heating transitions inside the heating states. CM3 -> CM2
-                    // should not force an artificial CM1 detour that drops compressor requests.
-                    if (strcmp(cur_cm, "CM2") == 0 || strcmp(cur_cm, "CM3") == 0) {
+                    // Skip CM1 preflow when the pump is already running (CM2/CM3/CM4/CM5).
+                    // CM1 is only needed when starting from a fully idle state (CM0).
+                    if (strcmp(cur_cm, "CM2") == 0 || strcmp(cur_cm, "CM3") == 0 ||
+                        strcmp(cur_cm, "CM4") == 0 || strcmp(cur_cm, "CM5") == 0) {
                       desired_local = 2;
                     } else {
                       start_cm1(2);
@@ -1194,7 +1207,13 @@ interval:
                   (strcmp(cur_cm, "CM5") == 0) ? 5 :
                   (strcmp(cur_cm, "CM1") == 0) ? 1 :
                   (strcmp(cur_cm, "CM98") == 0) ? 98 : 0;
-              if (power_house_active) {
+              // Feature flag: CV boiler hardware presence. When 0 (default in this
+              // build because the CV boiler has been physically removed), the CM2<->CM3
+              // promotion logic is suppressed entirely. The system never enters CM3
+              // because there is no boiler to provide auxiliary heating. This is safe
+              // for DHW: no DHW path depends on CM3.
+              constexpr bool cv_boiler_present = (${oq_cv_boiler_present} != 0);
+              if (power_house_active && cv_boiler_present) {
                 // CM3 (boiler assist) auto-switching
                 // Promote/Demote: deficit-based (thermal deficit) + timers/hysteresis
                 const float deficit_w = id(oq_P_deficit_w);
@@ -1230,6 +1249,8 @@ interval:
                   id(oq_cm3_demote_since_ms) = 0;
                 }
               } else {
+                // Either Power House isn't driving, or CV boiler is absent.
+                // Clear timers and force any lingering CM3 state back to CM2.
                 id(oq_cm3_need_since_ms) = 0;
                 id(oq_cm3_demote_since_ms) = 0;
                 if (cm_now == 3 && heating_req && base_target == 2) {

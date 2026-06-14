@@ -340,6 +340,11 @@ sensor:
     web_server:
       sorting_group_id: oq_performance
     lambda: |-
+      // nz(): converts NaN sensor readings to 0 W for aggregation. Intentional:
+      // this is a telemetry/COP sensor; 0 W is the correct contribution of an
+      // unavailable HP. Safety power-capping reads hp1/hp2_power_input directly
+      // and is unaffected. If both HPs are NaN the total reads 0 W (undercount),
+      // which is conservative — the supervisory will not cap unnecessarily.
       auto nz = [](float value) -> float { return isnan(value) ? 0.0f : value; };
       const float hp1_power_w = nz(id(hp1_power_input).state);
       #if OQ_TOPOLOGY_DUO
@@ -647,12 +652,17 @@ interval:
           const int heat_mode_code = id(oq_heat_mode_code);
           const bool is_curve_mode = (heat_mode_code == 1) || is_cooling_mode || is_dhw_mode;
           const int control_flavor_code = is_cooling_mode ? 2 : heat_mode_code;
-          // Keep CM4 (DHW) supervisory behavior, but keep Modbus thermal mode at Heating.
-          // Some ODU firmware revisions stop/resequence compressors on Heating<->Hot water
-          // mode flips; keeping Heating avoids that interruption while valve/element logic
-          // still enforces DHW hydraulics and priority.
-          const char* active_thermal_mode_opt = is_cooling_mode ? "Cooling" : "Heating";
-          const int active_thermal_mode_code = is_cooling_mode ? 1 : 2;
+          // Thermal mode per CM:
+          //   CM5 (cooling)  → Cooling (1)
+          //   CM4 (DHW)      → Hot water (3) — AMitime register 4000/OpenQuatt
+          //                    3999 bevestigt dit als geldig commando.
+          //   CM2/CM3 (heat) → Heating (2)
+          const char* active_thermal_mode_opt = is_cooling_mode ? "Cooling"
+                                              : is_dhw_mode     ? "Hot water"
+                                              :                    "Heating";
+          const int active_thermal_mode_code  = is_cooling_mode ? 1
+                                              : is_dhw_mode     ? 3
+                                              :                   2;
           const uint32_t loop_target_ms = (uint32_t) ((is_curve_mode ? ${oq_heat_loop_curve_s} : ${oq_heat_loop_powerhouse_s}) * 1000UL);
 
           // After any controller reboot we intentionally keep all heat outputs blocked for a while.
@@ -786,7 +796,10 @@ interval:
             if (id(${hc_secondary_compressor_level_id}).has_state()) cur2 = (int) id(${hc_secondary_compressor_level_id}).active_index().value_or(-1);
             rt2 = id(${hc_secondary_minutes_id});
             #endif
-            char buf[768];
+            // Static buffer i.p.v. stack-buffer (768 bytes weg van de stack).
+            // ESPHome lambdas worden uitsluitend door de timer task aangeroepen
+            // → static is hier thread-safe en heeft geen runtime cost.
+            static char buf[768];
             snprintf(
               buf, sizeof(buf),
               "mode=%s cm=%d phase=%s raw=%d f=%d cap=%d pre=%d post=%d dual=%d on=%d off=%d em=%d lead=%d owner=%d req=%d+%d app=%d+%d cur=%d+%d wm=%.0f/%.0f sp=%.2f pv=%.2f room=%.2f/%.2f rtgt=%.2f phouse=%.0f preq=%.0f out=%.2f ri=%d off_age=%lus rt=%d/%d",
@@ -1066,11 +1079,33 @@ interval:
           #if OQ_TOPOLOGY_DUO
           if (is_dhw_mode) {
             id(oq_duo_request_hold_until_ms) = 0;
-            const int dhw_level = std::max(0, std::min(10, id(oq_dhw_hp_level_request)));
-            hp1_req = id(oq_dhw_hp_request_active) ? dhw_level : 0;
-            hp2_req = id(oq_dhw_hp_request_active) ? dhw_level : 0;
-            request_owner_hp = (hp1_req > 0 || hp2_req > 0) ? 3 : 0;
-            request_reason = (hp1_req > 0 || hp2_req > 0) ? "dhw_duo" : "dhw_idle";
+            int dhw_level = std::max(0, std::min(10, id(oq_dhw_hp_level_request)));
+            // v0.32: optional single-HP mode for DHW. Routes the entire DHW
+            // request to the runtime-lead HP only, with an optional level
+            // bump to compensate for the lost capacity of the second HP.
+            // Avoids the COP-poor "both HPs at level 1" state at low DHW level.
+            const bool dhw_single_mode = id(oq_dhw_single_hp_mode).state;
+            if (dhw_single_mode && id(oq_dhw_hp_request_active)) {
+              const int level_bump = std::max(0, std::min(3,
+                  (int) roundf(id(oq_dhw_single_hp_level_bump).state)));
+              const int boosted = std::max(1, std::min(10, dhw_level + level_bump));
+              if (lead_is_hp1) {
+                hp1_req = boosted;
+                hp2_req = 0;
+                request_owner_hp = 1;
+                request_reason = "dhw_single_hp1";
+              } else {
+                hp1_req = 0;
+                hp2_req = boosted;
+                request_owner_hp = 2;
+                request_reason = "dhw_single_hp2";
+              }
+            } else {
+              hp1_req = id(oq_dhw_hp_request_active) ? dhw_level : 0;
+              hp2_req = id(oq_dhw_hp_request_active) ? dhw_level : 0;
+              request_owner_hp = (hp1_req > 0 || hp2_req > 0) ? 3 : 0;
+              request_reason = (hp1_req > 0 || hp2_req > 0) ? "dhw_duo" : "dhw_idle";
+            }
           } else if (!is_power_house) {
             id(oq_duo_request_hold_until_ms) = 0;
             publish_optimizer_reason("curve_mode");

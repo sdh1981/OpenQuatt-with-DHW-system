@@ -77,6 +77,120 @@ globals:
     restore_value: false
     initial_value: '0'
 
+  # ----- v0.32 thermal model improvements -----
+  # #2 Solar/internal gain residual EMA (W). Built from sustained over-shoot of
+  # the comfort band relative to predicted P_house in mild weather.
+  - id: oq_phouse_solar_gain_w
+    type: float
+    restore_value: false
+    initial_value: '0.0'
+
+  # #1 Self-learning UA estimator (W/K). Updated only during stable heating
+  # periods (room in band, no DHW, no defrost, HP delivering thermal power).
+  # Default 0 = "not yet learned"; UI exposes the derived rated-power estimate.
+  - id: oq_phouse_ua_estimate_wpk
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+
+  - id: oq_phouse_ua_sample_count
+    type: int
+    restore_value: true
+    initial_value: '0'
+
+  - id: oq_phouse_ua_last_sample_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+  # Last estimated thermal output of the HP set used by the UA learner.
+  # Diagnostic only.
+  - id: oq_phouse_hp_th_estimate_w
+    type: float
+    restore_value: false
+    initial_value: '0.0'
+
+  # UA learner skip-reason for the most recent tick. 0 = sampling OK,
+  # 1 = disabled, 2 = strategy not active in CM2/CM3, 3 = inputs invalid,
+  # 4 = unstable (room_err too high), 5 = DHW active, 6 = defrost active,
+  # 7 = oil-return active, 8 = HP power below threshold, 9 = dT too small,
+  # 10 = sample interval not yet reached.
+  - id: oq_phouse_ua_skip_reason
+    type: int
+    restore_value: false
+    initial_value: '1'
+
+  # ----- v0.32 smart features -----
+  # #1 Tariff-aware setpoint shift (°C). Positive = setpoint raised above
+  # baseline (cheap hour preheat); negative = setpoint lowered (expensive
+  # throttle). Slowly slewed; clamped within user-set bounds.
+  - id: oq_phouse_tariff_shift_c
+    type: float
+    restore_value: false
+    initial_value: '0.0'
+
+  # #1 Running 24h average tariff fallback (used when HA does not provide one).
+  - id: oq_phouse_tariff_running_avg_eur
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+
+  - id: oq_phouse_tariff_avg_last_update_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+  # #2 PV self-consumption boost (W) — additive contribution to P_target.
+  - id: oq_phouse_pv_boost_w
+    type: float
+    restore_value: false
+    initial_value: '0.0'
+
+  # #3 Window-open detection state. When true, P_target is squashed to 0 for
+  # window_open_pause_min minutes.
+  - id: oq_phouse_window_open_active
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+  - id: oq_phouse_window_open_until_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+  # #3 Room temperature short-window history for slope detection.
+  # We store (room_temp_t-N) to compute a 5-minute drop.
+  - id: oq_phouse_room_temp_5min_ago_c
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+
+  - id: oq_phouse_room_temp_5min_ago_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+  # #4 Adaptive Kp. Learns the effective house response gain over a long
+  # window from observed (dTr/dt) vs. (P_house - P_loss) imbalance.
+  # Default 0 = "use the user-configured ph_kp_w_per_k unchanged".
+  - id: oq_phouse_kp_estimate_w_per_k
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+
+  - id: oq_phouse_kp_sample_count
+    type: int
+    restore_value: true
+    initial_value: '0'
+
+  # Kp observer skip-reason: 0=ok, 1=disabled, 2=room near setpoint (no error),
+  # 3=dt too short, 4=HP power below threshold, 5=P_extra too small,
+  # 6=outlier rejected
+  - id: oq_phouse_kp_skip_reason
+    type: int
+    restore_value: false
+    initial_value: '1'
+
 select:
   - platform: template
     id: oq_ph_response_profile
@@ -122,6 +236,171 @@ select:
               set_number_value(id(ph_demand_rise_time_min), 5.0f);
               set_number_value(id(ph_demand_fall_time_min), 2.0f);
             }
+
+switch:
+  # #1 UA learning enable. Default OFF — opt-in. When enabled, the strategy
+  # samples (P_th_estimate, Trsp - Tout) tuples during stable heating and
+  # updates an EMA UA estimate. The estimate is shown as a diagnostic; the
+  # user can apply it via the "Apply UA estimate" button.
+  - platform: template
+    id: oq_phouse_ua_learn_enable
+    name: "Power House UA learning enable"
+    icon: mdi:school
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action: []
+    turn_off_action: []
+    web_server:
+      sorting_group_id: oq_power_house
+
+  # #2 Solar gain correction enable. Default OFF — opt-in to avoid surprises
+  # on first install.
+  - platform: template
+    id: oq_phouse_solar_gain_enable
+    name: "Power House solar gain enable"
+    icon: mdi:weather-sunny
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action: []
+    turn_off_action: []
+    web_server:
+      sorting_group_id: oq_power_house
+
+  # ----- v0.32 smart features switches -----
+  - platform: template
+    id: oq_phouse_tariff_shift_enable
+    name: "Power House tariff shift enable"
+    icon: mdi:currency-eur
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action: []
+    turn_off_action: []
+    web_server:
+      sorting_group_id: oq_power_house
+
+  - platform: template
+    id: oq_phouse_pv_boost_enable
+    name: "Power House PV self-consumption enable"
+    icon: mdi:solar-power-variant
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action: []
+    turn_off_action: []
+    web_server:
+      sorting_group_id: oq_power_house
+
+  - platform: template
+    id: oq_phouse_window_detect_enable
+    name: "Power House window-open detection"
+    icon: mdi:window-open-variant
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action: []
+    turn_off_action: []
+    web_server:
+      sorting_group_id: oq_power_house
+
+  - platform: template
+    id: oq_phouse_adaptive_kp_enable
+    name: "Power House adaptive Kp enable"
+    icon: mdi:tune-vertical
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action: []
+    turn_off_action: []
+    web_server:
+      sorting_group_id: oq_power_house
+
+button:
+  # #1 Apply learned UA → set house_rated_power_w to UA_estimate * (T0 - Tc).
+  - platform: template
+    id: oq_phouse_apply_ua_button
+    name: "Power House apply UA estimate"
+    icon: mdi:check-circle
+    web_server:
+      sorting_group_id: oq_power_house
+    on_press:
+      - lambda: |-
+          const float ua = id(oq_phouse_ua_estimate_wpk);
+          const float T0 = id(house_zero_power_temp_c).state;
+          const float Tc = id(house_cold_temp_c).state;
+          if (ua <= 0.0f || isnan(T0) || isnan(Tc) || (T0 <= Tc + 1.0f)) {
+            ESP_LOGW("quatt", "Apply UA: estimate invalid or temp pair invalid; nothing applied.");
+            return;
+          }
+          const float pr_estimate = ua * (T0 - Tc);
+          if (pr_estimate < 1000.0f || pr_estimate > 15000.0f) {
+            ESP_LOGW("quatt", "Apply UA: estimate %.0fW out of safe range, ignored.", pr_estimate);
+            return;
+          }
+          auto c = id(house_rated_power_w).make_call();
+          c.set_value(pr_estimate);
+          c.perform();
+          ESP_LOGI("quatt", "Apply UA: house_rated_power_w set to %.0fW (UA=%.1f W/K, ΔT=%.1fK).",
+                   pr_estimate, ua, (T0 - Tc));
+
+  # #1 Reset UA learning state.
+  - platform: template
+    id: oq_phouse_reset_ua_button
+    name: "Power House reset UA learning"
+    icon: mdi:restart
+    web_server:
+      sorting_group_id: oq_power_house
+    on_press:
+      - lambda: |-
+          id(oq_phouse_ua_estimate_wpk) = 0.0f;
+          id(oq_phouse_ua_sample_count) = 0;
+          id(oq_phouse_ua_last_sample_ms) = 0;
+          ESP_LOGI("quatt", "UA learning state reset.");
+
+  # #4 Apply learned Kp → write to ph_kp_w_per_k.
+  - platform: template
+    id: oq_phouse_apply_kp_button
+    name: "Power House apply Kp estimate"
+    icon: mdi:check-circle
+    web_server:
+      sorting_group_id: oq_power_house
+    on_press:
+      - lambda: |-
+          const float kp = id(oq_phouse_kp_estimate_w_per_k);
+          if (kp <= 0.0f || isnan(kp)) {
+            ESP_LOGW("quatt", "Apply Kp: no valid estimate yet.");
+            return;
+          }
+          if (kp < 200.0f || kp > 8000.0f) {
+            ESP_LOGW("quatt", "Apply Kp: estimate %.0f W/K out of range, ignored.", kp);
+            return;
+          }
+          auto c = id(ph_kp_w_per_k).make_call();
+          c.set_value(kp);
+          c.perform();
+          ESP_LOGI("quatt", "Apply Kp: ph_kp_w_per_k set to %.0f W/K.", kp);
+
+  # #4 Reset adaptive Kp learning state.
+  - platform: template
+    id: oq_phouse_reset_kp_button
+    name: "Power House reset Kp learning"
+    icon: mdi:restart
+    web_server:
+      sorting_group_id: oq_power_house
+    on_press:
+      - lambda: |-
+          id(oq_phouse_kp_estimate_w_per_k) = 0.0f;
+          id(oq_phouse_kp_sample_count) = 0;
+          ESP_LOGI("quatt", "Adaptive Kp learning state reset.");
+
+binary_sensor:
+  # #3 Window-open detection diagnostic.
+  - platform: template
+    id: oq_phouse_window_open_sensor
+    name: "Power House window-open active"
+    icon: mdi:window-open-variant
+    entity_category: diagnostic
+    device_class: opening
+    web_server:
+      sorting_group_id: oq_power_house
+    lambda: |-
+      return id(oq_phouse_window_open_active);
 
 number:
   - platform: template
@@ -259,6 +538,246 @@ number:
     web_server:
       sorting_group_id: oq_power_house
 
+  # ----- v0.32 thermal model improvements -----
+
+  # #2 Solar/internal gain correction strength (0..1).
+  # 0 = no correction, 0.7 = subtract 70% of the residual gain estimate from P_house.
+  - platform: template
+    id: ph_solar_gain_alpha
+    name: "Power House solar gain correction"
+    icon: mdi:weather-sunny
+    unit_of_measurement: "x"
+    min_value: 0.0
+    max_value: 1.0
+    step: 0.05
+    restore_value: true
+    optimistic: true
+    initial_value: 0.7
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_power_house
+
+  # #4 Frost-zone capacity derating amplitude (0..0.30).
+  # Applies a continuous derating to perf_map capacity in the wet-frost zone
+  # (around +1.5 °C) to anticipate averaged defrost duty cycle losses.
+  - platform: template
+    id: ph_frost_zone_max_derate
+    name: "Power House frost zone derate"
+    icon: mdi:snowflake-melt
+    unit_of_measurement: "x"
+    min_value: 0.0
+    max_value: 0.30
+    step: 0.01
+    restore_value: true
+    optimistic: true
+    initial_value: 0.15
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_power_house
+
+  # #3 Forecast pre-conditioning gain (0..1).
+  # Couples expected upcoming setpoint to current P_target. 0 disables.
+  - platform: template
+    id: ph_preheat_gain
+    name: "Power House preheat gain"
+    icon: mdi:clock-time-eight
+    unit_of_measurement: "x"
+    min_value: 0.0
+    max_value: 1.0
+    step: 0.05
+    restore_value: true
+    optimistic: true
+    initial_value: 0.0
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_power_house
+
+  # #5 Effective Tsup design ΔT (K). Used to derive a steady-state Tsup target
+  # from P_target so cold-start perf_map calls are not biased by cold supply.
+  - platform: template
+    id: ph_design_supply_dt_c
+    name: "Power House design supply ΔT"
+    icon: mdi:delta
+    unit_of_measurement: "K"
+    min_value: 3.0
+    max_value: 10.0
+    step: 0.5
+    restore_value: true
+    optimistic: true
+    initial_value: 5.0
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_power_house
+
+  # #1 UA learner time constant in hours (24..168h, default 48h).
+  # Higher = slower, more stable; lower = faster, more reactive to changes.
+  - platform: template
+    id: ph_ua_learn_tau_h
+    name: "Power House UA learn time constant"
+    icon: mdi:timer-sand
+    unit_of_measurement: "h"
+    min_value: 24
+    max_value: 168
+    step: 6
+    restore_value: true
+    optimistic: true
+    initial_value: 48
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_power_house
+
+
+  # ----- Tariff-aware shift tuning (#1 smart feature) -----
+  - platform: template
+    id: ph_tariff_shift_max_up_c
+    name: "Power House tariff preheat max"
+    icon: mdi:thermometer-chevron-up
+    unit_of_measurement: "°C"
+    min_value: 0
+    max_value: 1.5
+    step: 0.05
+    restore_value: true
+    optimistic: true
+    initial_value: 0.5
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_power_house
+
+  - platform: template
+    id: ph_tariff_shift_max_down_c
+    name: "Power House tariff throttle max"
+    icon: mdi:thermometer-chevron-down
+    unit_of_measurement: "°C"
+    min_value: 0
+    max_value: 1.5
+    step: 0.05
+    restore_value: true
+    optimistic: true
+    initial_value: 0.3
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_power_house
+
+  - platform: template
+    id: ph_tariff_cheap_ratio
+    name: "Power House tariff cheap ratio"
+    icon: mdi:percent
+    min_value: 0.30
+    max_value: 0.95
+    step: 0.05
+    restore_value: true
+    optimistic: true
+    initial_value: 0.7
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_power_house
+
+  - platform: template
+    id: ph_tariff_expensive_ratio
+    name: "Power House tariff expensive ratio"
+    icon: mdi:percent
+    min_value: 1.05
+    max_value: 2.50
+    step: 0.05
+    restore_value: true
+    optimistic: true
+    initial_value: 1.3
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_power_house
+
+  # ----- PV self-consumption tuning (#2) -----
+  - platform: template
+    id: ph_pv_export_threshold_w
+    name: "Power House PV export threshold"
+    icon: mdi:solar-power
+    unit_of_measurement: "W"
+    min_value: 200
+    max_value: 5000
+    step: 50
+    restore_value: true
+    optimistic: true
+    initial_value: 800
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_power_house
+
+  - platform: template
+    id: ph_pv_boost_max_w
+    name: "Power House PV boost max"
+    icon: mdi:solar-power-variant
+    unit_of_measurement: "W"
+    min_value: 0
+    max_value: 6000
+    step: 100
+    restore_value: true
+    optimistic: true
+    initial_value: 2000
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_power_house
+
+  - platform: template
+    id: ph_pv_assumed_cop
+    name: "Power House PV assumed COP"
+    icon: mdi:chart-bell-curve
+    min_value: 1.5
+    max_value: 6.0
+    step: 0.1
+    restore_value: true
+    optimistic: true
+    initial_value: 3.5
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_power_house
+
+  # ----- Window-open detection tuning (#3) -----
+  - platform: template
+    id: ph_window_drop_threshold_c
+    name: "Power House window-open temp drop"
+    icon: mdi:thermometer-chevron-down
+    unit_of_measurement: "°C"
+    min_value: 0.15
+    max_value: 1.50
+    step: 0.05
+    restore_value: true
+    optimistic: true
+    initial_value: 0.35
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_power_house
+
+  - platform: template
+    id: ph_window_pause_min
+    name: "Power House window-open pause"
+    icon: mdi:timer-pause
+    unit_of_measurement: "min"
+    min_value: 2
+    max_value: 30
+    step: 1
+    restore_value: true
+    optimistic: true
+    initial_value: 12
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_power_house
+
+  # ----- Adaptive Kp tuning (#4) -----
+  - platform: template
+    id: ph_kp_learn_tau_h
+    name: "Power House Kp learn time constant"
+    icon: mdi:timer-sand
+    unit_of_measurement: "h"
+    min_value: 24
+    max_value: 168
+    step: 6
+    restore_value: true
+    optimistic: true
+    initial_value: 72
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_power_house
+
 text_sensor:
   # DEBUG-RUNTIME START: Duo Power House request reason
   - platform: template
@@ -277,6 +796,53 @@ text_sensor:
       return std::string("single_topology");
       #endif
   # DEBUG-RUNTIME END
+
+  # UA learner skip reason — human-readable. Helps diagnose why no samples are
+  # being captured.
+  - platform: template
+    id: oq_phouse_ua_skip_reason_text
+    name: "Power House – UA skip reason"
+    icon: mdi:information-outline
+    entity_category: diagnostic
+    update_interval: 30s
+    web_server:
+      sorting_group_id: oq_power_house
+    lambda: |-
+      switch (id(oq_phouse_ua_skip_reason)) {
+        case 0:  return std::string("sampling_ok");
+        case 1:  return std::string("disabled");
+        case 2:  return std::string("not_in_heating");
+        case 3:  return std::string("inputs_invalid");
+        case 4:  return std::string("room_unstable");
+        case 5:  return std::string("dhw_active");
+        case 6:  return std::string("defrost_active");
+        case 7:  return std::string("oil_return_active");
+        case 8:  return std::string("hp_power_low");
+        case 9:  return std::string("dT_too_small");
+        case 10: return std::string("waiting_sample_interval");
+      }
+      return std::string("unknown");
+
+  # Kp observer skip reason.
+  - platform: template
+    id: oq_phouse_kp_skip_reason_text
+    name: "Power House – Kp skip reason"
+    icon: mdi:information-outline
+    entity_category: diagnostic
+    update_interval: 30s
+    web_server:
+      sorting_group_id: oq_power_house
+    lambda: |-
+      switch (id(oq_phouse_kp_skip_reason)) {
+        case 0: return std::string("sampling_ok");
+        case 1: return std::string("disabled");
+        case 2: return std::string("room_near_setpoint");
+        case 3: return std::string("waiting_sample_interval");
+        case 4: return std::string("hp_power_low");
+        case 5: return std::string("p_extra_too_small");
+        case 6: return std::string("outlier_rejected");
+      }
+      return std::string("unknown");
 
 sensor:
   - platform: template
@@ -350,6 +916,256 @@ sensor:
     lambda: |-
       return id(room_setpoint_selected).state + id(oq_phouse_comfort_memory_c);
 
+  # ----- v0.32 thermal model improvements diagnostics -----
+
+  # #2 Solar/internal gain residual estimate (W).
+  - platform: template
+    id: oq_phouse_solar_gain_w_sensor
+    name: "Power House – solar gain estimate"
+    icon: mdi:weather-sunny
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 5s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_power_house
+    lambda: |-
+      return id(oq_phouse_solar_gain_w);
+
+  # #1 UA estimate (W/K).
+  - platform: template
+    id: oq_phouse_ua_estimate_wpk_sensor
+    name: "Power House – UA estimate"
+    icon: mdi:home-thermometer-outline
+    unit_of_measurement: "W/K"
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 10s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_power_house
+    lambda: |-
+      return id(oq_phouse_ua_estimate_wpk);
+
+  # #1 Estimated rated power derived from UA learner.
+  - platform: template
+    id: oq_phouse_estimated_rated_power_w_sensor
+    name: "Power House – estimated rated power"
+    icon: mdi:home-lightning-bolt-outline
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 10s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_power_house
+    lambda: |-
+      const float ua = id(oq_phouse_ua_estimate_wpk);
+      const float T0 = id(house_zero_power_temp_c).state;
+      const float Tc = id(house_cold_temp_c).state;
+      if (ua <= 0.0f || isnan(T0) || isnan(Tc) || (T0 <= Tc + 1.0f)) return NAN;
+      return ua * (T0 - Tc);
+
+  # Live house heat loss based on UA × (Tr − Tout). Uses the learned UA when
+  # available, otherwise derives an effective UA from the configured rated
+  # power and design temperature span: UA_config = Pr / (T0 - Tc).
+  - platform: template
+    id: oq_phouse_heat_loss_now_w_sensor
+    name: "Power House – live heat loss"
+    icon: mdi:home-thermometer
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 10s
+    web_server:
+      sorting_group_id: oq_power_house
+    lambda: |-
+      const float Tr = id(room_temp_selected).state;
+      const float Tout = id(outside_temp_selected).state;
+      if (isnan(Tr) || isnan(Tout)) return NAN;
+      const float dT = Tr - Tout;
+      if (dT <= 0.0f) return 0.0f;  // free-cooling territory, no loss
+      // Prefer learned UA when available.
+      float ua = id(oq_phouse_ua_estimate_wpk);
+      if (ua <= 0.0f) {
+        // Fallback: derive UA from configured rated power + design temps.
+        const float T0 = id(house_zero_power_temp_c).state;
+        const float Tc = id(house_cold_temp_c).state;
+        const float Pr = id(house_rated_power_w).state;
+        if (isnan(T0) || isnan(Tc) || isnan(Pr) || (T0 <= Tc + 1.0f) || Pr <= 0.0f) return NAN;
+        ua = Pr / (T0 - Tc);
+      }
+      return ua * dT;
+
+  # Effective UA used in the live heat-loss calculation. Diagnostic — shows
+  # whether we are using the learned UA or the config fallback.
+  - platform: template
+    id: oq_phouse_ua_effective_sensor
+    name: "Power House – effective UA"
+    icon: mdi:home-thermometer-outline
+    unit_of_measurement: "W/K"
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 30s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_power_house
+    lambda: |-
+      float ua = id(oq_phouse_ua_estimate_wpk);
+      if (ua > 0.0f) return ua;
+      const float T0 = id(house_zero_power_temp_c).state;
+      const float Tc = id(house_cold_temp_c).state;
+      const float Pr = id(house_rated_power_w).state;
+      if (isnan(T0) || isnan(Tc) || isnan(Pr) || (T0 <= Tc + 1.0f) || Pr <= 0.0f) return NAN;
+      return Pr / (T0 - Tc);
+
+  # #1 UA sample count (diagnostics — how mature is the estimate).
+  - platform: template
+    id: oq_phouse_ua_sample_count_sensor
+    name: "Power House – UA samples"
+    icon: mdi:counter
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 10s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_power_house
+    lambda: |-
+      return (float) id(oq_phouse_ua_sample_count);
+
+  # #1 HP thermal output estimate (W) — diagnostic for understanding the learner.
+  - platform: template
+    id: oq_phouse_hp_th_estimate_w_sensor
+    name: "Power House – HP thermal output estimate"
+    icon: mdi:radiator
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 5s
+    entity_category: diagnostic
+    disabled_by_default: true
+    web_server:
+      sorting_group_id: oq_power_house
+    lambda: |-
+      return id(oq_phouse_hp_th_estimate_w);
+
+  # #5 Effective Tsup used by the perf_map (diagnostic).
+  - platform: template
+    id: oq_phouse_eff_supply_temp_c_sensor
+    name: "Power House – effective supply temp"
+    icon: mdi:thermometer-water
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 5s
+    entity_category: diagnostic
+    disabled_by_default: true
+    web_server:
+      sorting_group_id: oq_power_house
+    lambda: |-
+      const float Tsup_meas = id(oq_system_supply_temp).state;
+      const float Pr = id(house_rated_power_w).state;
+      const float P_target = id(oq_phouse_req_w);
+      const float dt_design = id(ph_design_supply_dt_c).state;
+      if (isnan(Pr) || Pr <= 0.0f) return Tsup_meas;
+      const float frac = (P_target / Pr);
+      float Tsup_steady = 30.0f + 25.0f * (frac < 0.0f ? 0.0f : (frac > 1.0f ? 1.0f : frac));
+      (void) dt_design;  // reserved for future flow-based derivation
+      if (isnan(Tsup_meas)) return Tsup_steady;
+      return fmaxf(Tsup_meas, Tsup_steady);
+
+  # ----- v0.32 smart-feature diagnostics -----
+
+  # #1 Tariff shift currently applied (°C).
+  - platform: template
+    id: oq_phouse_tariff_shift_c_sensor
+    name: "Power House – tariff setpoint shift"
+    icon: mdi:currency-eur
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 10s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_power_house
+    lambda: |-
+      return id(oq_phouse_tariff_shift_c);
+
+  # #1 Effective tariff ratio (now / 24h-avg).
+  - platform: template
+    id: oq_phouse_tariff_ratio_sensor
+    name: "Power House – tariff ratio"
+    icon: mdi:trending-up
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 10s
+    entity_category: diagnostic
+    disabled_by_default: true
+    web_server:
+      sorting_group_id: oq_power_house
+    lambda: |-
+      const float tariff_now = id(electricity_tariff_now_ha).has_state()
+          ? id(electricity_tariff_now_ha).state : NAN;
+      float tariff_avg = id(electricity_tariff_avg24_ha).has_state()
+          ? id(electricity_tariff_avg24_ha).state : NAN;
+      if (isnan(tariff_avg) || tariff_avg <= 0.0f) tariff_avg = id(oq_phouse_tariff_running_avg_eur);
+      if (isnan(tariff_now) || tariff_avg <= 0.0f) return NAN;
+      return tariff_now / tariff_avg;
+
+  # #2 PV boost currently applied (W).
+  - platform: template
+    id: oq_phouse_pv_boost_w_sensor
+    name: "Power House – PV boost"
+    icon: mdi:solar-power-variant
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 10s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_power_house
+    lambda: |-
+      return id(oq_phouse_pv_boost_w);
+
+  # #4 Adaptive Kp estimate (W/K).
+  - platform: template
+    id: oq_phouse_kp_estimate_sensor
+    name: "Power House – adaptive Kp estimate"
+    icon: mdi:tune-vertical
+    unit_of_measurement: "W/K"
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 30s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_power_house
+    lambda: |-
+      return id(oq_phouse_kp_estimate_w_per_k);
+
+  # #4 Adaptive Kp sample count.
+  - platform: template
+    id: oq_phouse_kp_sample_count_sensor
+    name: "Power House – Kp samples"
+    icon: mdi:counter
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 30s
+    entity_category: diagnostic
+    disabled_by_default: true
+    web_server:
+      sorting_group_id: oq_power_house
+    lambda: |-
+      return (float) id(oq_phouse_kp_sample_count);
+
+
 interval:
   - interval: ${oq_heat_loop_tick_s}s
     startup_delay: 4000ms
@@ -418,11 +1234,70 @@ interval:
               isnan(Tr) || isnan(Trsp) || (T0 <= Tc + ${oq_temp_guard_delta_c}f)) {
             id(oq_phouse_req_w) = 0.0f;
             id(oq_phouse_comfort_memory_c) = 0.0f;
+            id(oq_phouse_solar_gain_w) = 0.0f;
             id(oq_demand_raw) = 0;
           } else {
             float x = (T0 - Tout) / (T0 - Tc);
             x = clampf(x, 0.0f, 1.0f);
-            const float P_house = house_power_rating_w * x;
+            float P_house = house_power_rating_w * x;
+
+            // ===== v0.32 #2: Solar / internal gain residual EMA =====
+            // When the room sits above setpoint despite a low predicted P_house,
+            // the implied external gain is captured as a slow EMA in W and
+            // subtracted (with user-tunable strength) from P_house to avoid
+            // afternoon-overshoot on sunny shoulder days.
+            const bool solar_enabled = id(oq_phouse_solar_gain_enable).state;
+            const float solar_alpha_user = clampf(id(ph_solar_gain_alpha).state, 0.0f, 1.0f);
+            const float room_err_above = Tr - Trsp;  // > 0 when above setpoint
+            const float dt_solar_s = (now_ms >= id(oq_phouse_last_ms) && id(oq_phouse_last_ms) > 0)
+                ? ((now_ms - id(oq_phouse_last_ms)) / 1000.0f) : dt_s;
+            // Heuristic instant residual: room over-shoot scaled to power
+            // domain via the design temperature span. Only counted in mild
+            // weather (Tout > 5 °C) — avoids spurious gains at low Tout where
+            // small room overshoot is mostly thermal mass.
+            float P_residual_w = 0.0f;
+            if (solar_enabled && room_err_above > 0.05f && Tout > 5.0f) {
+              const float design_span_k = fmaxf(2.0f, Trsp - Tc);
+              P_residual_w = house_power_rating_w * (room_err_above / design_span_k);
+              P_residual_w = clampf(P_residual_w, 0.0f, 0.6f * house_power_rating_w);
+            }
+            // EMA with τ ≈ 30 min so single-sample noise does not drive demand.
+            const float solar_tau_s = 1800.0f;
+            const float solar_ema_alpha = (solar_tau_s > 0.0f && dt_solar_s > 0.0f)
+                ? (1.0f - expf(-dt_solar_s / solar_tau_s)) : 0.0f;
+            float solar_gain = id(oq_phouse_solar_gain_w);
+            if (isnan(solar_gain) || solar_gain < 0.0f) solar_gain = 0.0f;
+            if (!solar_enabled) {
+              // Decay to zero when feature is disabled.
+              solar_gain = solar_gain * (1.0f - solar_ema_alpha);
+            } else {
+              solar_gain = solar_gain + solar_ema_alpha * (P_residual_w - solar_gain);
+            }
+            id(oq_phouse_solar_gain_w) = solar_gain;
+            const float solar_correction_w = solar_alpha_user * solar_gain;
+            P_house = fmaxf(0.0f, P_house - solar_correction_w);
+
+            // ===== v0.32 #3: Forecast pre-conditioning =====
+            // When an upcoming setpoint step is known (HA proxy), gently lift
+            // P_target so the strategy starts pre-heating with low levels —
+            // best COP zone (level 4-6) instead of a recovery spike.
+            const float preheat_gain = clampf(id(ph_preheat_gain).state, 0.0f, 1.0f);
+            float P_preheat_w = 0.0f;
+            if (preheat_gain > 0.0f) {
+              const float Trsp_next = id(room_setpoint_next_ha).has_state()
+                  ? id(room_setpoint_next_ha).state : NAN;
+              const float Tout_next = id(outside_temp_forecast_ha).has_state()
+                  ? id(outside_temp_forecast_ha).state : NAN;
+              if (!isnan(Trsp_next) && Trsp_next > Trsp + 0.3f) {
+                const float T_eff = isnan(Tout_next) ? Tout : Tout_next;
+                float x_next = (T0 - T_eff) / (T0 - Tc);
+                x_next = clampf(x_next, 0.0f, 1.0f);
+                const float P_house_next = house_power_rating_w * x_next;
+                // Add a small fraction so the room can drift up gently before
+                // the schedule jumps. Larger preheat_gain = more anticipation.
+                P_preheat_w = preheat_gain * 0.4f * P_house_next;
+              }
+            }
 
             const float comfort_below = clampf(id(ph_comfort_band_below_c).state, 0.0f, 2.0f);
             const float comfort_above = clampf(id(ph_comfort_band_above_c).state, 0.0f, 2.0f);
@@ -472,6 +1347,9 @@ interval:
 
             const float temperature_reaction_w_per_k = id(ph_kp_w_per_k).state;
             float P_raw = P_house + temperature_reaction_w_per_k * e;
+            // Apply preheat boost: floor P_raw at the preheat estimate so the
+            // strategy already moves up before the live error pushes it.
+            if (P_preheat_w > 0.0f && P_preheat_w > P_raw) P_raw = P_preheat_w;
             P_raw = clampf(P_raw, 0.0f, house_power_rating_w);
 
             const float rise_time_min = clampf(id(ph_demand_rise_time_min).state, 2.0f, 20.0f);
@@ -488,11 +1366,226 @@ interval:
               }
             }
 
-            const float P_effective = P_limited * id(oq_water_temp_limit_factor);
+            float P_effective = P_limited * id(oq_water_temp_limit_factor);
+
+            // ===== v0.32 smart #3: Window-open detection =====
+            // Compare current Tr against a 5-minute-ago snapshot. Sustained
+            // sharp drop with unchanged setpoint → very likely an open window
+            // or door. Pause the strategy briefly to avoid wasting energy
+            // chasing the drop.
+            const bool window_detect_on = id(oq_phouse_window_detect_enable).state;
+            // Update the rolling 5-min snapshot.
+            const uint32_t window_sample_age_ms = (now_ms >= id(oq_phouse_room_temp_5min_ago_ms))
+                ? (now_ms - id(oq_phouse_room_temp_5min_ago_ms)) : 0;
+            const bool snapshot_exists = !isnan(id(oq_phouse_room_temp_5min_ago_c));
+            if (!snapshot_exists || window_sample_age_ms >= 300000UL) {
+              id(oq_phouse_room_temp_5min_ago_c) = Tr;
+              id(oq_phouse_room_temp_5min_ago_ms) = now_ms;
+            }
+            if (window_detect_on && snapshot_exists) {
+              const float drop_threshold = clampf(id(ph_window_drop_threshold_c).state, 0.10f, 1.50f);
+              const float drop_c = id(oq_phouse_room_temp_5min_ago_c) - Tr;
+              // Trigger only if drop is rapid relative to outdoor + outdoor is colder.
+              if (drop_c >= drop_threshold && Tout < (Tr - 1.0f) && !id(oq_phouse_window_open_active)) {
+                const uint32_t pause_min = (uint32_t) clampf(id(ph_window_pause_min).state, 2.0f, 30.0f);
+                id(oq_phouse_window_open_active) = true;
+                id(oq_phouse_window_open_until_ms) = now_ms + pause_min * 60000UL;
+                ESP_LOGW("quatt", "Window-open detected: Tr dropped %.2fK in 5min — pausing %u min.",
+                         drop_c, (unsigned) pause_min);
+              }
+            }
+            // Auto-clear window state once the pause window elapses.
+            if (id(oq_phouse_window_open_active) && now_ms >= id(oq_phouse_window_open_until_ms)) {
+              id(oq_phouse_window_open_active) = false;
+              ESP_LOGI("quatt", "Window-open pause elapsed — resuming Power House.");
+            }
+            // If detection is disabled, immediately drop the active flag.
+            if (!window_detect_on) {
+              id(oq_phouse_window_open_active) = false;
+              id(oq_phouse_window_open_until_ms) = 0;
+            }
+
+            // ===== v0.32 smart #1: Tariff-aware setpoint shift =====
+            // When dynamic tariff is well below the 24h average → preheat
+            // (positive shift, raises P via Kp). When well above average →
+            // throttle (negative shift, lowers P). Slewed so we don't whip
+            // the strategy when tariff jumps. No effect when disabled.
+            const bool tariff_on = id(oq_phouse_tariff_shift_enable).state;
+            float tariff_shift_target_c = 0.0f;
+            if (tariff_on && id(electricity_tariff_now_ha).has_state() &&
+                !isnan(id(electricity_tariff_now_ha).state)) {
+              const float tariff_now = id(electricity_tariff_now_ha).state;
+              float tariff_avg = id(electricity_tariff_avg24_ha).has_state()
+                  ? id(electricity_tariff_avg24_ha).state : NAN;
+              if (isnan(tariff_avg) || tariff_avg <= 0.0f) {
+                tariff_avg = id(oq_phouse_tariff_running_avg_eur);
+              }
+              // Maintain a slow running average ourselves (≈24h EMA on the now-tariff).
+              const uint32_t tariff_dt_ms = (id(oq_phouse_tariff_avg_last_update_ms) > 0 &&
+                                              now_ms > id(oq_phouse_tariff_avg_last_update_ms))
+                  ? (now_ms - id(oq_phouse_tariff_avg_last_update_ms)) : 0UL;
+              if (tariff_dt_ms > 30000UL) {
+                const float tau24h_s = 86400.0f;
+                const float dt_run = (float) tariff_dt_ms / 1000.0f;
+                const float a = 1.0f - expf(-dt_run / tau24h_s);
+                float run_avg = id(oq_phouse_tariff_running_avg_eur);
+                if (run_avg <= 0.0f || isnan(run_avg)) run_avg = tariff_now;
+                else run_avg += a * (tariff_now - run_avg);
+                id(oq_phouse_tariff_running_avg_eur) = run_avg;
+                id(oq_phouse_tariff_avg_last_update_ms) = now_ms;
+                if (isnan(tariff_avg) || tariff_avg <= 0.0f) tariff_avg = run_avg;
+              }
+              if (!isnan(tariff_avg) && tariff_avg > 0.0f) {
+                const float ratio = tariff_now / tariff_avg;
+                const float cheap = clampf(id(ph_tariff_cheap_ratio).state, 0.30f, 0.95f);
+                const float expensive = clampf(id(ph_tariff_expensive_ratio).state, 1.05f, 2.50f);
+                const float max_up = clampf(id(ph_tariff_shift_max_up_c).state, 0.0f, 1.5f);
+                const float max_dn = clampf(id(ph_tariff_shift_max_down_c).state, 0.0f, 1.5f);
+                if (ratio <= cheap) {
+                  // Linear ramp: ratio=cheap → 0, ratio=0 → max_up
+                  const float frac = clampf((cheap - ratio) / fmaxf(0.05f, cheap), 0.0f, 1.0f);
+                  tariff_shift_target_c = max_up * frac;
+                } else if (ratio >= expensive) {
+                  // Linear ramp: ratio=expensive → 0, ratio=2*expensive → -max_dn
+                  const float frac = clampf((ratio - expensive) / fmaxf(0.10f, expensive), 0.0f, 1.0f);
+                  tariff_shift_target_c = -max_dn * frac;
+                }
+              }
+            }
+            // Slew towards target at 0.05 K/min so single-tariff outliers don't whip.
+            const float tariff_slew_c_per_s = 0.05f / 60.0f;
+            float tariff_shift = id(oq_phouse_tariff_shift_c);
+            if (isnan(tariff_shift)) tariff_shift = 0.0f;
+            const float tariff_step = tariff_slew_c_per_s * dt_power_s;
+            if (tariff_shift_target_c > tariff_shift)
+              tariff_shift = fminf(tariff_shift_target_c, tariff_shift + tariff_step);
+            else if (tariff_shift_target_c < tariff_shift)
+              tariff_shift = fmaxf(tariff_shift_target_c, tariff_shift - tariff_step);
+            id(oq_phouse_tariff_shift_c) = tariff_shift;
+            // Translate setpoint shift to extra power via Kp.
+            const float P_tariff_w = clampf(temperature_reaction_w_per_k * tariff_shift,
+                                            -house_power_rating_w, house_power_rating_w);
+
+            // ===== v0.32 smart #2: PV self-consumption boost =====
+            // When grid net power is exporting (negative), boost P_target so
+            // we use that PV electricity as heat. Linear above the export
+            // threshold, capped at user-set max boost.
+            const bool pv_on = id(oq_phouse_pv_boost_enable).state;
+            float pv_boost_w = 0.0f;
+            if (pv_on && id(grid_net_power_ha).has_state() && !isnan(id(grid_net_power_ha).state)) {
+              const float grid_net = id(grid_net_power_ha).state;  // negative = export
+              const float export_w = (grid_net < 0.0f) ? -grid_net : 0.0f;
+              const float threshold_w = clampf(id(ph_pv_export_threshold_w).state, 200.0f, 5000.0f);
+              const float max_boost_w = clampf(id(ph_pv_boost_max_w).state, 0.0f, 6000.0f);
+              const float assumed_cop = clampf(id(ph_pv_assumed_cop).state, 1.5f, 6.0f);
+              if (export_w > threshold_w) {
+                // Convert excess electrical export to thermal at assumed COP.
+                pv_boost_w = (export_w - threshold_w) * assumed_cop;
+                pv_boost_w = clampf(pv_boost_w, 0.0f, max_boost_w);
+              }
+            }
+            // Slew so brief solar dips don't whip P_target.
+            const float pv_slew_w_per_s = 200.0f;  // 200 W/s rise/fall
+            float pv_boost_state = id(oq_phouse_pv_boost_w);
+            if (isnan(pv_boost_state)) pv_boost_state = 0.0f;
+            const float pv_step = pv_slew_w_per_s * dt_power_s;
+            if (pv_boost_w > pv_boost_state)
+              pv_boost_state = fminf(pv_boost_w, pv_boost_state + pv_step);
+            else if (pv_boost_w < pv_boost_state)
+              pv_boost_state = fmaxf(pv_boost_w, pv_boost_state - pv_step);
+            id(oq_phouse_pv_boost_w) = pv_boost_state;
+
+            // Apply smart-feature contributions to P_effective.
+            // PV boost: additive, no cap beyond Pr*1.2 (over-rated allowed for short bursts).
+            P_effective = fmaxf(0.0f,
+                fminf(house_power_rating_w * 1.20f, P_effective + P_tariff_w + pv_boost_state));
+            // Window-open: hard zero override of P_effective (HP idles).
+            if (id(oq_phouse_window_open_active)) {
+              P_effective = 0.0f;
+            }
+
             id(oq_phouse_req_w) = P_effective;
             id(oq_phouse_last_w) = P_effective;
             id(oq_phouse_last_ms) = now_ms;
             id(oq_demand_raw) = clamp_demand((int) lroundf(${oq_strategy_demand_max_f} * (P_effective / house_power_rating_w)));
+
+            // ===== v0.32 smart #4: Adaptive Kp observer =====
+            // NOTE: this is a *verification* observer, not a true learner.
+            // The numerator (P_raw - P_house) is by construction equal to
+            // ph_kp_w_per_k * e in the code above, so kp_sample mathematically
+            // equals the configured Kp whenever both are non-zero.
+            //
+            // What the observer is good for:
+            //   - Confirming the strategy actually applies the configured Kp
+            //     (catches caps, slew limiters, water-temp-trip etc. that may
+            //     suppress P_extra without changing the configured Kp)
+            //   - Showing the EMA-smoothed effective Kp over time
+            //
+            // For real Kp tuning, watch comfort_memory_c growth: if it stays
+            // above zero during heating and never decays, your configured Kp
+            // is likely too low. Drop it incrementally and observe.
+            //
+            // Sampling: use the absolute room offset (Tr - Trsp), require at
+            // least 0.15 K offset and a HP delivering >= 500 W. dt >= 60 s.
+            const bool kp_learn_on = id(oq_phouse_adaptive_kp_enable).state;
+            int kp_skip = 0;
+            if (!kp_learn_on) {
+              kp_skip = 1;
+            } else {
+              const float room_offset = Tr - Trsp;  // signed
+              const bool offset_ok = fabsf(room_offset) > 0.15f;
+              const bool dt_ok_kp = dt_power_s >= 60.0f;
+              const float P_extra = P_raw - P_house;
+              // p_th_estimate_w is computed later in the UA learner block; here
+              // we approximate "HP active" by the actual applied level.
+              const int hp1_lvl_kp = id(hp1_last_applied_level);
+              #if OQ_TOPOLOGY_DUO
+              const int hp2_lvl_kp = id(${ph_secondary_last_applied_level_id});
+              #else
+              const int hp2_lvl_kp = 0;
+              #endif
+              const bool hp_active_kp = (hp1_lvl_kp > 0) || (hp2_lvl_kp > 0);
+              const bool extra_ok = fabsf(P_extra) >= 100.0f;
+
+              if (!offset_ok) kp_skip = 2;
+              else if (!dt_ok_kp) kp_skip = 3;
+              else if (!hp_active_kp) kp_skip = 4;
+              else if (!extra_ok) kp_skip = 5;
+              else {
+                // Use the dead-band-clipped error e (matches how P_extra was
+                // generated). This makes the observer agree with the
+                // configured Kp during normal heating activity.
+                const float kp_sample = (fabsf(e) > 0.05f)
+                    ? P_extra / e
+                    : P_extra / room_offset;
+                if (kp_sample >= 200.0f && kp_sample <= 8000.0f) {
+                  float kp_ema = id(oq_phouse_kp_estimate_w_per_k);
+                  const int sample_count = id(oq_phouse_kp_sample_count);
+                  bool accept_kp = true;
+                  if (kp_ema > 100.0f && (kp_sample > 4.0f * kp_ema || kp_sample < 0.25f * kp_ema)) {
+                    accept_kp = false;
+                    kp_skip = 6;
+                  }
+                  if (accept_kp) {
+                    const float tau_h = clampf(id(ph_kp_learn_tau_h).state, 24.0f, 168.0f);
+                    const float tau_s_kp = tau_h * 3600.0f;
+                    if (sample_count < 6 || kp_ema <= 0.0f) {
+                      if (kp_ema <= 0.0f) kp_ema = kp_sample;
+                      else kp_ema = kp_ema + (kp_sample - kp_ema) / (float)(sample_count + 1);
+                    } else {
+                      const float a_kp = 1.0f - expf(-dt_power_s / tau_s_kp);
+                      kp_ema += a_kp * (kp_sample - kp_ema);
+                    }
+                    id(oq_phouse_kp_estimate_w_per_k) = kp_ema;
+                    id(oq_phouse_kp_sample_count) = sample_count + 1;
+                    kp_skip = 0;
+                  }
+                } else {
+                  kp_skip = 6;  // outlier
+                }
+              }
+            }
+            id(oq_phouse_kp_skip_reason) = kp_skip;
           }
 
           int raw = id(oq_demand_raw);
@@ -590,7 +1683,30 @@ interval:
           };
 
           const float Tamb = id(outside_temp_selected).state;
-          const float Tsup = id(oq_system_supply_temp).state;
+          const float Tsup_meas = id(oq_system_supply_temp).state;
+
+          // ===== v0.32 #5: Effective Tsup for perf_map =====
+          // Cold-start protection: when measured supply is far below the
+          // steady-state target (e.g. just out of CM0/CM1 with cold loop),
+          // the perf_map would optimistically report high P_th at low Tsup,
+          // and the optimizer would pick too low a level. Use the higher of
+          // measured Tsup and a steady-state estimate derived from P_target.
+          auto eff_supply_temp_c = [&](float P_target_w)->float {
+            const float Pr_eff = id(house_rated_power_w).state;
+            float Tsup_steady = 35.0f;
+            if (!isnan(Pr_eff) && Pr_eff > 0.0f) {
+              float frac = P_target_w / Pr_eff;
+              if (frac < 0.0f) frac = 0.0f;
+              if (frac > 1.0f) frac = 1.0f;
+              // 30 °C @ idle, 55 °C @ rated. Lines up with perf_map breakpoints.
+              Tsup_steady = 30.0f + 25.0f * frac;
+            }
+            if (isnan(Tsup_meas)) return Tsup_steady;
+            return fmaxf(Tsup_meas, Tsup_steady);
+          };
+          const float P_target_for_tsup = id(oq_phouse_req_w);
+          const float Tsup = eff_supply_temp_c(P_target_for_tsup);
+
           int level_cap = (int) roundf(id(oq_day_max_level).state);
           if (id(oq_silent_active).state) level_cap = (int) roundf(id(oq_silent_max_level).state);
           if (level_cap < 0) level_cap = 0;
@@ -632,8 +1748,29 @@ interval:
           float def_fac_cfg = ${oq_defrost_power_factor};
           if (isnan(def_fac_cfg)) def_fac_cfg = 0.55f;
           const float def_fac = fmaxf(0.10f, fminf(1.00f, def_fac_cfg));
-          const float hp1_th_fac = hp1_valve_def ? def_fac : 1.0f;
-          const float hp2_th_fac = hp2_valve_def ? def_fac : 1.0f;
+
+          // ===== v0.32 #4: Frost-zone capacity derating =====
+          // Outside actual defrost moments, anticipate the averaged defrost
+          // duty cycle in the wet-frost zone (around +1.5 °C with high RH).
+          // This lowers expected capacity slightly so the duo optimizer is
+          // more inclined to pick duo when needed and avoids under-delivery.
+          // No effect outside the frost band or when the user disables via 0.
+          auto frost_zone_derate = [&](float Tamb_c)->float {
+            if (isnan(Tamb_c)) return 1.0f;
+            if (Tamb_c > 6.0f || Tamb_c < -10.0f) return 1.0f;  // outside frost band
+            const float max_derate = clampf(id(ph_frost_zone_max_derate).state, 0.0f, 0.30f);
+            if (max_derate <= 0.0f) return 1.0f;
+            const float Tpeak = 1.5f;
+            const float sigma = 3.5f;
+            const float dx = (Tamb_c - Tpeak) / sigma;
+            const float bell = expf(-dx * dx);
+            return fmaxf(0.70f, 1.0f - max_derate * bell);
+          };
+          const float frost_derate = frost_zone_derate(Tamb);
+          // During actual defrost (4-way valve active) the explicit def_fac
+          // dominates; otherwise apply the continuous frost-zone derating.
+          const float hp1_th_fac = hp1_valve_def ? def_fac : frost_derate;
+          const float hp2_th_fac = hp2_valve_def ? def_fac : frost_derate;
 
           auto max_cap_hp = [&](bool is_hp1)->float {
             if ((is_hp1 && !hp1_available) || (!is_hp1 && !hp2_available)) return 0.0f;
@@ -1094,15 +2231,140 @@ interval:
           id(oq_ph_request_owner_hp) = request_owner_hp;
           id(oq_ph_request_reason_code) = request_reason_code;
 
+          // ===== v0.32 #1: Self-learning UA estimator =====
+          // Estimates the house heat-loss coefficient (W/K) from observed
+          // HP thermal output relative to (Trsp - Tout) during stable
+          // heating periods. Default OFF (opt-in via switch). The estimate
+          // is published as a diagnostic; user explicitly applies it via
+          // the "Apply UA estimate" button.
+          //
+          // Sampling preconditions (all must hold):
+          //   - UA learning enabled
+          //   - Strategy active (CM2/CM3, in heating)
+          //   - Room within ±0.3 K of setpoint (steady comfort, not warming up)
+          //   - No DHW active, no defrost on either HP, no oil-return hold
+          //   - HP delivering >= 500 W estimated thermal (excludes near-idle)
+          //   - Tout valid; (Trsp - Tout) >= 5 K (avoid divide-by-tiny)
+          //   - dt since last sample >= 2 minutes (decimate)
+          //
+          // Update law: UA_sample = P_th_estimate / max(Trsp - Tout, 5)
+          //   UA_ema += (dt/τ) · (UA_sample − UA_ema)  with τ = ph_ua_learn_tau_h
+          // Outlier rejection: skip if UA_sample > 3·UA_ema (when ema > 0).
+          {
+            const bool ua_enabled = id(oq_phouse_ua_learn_enable).state;
+            const bool ua_inputs_valid = !isnan(Tout) && !isnan(Tsup_meas) && !isnan(Trsp);
+            float p_th_estimate_w = 0.0f;
+            const int hp1_lvl_for_est = id(hp1_last_applied_level);
+            #if OQ_TOPOLOGY_DUO
+            const int hp2_lvl_for_est = id(${ph_secondary_last_applied_level_id});
+            #else
+            const int hp2_lvl_for_est = 0;
+            #endif
+            if (ua_inputs_valid && hp1_lvl_for_est > 0) {
+              float p1 = oq_perf::interp_power_th_w(hp1_lvl_for_est, Tamb, Tsup_meas);
+              if (!isnan(p1)) {
+                if (hp1_valve_def) p1 *= def_fac;
+                p_th_estimate_w += p1;
+              }
+            }
+            #if OQ_TOPOLOGY_DUO
+            if (ua_inputs_valid && hp2_lvl_for_est > 0) {
+              float p2 = oq_perf::interp_power_th_w(hp2_lvl_for_est, Tamb, Tsup_meas);
+              if (!isnan(p2)) {
+                if (hp2_valve_def) p2 *= def_fac;
+                p_th_estimate_w += p2;
+              }
+            }
+            #endif
+            id(oq_phouse_hp_th_estimate_w) = p_th_estimate_w;
+
+            // Determine skip reason for diagnostics. Order mirrors the gate
+            // checks below; the first failing condition wins.
+            int ua_skip = 0;
+            if (!ua_enabled) {
+              ua_skip = 1;
+            } else if (!active || !(cm_code == 2 || cm_code == 3)) {
+              ua_skip = 2;
+            } else if (!ua_inputs_valid) {
+              ua_skip = 3;
+            }
+            if (ua_skip == 0 && ua_enabled && active && ua_inputs_valid &&
+                (cm_code == 2 || cm_code == 3)) {
+              // v0.32 fix: looser stability tolerance and use Tr (actual room
+              // temperature) instead of Trsp for the heat-loss math. Heat loss
+              // is proportional to (T_room - T_outdoor), regardless of setpoint.
+              // A room sitting steady at 19.5 °C with setpoint 20 °C still
+              // gives a valid UA sample.
+              const float room_err = fabsf(Tr - Trsp);
+              const bool dhw_quiet = !id(oq_dhw_block_cv_priority);
+              const bool defrost_quiet = !hp1_valve_def && !hp2_valve_def && !hp1_def && !hp2_def;
+              const bool oil_quiet = !oil_return_hold_active;
+              const bool hp_active_min = p_th_estimate_w >= 500.0f;
+              const float dT_load = Tr - Tout;  // actual room ↔ outdoor delta
+              const bool dT_ok = dT_load >= 3.0f;
+              const bool stable = room_err <= 0.6f;
+
+              const uint32_t last_sample_ms = id(oq_phouse_ua_last_sample_ms);
+              const uint32_t min_dt_sample_ms = 120000UL;  // 2 minutes
+              const bool sample_dt_ok = (last_sample_ms == 0) ||
+                  (now_ms > last_sample_ms && (now_ms - last_sample_ms) >= min_dt_sample_ms);
+
+              if (!stable) ua_skip = 4;
+              else if (!dhw_quiet) ua_skip = 5;
+              else if (!defrost_quiet) ua_skip = 6;
+              else if (!oil_quiet) ua_skip = 7;
+              else if (!hp_active_min) ua_skip = 8;
+              else if (!dT_ok) ua_skip = 9;
+              else if (!sample_dt_ok) ua_skip = 10;
+
+              if (stable && dhw_quiet && defrost_quiet && oil_quiet &&
+                  hp_active_min && dT_ok && sample_dt_ok) {
+                ua_skip = 0;
+                const float ua_sample = p_th_estimate_w / dT_load;  // W/K
+                float ua_ema = id(oq_phouse_ua_estimate_wpk);
+                const int sample_count = id(oq_phouse_ua_sample_count);
+
+                // Outlier rejection: ignore wildly off samples once ema is established.
+                bool accept_sample = true;
+                if (ua_ema > 0.5f && (ua_sample > 3.0f * ua_ema || ua_sample < 0.25f * ua_ema)) {
+                  accept_sample = false;
+                }
+                // Sanity: 50..2000 W/K covers extreme cases (very small flat to oversized house).
+                if (ua_sample < 50.0f || ua_sample > 2000.0f) accept_sample = false;
+
+                if (accept_sample) {
+                  const float tau_h = clampf(id(ph_ua_learn_tau_h).state, 24.0f, 168.0f);
+                  const float tau_s = tau_h * 3600.0f;
+                  // First 6 samples: arithmetic blend so the estimate seeds quickly.
+                  if (sample_count < 6 || ua_ema <= 0.0f) {
+                    if (ua_ema <= 0.0f) ua_ema = ua_sample;
+                    else ua_ema = ua_ema + (ua_sample - ua_ema) / (float)(sample_count + 1);
+                  } else {
+                    const float dt_sample_s = (last_sample_ms == 0) ? (float)min_dt_sample_ms / 1000.0f
+                        : (float)(now_ms - last_sample_ms) / 1000.0f;
+                    const float alpha = 1.0f - expf(-dt_sample_s / tau_s);
+                    ua_ema += alpha * (ua_sample - ua_ema);
+                  }
+                  id(oq_phouse_ua_estimate_wpk) = ua_ema;
+                  id(oq_phouse_ua_sample_count) = sample_count + 1;
+                  id(oq_phouse_ua_last_sample_ms) = now_ms;
+                }
+              }
+            }
+            id(oq_phouse_ua_skip_reason) = ua_skip;
+          }
+
           id(oq_strategy_phase_code) = (f > 0) ? 1 : 0;
           id(oq_strategy_requested_power_w) = id(oq_phouse_req_w);
           id(oq_strategy_supply_target_temp) = NAN;
           id(oq_strategy_heat_request_active) = (f > 0);
           id(oq_strategy_phase_text).publish_state((f > 0) ? "heat" : "idle");
 
-          char debug_buf[160];
+          char debug_buf[200];
           snprintf(
             debug_buf, sizeof(debug_buf),
-            "ph f=%d raw=%d preq=%.0f owner=%d reason=%d",
-            f, raw, id(oq_phouse_req_w), request_owner_hp, request_reason_code);
+            "ph f=%d raw=%d preq=%.0f owner=%d reason=%d sgain=%.0f ua=%.1f n=%d",
+            f, raw, id(oq_phouse_req_w), request_owner_hp, request_reason_code,
+            id(oq_phouse_solar_gain_w), id(oq_phouse_ua_estimate_wpk),
+            id(oq_phouse_ua_sample_count));
           id(oq_strategy_debug_state).publish_state(debug_buf);

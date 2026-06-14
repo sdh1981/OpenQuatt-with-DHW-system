@@ -1,0 +1,539 @@
+# ==============================================================================
+# OpenQuatt - Sensor Source Selection and Merged Signals
+# ==============================================================================
+#
+# Goal:
+#   Provide runtime source selection and canonical selected-source signals
+#   used by control logic.
+#
+# Scope:
+#   - Source selectors for water/flow/outside/room inputs
+#   - Merged selected outputs consumed by strategy/control packages
+# ==============================================================================
+
+packages:
+  oq_cooling_safety: !include oq_cooling_safety.yaml
+
+globals:
+  - id: oq_water_supply_temp_selected_last_valid_c
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: oq_water_supply_temp_selected_last_valid_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: oq_water_supply_temp_selected_hold_active
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+  - id: oq_outside_temp_selected_last_valid_c
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: oq_outside_temp_selected_last_valid_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: oq_outside_temp_selected_hold_active
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+  - id: oq_room_temp_selected_last_valid_c
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: oq_room_temp_selected_last_valid_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: oq_room_temp_selected_hold_active
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+  - id: oq_room_setpoint_selected_last_valid_c
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: oq_room_setpoint_selected_last_valid_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: oq_room_setpoint_selected_hold_active
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+select:
+  - platform: template
+    name: "Water Supply Source"
+    id: water_supply_source
+    icon: mdi:source-branch
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    options:
+      - Local
+      - CIC
+      - HA input
+    initial_option: Local
+    web_server:
+      sorting_group_id: oq_sensor_selection
+
+  - platform: template
+    name: "Flow Source"
+    id: flow_source
+    icon: mdi:source-branch
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    options:
+      - Outdoor unit
+      - CIC
+    initial_option: Outdoor unit
+    web_server:
+      sorting_group_id: oq_sensor_selection
+
+  - platform: template
+    name: "Outdoor Unit Flow Mode"
+    id: oq_duo_outdoor_flow_mode
+    internal: ${sensor_sources_duo_flow_internal}
+    icon: mdi:call-split
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    options:
+      - Flowmeter HP1
+      - Flowmeter HP2
+      - Local aggregate HP1/HP2
+    initial_option: Local aggregate HP1/HP2
+    web_server:
+      sorting_group_id: oq_sensor_selection
+
+  - platform: template
+    name: "Outside Temperature Source"
+    id: outside_temp_source
+    icon: mdi:source-branch
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    options:
+      - Auto
+      - Outdoor unit
+      - HA input
+    initial_option: Auto
+    web_server:
+      sorting_group_id: oq_sensor_selection
+
+  - platform: template
+    name: "Room Temperature Source"
+    id: room_temp_source
+    icon: mdi:source-branch
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    options:
+      - CIC
+      - OT thermostat
+      - HA input
+    initial_option: CIC
+    web_server:
+      sorting_group_id: oq_sensor_selection
+
+  - platform: template
+    name: "Room Setpoint Source"
+    id: room_setpoint_source
+    icon: mdi:source-branch
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    options:
+      - CIC
+      - OT thermostat
+      - HA input
+    initial_option: CIC
+    web_server:
+      sorting_group_id: oq_sensor_selection
+
+  - platform: template
+    name: "Cooling Enable Source"
+    id: cooling_enable_source
+    icon: mdi:source-branch
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    options:
+      - CIC
+      - HA input
+      - CIC or HA input
+    initial_option: CIC or HA input
+    web_server:
+      sorting_group_id: oq_sensor_selection
+
+switch:
+  - platform: template
+    id: oq_manual_cooling_enable
+    name: "Manual Cooling Enable"
+    icon: mdi:snowflake-check
+    restore_mode: RESTORE_DEFAULT_OFF
+    optimistic: true
+    web_server:
+      sorting_group_id: oq_control
+
+binary_sensor:
+  - platform: template
+    id: cooling_enable_selected
+    name: "Cooling Enable (Selected)"
+    icon: mdi:snowflake-check
+    device_class: cold
+    lambda: |-
+      if (!id(cooling_enable_source).has_state()) return false;
+      const auto source = id(cooling_enable_source).current_option();
+      const bool cic_enabled = id(cic_cooling_enabled).has_state() && id(cic_cooling_enabled).state;
+      const bool ha_enabled = id(cooling_enable_ha).has_state() && id(cooling_enable_ha).state;
+      const bool manual_enabled = id(oq_manual_cooling_enable).state;
+      if (source == "CIC") return cic_enabled || manual_enabled;
+      if (source == "HA input") return ha_enabled || manual_enabled;
+      if (source == "CIC or HA input") return cic_enabled || ha_enabled || manual_enabled;
+      return false;
+    web_server:
+      sorting_group_id: oq_sensor_selection
+
+text_sensor:
+  - platform: template
+    id: oq_room_temperature_effective_source
+    name: "Room Temperature Effective Source"
+    icon: mdi:source-branch
+    update_interval: 5s
+    lambda: |-
+      if (!id(room_temp_source).has_state()) return {"Unknown"};
+      return {id(room_temp_source).current_option().c_str()};
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_sensor_selection
+
+  - platform: template
+    id: oq_room_setpoint_effective_source
+    name: "Room Setpoint Effective Source"
+    icon: mdi:source-branch
+    update_interval: 5s
+    lambda: |-
+      if (!id(room_setpoint_source).has_state()) return {"Unknown"};
+      return {id(room_setpoint_source).current_option().c_str()};
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_sensor_selection
+
+  - platform: template
+    id: oq_cooling_enable_effective_source
+    name: "Cooling Enable Effective Source"
+    icon: mdi:source-branch
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: |-
+      // Report which raw source is currently granting cooling enable.
+      if (!id(cooling_enable_source).has_state()) return {"Unknown"};
+
+      const auto source = id(cooling_enable_source).current_option();
+      const bool cic_enabled = id(cic_cooling_enabled).has_state() && id(cic_cooling_enabled).state;
+      const bool ha_enabled = id(cooling_enable_ha).has_state() && id(cooling_enable_ha).state;
+      const bool manual_enabled = id(oq_manual_cooling_enable).state;
+
+      auto with_manual = [&](const std::string &base) -> std::string {
+        if (!manual_enabled) return base;
+        if (base == "None") return "Manual";
+        return base + " + Manual";
+      };
+
+      if (source == "CIC") return {with_manual(cic_enabled ? "CIC" : "None")};
+      if (source == "HA input") return {with_manual(ha_enabled ? "HA input" : "None")};
+      if (source == "CIC or HA input") {
+        if (cic_enabled && ha_enabled) return {with_manual("CIC + HA input")};
+        if (cic_enabled) return {with_manual("CIC")};
+        if (ha_enabled) return {with_manual("HA input")};
+        return {with_manual("None")};
+      }
+      return {"Unknown"};
+    web_server:
+      sorting_group_id: oq_sensor_selection
+
+  - platform: template
+    id: oq_selected_input_hold_active
+    name: "Selected Input Hold Active"
+    disabled_by_default: true
+    icon: mdi:timer-sand
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: |-
+      // Report which selected-source inputs are currently being held through source dropouts.
+      std::string active;
+      auto add = [&](const char *label) {
+        if (!active.empty()) active += ", ";
+        active += label;
+      };
+
+      if (id(oq_water_supply_temp_selected_hold_active)) add("Water supply");
+      if (id(oq_outside_temp_selected_hold_active)) add("Outside temp");
+      if (id(oq_room_temp_selected_hold_active)) add("Room temp");
+      if (id(oq_room_setpoint_selected_hold_active)) add("Room setpoint");
+      if (id(oq_cooling_room_count_selected_hold_active)) add("Cooling room count");
+      if (id(oq_cooling_valid_room_count_hold_active)) add("Cooling valid rooms");
+      if (id(oq_cooling_dew_point_selected_hold_active)) add("Cooling dew point");
+
+      if (active.empty()) active = "None";
+      return {active};
+    web_server:
+      sorting_group_id: oq_sensor_selection
+
+sensor:
+  - platform: template
+    id: water_supply_temp_selected
+    name: "Water Supply Temp (Selected)"
+    icon: mdi:water-thermometer
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 5s
+    lambda: |-
+      // Hold the selected HA water supply input briefly through HA reload gaps.
+      if (!id(water_supply_source).has_state()) return NAN;
+      const auto source = id(water_supply_source).current_option();
+      const bool hold_enabled = source == "HA input";
+      const uint32_t hold_ms = (uint32_t)(${oq_selected_input_stale_hold_s}UL * 1000UL);
+      const uint32_t now_ms = (uint32_t) millis();
+
+      float selected_c = NAN;
+      if (source == "CIC") {
+        if (id(water_supply_temp_cic).has_state()) selected_c = id(water_supply_temp_cic).state;
+      }
+      if (source == "HA input") {
+        if (id(water_supply_temp_ha).has_state()) selected_c = id(water_supply_temp_ha).state;
+      }
+      if (source == "Local") {
+        if (id(water_supply_temp_esp).has_state()) selected_c = id(water_supply_temp_esp).state;
+      }
+
+      const bool selected_valid = !isnan(selected_c);
+      if (selected_valid) {
+        id(oq_water_supply_temp_selected_last_valid_c) = selected_c;
+        id(oq_water_supply_temp_selected_last_valid_ms) = now_ms;
+        id(oq_water_supply_temp_selected_hold_active) = false;
+        return selected_c;
+      }
+
+      id(oq_water_supply_temp_selected_hold_active) = false;
+      if (hold_enabled &&
+          hold_ms > 0 &&
+          id(oq_water_supply_temp_selected_last_valid_ms) > 0 &&
+          (uint32_t)(now_ms - id(oq_water_supply_temp_selected_last_valid_ms)) < hold_ms &&
+          !isnan(id(oq_water_supply_temp_selected_last_valid_c))) {
+        id(oq_water_supply_temp_selected_hold_active) = true;
+        return id(oq_water_supply_temp_selected_last_valid_c);
+      }
+
+      return NAN;
+    web_server:
+      sorting_group_id: oq_temperatures
+
+  - platform: template
+    id: flow_rate_selected
+    name: "Flow average (Selected)"
+    icon: mdi:waves
+    unit_of_measurement: "L/h"
+    device_class: volume_flow_rate
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 5s
+    lambda: |-
+      if (!id(flow_source).has_state()) return NAN;
+      const auto source = id(flow_source).current_option();
+      if (source == "CIC") {
+        if (id(flow_rate_cic).has_state()) return id(flow_rate_cic).state;
+        return NAN;
+      }
+      if (source == "Outdoor unit") {
+        #if OQ_TOPOLOGY_DUO
+        // Duo-only local flow selector:
+        // - HP1/HP2 = direct individual flowmeter
+        // - Local aggregate HP1/HP2 = existing combined local flow signal
+        //   (normally average, but with mismatch guard inside flow_rate_hp_avg)
+        // This keeps the main flow source selector compact while still allowing
+        // per-flowmeter inspection and explicit selection for local Duo flow.
+        const auto local_mode = id(oq_duo_outdoor_flow_mode).current_option();
+        if (local_mode == "Flowmeter HP1") {
+          if (id(hp1_flow).has_state()) return id(hp1_flow).state;
+          return NAN;
+        }
+        if (local_mode == "Flowmeter HP2") {
+          if (id(${flow_secondary_flow_sensor_id}).has_state()) return id(${flow_secondary_flow_sensor_id}).state;
+          return NAN;
+        }
+        #endif
+        if (id(flow_rate_hp_avg).has_state()) return id(flow_rate_hp_avg).state;
+        return NAN;
+      }
+      return NAN;
+    web_server:
+      sorting_group_id: oq_hydraulics
+
+  - platform: template
+    id: outside_temp_selected
+    name: "Outside Temperature (Selected)"
+    icon: mdi:thermometer
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 10s
+    lambda: |-
+      // Auto uses the lowest currently valid outside temperature source.
+      if (!id(outside_temp_source).has_state()) return NAN;
+      const auto source = id(outside_temp_source).current_option();
+      const uint32_t now_ms = (uint32_t) millis();
+      const uint32_t hold_ms = (uint32_t)(${oq_selected_input_stale_hold_s}UL * 1000UL);
+      const bool hp_valid = id(outside_temp_hp_avg).has_state() && !isnan(id(outside_temp_hp_avg).state);
+      const bool ha_valid = id(outside_temp_ha).has_state() && !isnan(id(outside_temp_ha).state);
+      const bool hold_enabled = source == "HA input";
+
+      float selected_c = NAN;
+      if (source == "Auto" || source == "Lowest valid") {
+        if (ha_valid && hp_valid) {
+          selected_c = std::min(id(outside_temp_ha).state, id(outside_temp_hp_avg).state);
+        } else if (ha_valid) {
+          selected_c = id(outside_temp_ha).state;
+        } else if (hp_valid) {
+          selected_c = id(outside_temp_hp_avg).state;
+        }
+      }
+      if (source == "HA input") {
+        if (ha_valid) selected_c = id(outside_temp_ha).state;
+      }
+      if (source == "Outdoor unit") {
+        if (hp_valid) selected_c = id(outside_temp_hp_avg).state;
+      }
+
+      const bool selected_valid = !isnan(selected_c);
+      if (selected_valid) {
+        id(oq_outside_temp_selected_last_valid_c) = selected_c;
+        id(oq_outside_temp_selected_last_valid_ms) = now_ms;
+        id(oq_outside_temp_selected_hold_active) = false;
+        return selected_c;
+      }
+
+      id(oq_outside_temp_selected_hold_active) = false;
+      if (hold_enabled &&
+          hold_ms > 0 &&
+          id(oq_outside_temp_selected_last_valid_ms) > 0 &&
+          (uint32_t)(now_ms - id(oq_outside_temp_selected_last_valid_ms)) < hold_ms &&
+          !isnan(id(oq_outside_temp_selected_last_valid_c))) {
+        id(oq_outside_temp_selected_hold_active) = true;
+        return id(oq_outside_temp_selected_last_valid_c);
+      }
+
+      return NAN;
+    web_server:
+      sorting_group_id: oq_temperatures
+
+  - platform: template
+    id: room_temp_selected
+    name: "Room Temperature (Selected)"
+    icon: mdi:home-thermometer
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 10s
+    lambda: |-
+      // Hold the selected HA room temperature briefly through HA reload gaps.
+      if (!id(room_temp_source).has_state()) return NAN;
+      const auto source = id(room_temp_source).current_option();
+      const bool hold_enabled = source == "HA input";
+      const uint32_t hold_ms = (uint32_t)(${oq_selected_input_stale_hold_s}UL * 1000UL);
+      const uint32_t now_ms = (uint32_t) millis();
+
+      float selected_c = NAN;
+      if (source == "HA input") {
+        if (id(thermostat_room_temp_ha).has_state()) selected_c = id(thermostat_room_temp_ha).state;
+      }
+      if (source == "OT thermostat") {
+        if (id(ot_thermostat_room_temp).has_state()) selected_c = id(ot_thermostat_room_temp).state;
+      }
+      if (source == "CIC") {
+        if (id(cic_room_temp).has_state()) selected_c = id(cic_room_temp).state;
+      }
+
+      const bool selected_valid = !isnan(selected_c);
+      if (selected_valid) {
+        id(oq_room_temp_selected_last_valid_c) = selected_c;
+        id(oq_room_temp_selected_last_valid_ms) = now_ms;
+        id(oq_room_temp_selected_hold_active) = false;
+        return selected_c;
+      }
+
+      id(oq_room_temp_selected_hold_active) = false;
+      if (hold_enabled &&
+          hold_ms > 0 &&
+          id(oq_room_temp_selected_last_valid_ms) > 0 &&
+          (uint32_t)(now_ms - id(oq_room_temp_selected_last_valid_ms)) < hold_ms &&
+          !isnan(id(oq_room_temp_selected_last_valid_c))) {
+        id(oq_room_temp_selected_hold_active) = true;
+        return id(oq_room_temp_selected_last_valid_c);
+      }
+
+      return NAN;
+    web_server:
+      sorting_group_id: oq_temperatures
+
+  - platform: template
+    id: room_setpoint_selected
+    name: "Room Setpoint (Selected)"
+    icon: mdi:thermostat
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 10s
+    lambda: |-
+      // Hold the selected HA room setpoint briefly through HA reload gaps.
+      if (!id(room_setpoint_source).has_state()) return NAN;
+      const auto source = id(room_setpoint_source).current_option();
+      const bool hold_enabled = source == "HA input";
+      const uint32_t hold_ms = (uint32_t)(${oq_selected_input_stale_hold_s}UL * 1000UL);
+      const uint32_t now_ms = (uint32_t) millis();
+
+      float selected_c = NAN;
+      if (source == "HA input") {
+        if (id(thermostat_setpoint_ha).has_state()) selected_c = id(thermostat_setpoint_ha).state;
+      }
+      if (source == "OT thermostat") {
+        if (id(ot_thermostat_room_setpoint).has_state()) selected_c = id(ot_thermostat_room_setpoint).state;
+      }
+      if (source == "CIC") {
+        if (id(cic_room_setpoint).has_state()) selected_c = id(cic_room_setpoint).state;
+      }
+
+      const bool selected_valid = !isnan(selected_c);
+      if (selected_valid) {
+        id(oq_room_setpoint_selected_last_valid_c) = selected_c;
+        id(oq_room_setpoint_selected_last_valid_ms) = now_ms;
+        id(oq_room_setpoint_selected_hold_active) = false;
+        return selected_c;
+      }
+
+      id(oq_room_setpoint_selected_hold_active) = false;
+      if (hold_enabled &&
+          hold_ms > 0 &&
+          id(oq_room_setpoint_selected_last_valid_ms) > 0 &&
+          (uint32_t)(now_ms - id(oq_room_setpoint_selected_last_valid_ms)) < hold_ms &&
+          !isnan(id(oq_room_setpoint_selected_last_valid_c))) {
+        id(oq_room_setpoint_selected_hold_active) = true;
+        return id(oq_room_setpoint_selected_last_valid_c);
+      }
+
+      return NAN;
+    web_server:
+      sorting_group_id: oq_temperatures

@@ -15,7 +15,7 @@
 # 11) Local sensors
 # 12) Source selection and merged selected-source signals
 # 13) OpenTherm thermostat bridge
-# 14) Setup/status
+# 14) Setup/status compatibility
 # 15) Web UI
 # 16) Per-HP hardware adapters
 # ==============================================================================
@@ -135,14 +135,32 @@ oq_sensor_sources: !include
     sensor_sources_duo_flow_internal: "${sensor_sources_duo_flow_internal}"
     flow_secondary_flow_sensor_id: "${secondary_hp_id}_flow"
     secondary_working_mode_id: "${secondary_hp_id}_working_mode"
-oq_ot_slave: !include
-  file: oq_ot_slave.yaml
-  vars:
-    ot_secondary_present: "${ot_secondary_present}"
-    ot_secondary_last_applied_level_id: "${secondary_hp_id}_last_applied_level"
-    ot_secondary_working_mode_id: "${secondary_hp_id}_working_mode"
-    ot_secondary_fault_binary_sensor_id: "${secondary_hp_id}_ot_fault_active"
+# v0.40: OpenTherm slave bridge verwijderd — niet in gebruik.
+# Bestand oq_ot_slave.yaml en components/openquatt_ot_slave/ blijven
+# behouden voor eventuele rollback. Om OT weer in te schakelen:
+# uncomment onderstaande include.
+# oq_ot_slave: !include
+#   file: oq_ot_slave.yaml
+#   vars:
+#     ot_secondary_present: "${ot_secondary_present}"
+#     ot_secondary_last_applied_level_id: "${secondary_hp_id}_last_applied_level"
+#     ot_secondary_working_mode_id: "${secondary_hp_id}_working_mode"
+#     ot_secondary_fault_binary_sensor_id: "${secondary_hp_id}_ot_fault_active"
+# Sensor calibratie — moet vóór oq_HP_io (heatpump1/heatpump2) geladen worden
+# zodat de offset-globals beschikbaar zijn voor de lambda-filters in HP_io.
 oq_setup_status: !include oq_setup_status.yaml
+oq_sensor_calibration: !include oq_sensor_calibration.yaml
+oq_pressure_protection: !include oq_pressure_protection.yaml
+oq_supply_temp_protection: !include oq_supply_temp_protection.yaml
+oq_smart_diagnostics: !include
+  file: oq_smart_diagnostics.yaml
+  vars:
+    smart_secondary_minutes_id: "${secondary_hp_id}_minutes"
+    smart_secondary_last_applied_level_id: "${secondary_hp_id}_last_applied_level"
+    smart_secondary_last_start_ms_id: "${secondary_hp_id}_last_start_ms"
+    smart_secondary_last_stop_ms_id: "${secondary_hp_id}_last_stop_ms"
+    smart_secondary_4_way_valve_id: "${secondary_hp_id}_4_way_valve"
+    smart_secondary_working_mode_id: "${secondary_hp_id}_working_mode"
 oq_webserver: !include oq_webserver.yaml
 heatpump1: !include
   file: oq_HP_io.yaml

@@ -1,0 +1,34 @@
+# ==============================================================================
+# OpenQuatt - Hardware Profile: LilyGO T-Connect (ESP32-S3)
+# ==============================================================================
+# Revision management:
+# - Bump `profile_revision` whenever pin mapping or board settings change.
+# - Append an entry to `profile_revision_log`.
+substitutions:
+  profile_revision: "v1.0.0"
+  profile_revision_date: "2026-03-27"
+  esp_board: "esp32-s3-devkitc-1"                       # ESP32-S3 board definition.
+  esp_flash_size: "16MB"                                # T-Connect has 16 MB flash.
+  esp_variant: "esp32s3"                                # ESP32 variant.
+  ds18b20_pin: "GPIO42"                                  # DS18B20 1-Wire pin (required by oq_local_sensors package).
+  uart_tx_pin: "GPIO4"                                  # T-Connect RS485 TX_1.
+  uart_rx_pin: "GPIO5"                                  # T-Connect RS485 RX_1.
+  uart_rts_pin: "GPIO21"                                # RS485 DE/RE control pin (adjust if wired differently).
+  dhw_rs4853_tx_pin: "GPIO17"                           # RS485 #3 TX for external DHW Modbus sensor-node (official LilyGO pinout).
+  dhw_rs4853_rx_pin: "GPIO18"                           # RS485 #3 RX for external DHW Modbus sensor-node (official LilyGO pinout).
+  dhw_rs4853_rts_pin: "GPIO39"                          # Unused for T-Connect TD501 RS485 (auto-direction transceiver).
+  oq_ot_thermostat_in_pin: "GPIO14"                     # OpenTherm thermostat input placeholder.
+  oq_ot_thermostat_out_pin: "GPIO12"                    # OpenTherm thermostat output placeholder (moved off GPIO13; GPIO13 used for DHW aux sense).
+  oq_boiler_relay_pin: "GPIO48"                         # Boiler relay output placeholder.
+  oq_dhw_valve_relay_pin: "GPIO40"                      # Dedicated DHW 3-way valve relay output (kept separate from RS485 RTS GPIO21).
+  oq_dhw_valve_aux_drive_pin: "GPIO11"                  # DHW valve aux contact drive GPIO (held HIGH).
+  oq_dhw_valve_aux_sense_pin: "GPIO13"                  # DHW valve aux contact sense GPIO (reads HIGH when contact closes to drive).
+  max31865_spi_sck_pin: "GPIO41"                        # Shared SPI SCK for dual MAX31865.
+  max31865_spi_mosi_pin: "GPIO39"                        # Shared SPI MOSI (SDI) for dual MAX31865.
+  max31865_spi_miso_pin: "GPIO38"                       # Shared SPI MISO (SDO) for dual MAX31865.
+  max31865_1_cs_pin: "GPIO47"                           # MAX31865 #1 chip-select.
+  max31865_2_cs_pin: "GPIO2"                           # MAX31865 #2 chip-select.
+# profile_revision_log:
+#   - v1.0.0 (2026-03-27): Initial LilyGO T-Connect profile (UART TX/RX mapped to GPIO4/GPIO5).
+
+

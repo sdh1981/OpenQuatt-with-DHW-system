@@ -18,9 +18,6 @@ web_server:
   js_include: openquatt/web/js/openquatt-app.js
   js_url: ""
   sorting_groups:
-    - id: oq_setup
-      name: "Quick Start"
-      sorting_weight: 2
     - id: oq_overview
       name: "Overview"
       sorting_weight: 5
@@ -42,9 +39,7 @@ web_server:
     - id: oq_sensor_selection
       name: "Sensor Selection"
       sorting_weight: 40
-    - id: oq_opentherm
-      name: "OpenTherm"
-      sorting_weight: 45
+    # v0.40: oq_opentherm sorting group verwijderd (OT package weggehaald)
     - id: oq_boiler
       name: "Boiler"
       sorting_weight: 50
@@ -75,6 +70,15 @@ web_server:
     - id: oq_advanced_hp_levels
       name: "Advanced - HP Levels"
       sorting_weight: 110
+    - id: oq_pressure_protection
+      name: "Pressure Protection"
+      sorting_weight: 175
+    - id: oq_supply_temp_protection
+      name: "Supply Temp Protection"
+      sorting_weight: 178
+    - id: oq_service_cal
+      name: "Service - Sensor Calibration"
+      sorting_weight: 160
     - id: oq_system_diagnostics
       name: "System Diagnostics"
       sorting_weight: 180

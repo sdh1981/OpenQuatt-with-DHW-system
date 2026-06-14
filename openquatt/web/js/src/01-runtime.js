@@ -151,7 +151,7 @@
   }
 
   function getDefaultAppView() {
-    return state.complete ? "overview" : QUICK_START_VIEW;
+    return "overview";
   }
 
   function hasLoadedEntities() {
@@ -165,6 +165,17 @@
     }
     state.motionStartedAt = 0;
     clearLegacyMotionVariables();
+  }
+
+  function shouldAnimateMotion() {
+    return Boolean(
+      state.mounted
+      && !state.nativeOpen
+      && !state.loadingEntities
+      && hasLoadedEntities()
+      && state.appView === "overview"
+      && state.hpVisualMode === "schematic",
+    );
   }
 
   function startEntityPolling() {
@@ -192,7 +203,11 @@
       return;
     }
 
-    startMotionLoop();
+    if (shouldAnimateMotion()) {
+      startMotionLoop();
+    } else {
+      stopMotionLoop();
+    }
     startEntityPolling();
 
     if (options.refresh === false) {
@@ -206,7 +221,7 @@
   }
 
   function normalizeAppView(view) {
-    return APP_VIEW_IDS.has(view) ? view : "";
+    return view === QUICK_START_VIEW ? "overview" : APP_VIEW_IDS.has(view) ? view : "";
   }
 
   function getUrlAppView() {
@@ -496,6 +511,10 @@
   }
 
   function tickMotion(now) {
+    if (!shouldAnimateMotion()) {
+      stopMotionLoop();
+      return;
+    }
     syncMotionVariables(now);
     state.motionFrame = window.requestAnimationFrame(tickMotion);
   }
@@ -515,4 +534,3 @@
     const path = window.location.pathname.replace(/\/$/, "");
     return path === "" ? "" : path;
   }
-

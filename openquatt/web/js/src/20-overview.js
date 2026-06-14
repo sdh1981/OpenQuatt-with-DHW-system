@@ -697,6 +697,97 @@
     });
   }
 
+  function getOverviewAdvisorModel() {
+    const recommendations = [];
+    const flow = getEntityNumericValue("flowSelected");
+    const supply = getEntityNumericValue("supplyTemp");
+    const outside = getEntityNumericValue("outsideTempSelected");
+    const maxWater = getEntityNumericValue("maxWater");
+    const capacity = getEntityNumericValue("hpCapacity");
+    const requestedPower = getEntityNumericValue("strategyRequestedPower");
+    const curveTarget = getEntityNumericValue("curveSupplyTarget");
+    const coolingActive = isCoolingOverviewActive();
+    const controlMode = getEntityStateText("controlModeLabel", "Onbekend");
+
+    if (!coolingActive && !Number.isNaN(flow) && flow < 12) {
+      recommendations.push({
+        tone: "warn",
+        title: "Flow is laag voor stabiele afgifte",
+        detail: "Controleer flow-regeling of ontluchting. Een iets hogere flow helpt vaak tegen pendelen.",
+      });
+    }
+
+    if (!coolingActive && !Number.isNaN(maxWater) && !Number.isNaN(outside) && outside > 10 && maxWater >= 50) {
+      recommendations.push({
+        tone: "tip",
+        title: "Maximale watertemperatuur lijkt hoog",
+        detail: "Bij zachte buitentemperaturen kan een lagere max-waterlimiet meestal zuiniger draaien zonder comfortverlies.",
+      });
+    }
+
+    if (!coolingActive && !Number.isNaN(supply) && !Number.isNaN(curveTarget) && (supply - curveTarget) > 3.0) {
+      recommendations.push({
+        tone: "note",
+        title: "Aanvoer ligt boven de stooklijn",
+        detail: "De installatie levert warmer water dan gevraagd. Overweeg een rustiger responsprofiel of lagere limieten.",
+      });
+    }
+
+    if (!coolingActive && !Number.isNaN(requestedPower) && !Number.isNaN(capacity) && requestedPower > capacity + 500) {
+      recommendations.push({
+        tone: "warn",
+        title: "Warmtevraag boven actuele capaciteit",
+        detail: "Verlaag tijdelijk vraagpieken (setpointstappen) of laat de regeling rustiger opschakelen.",
+      });
+    }
+
+    if (coolingActive && !Number.isNaN(supply) && supply < 17) {
+      recommendations.push({
+        tone: "warn",
+        title: "Lage aanvoer tijdens koelen",
+        detail: "Controleer dauwpuntveiligheid en condensrisico, vooral in vochtige ruimtes.",
+      });
+    }
+
+    return {
+      title: "Slimme assistent",
+      copy: `Live aanbevelingen op basis van de huidige regeling (${controlMode}).`,
+      recommendations,
+    };
+  }
+
+  function renderOverviewAdvisorItems(items) {
+    if (!items.length) {
+      return `
+        <article class="oq-overview-advisor-item oq-overview-advisor-item--ok">
+          <strong>Geen directe aandachtspunten</strong>
+          <p>De belangrijkste signalen lijken op dit moment stabiel.</p>
+        </article>
+      `;
+    }
+    return items.map((item) => `
+      <article class="oq-overview-advisor-item oq-overview-advisor-item--${escapeHtml(item.tone)}">
+        <strong>${escapeHtml(item.title)}</strong>
+        <p>${escapeHtml(item.detail)}</p>
+      </article>
+    `).join("");
+  }
+
+  function renderOverviewAdvisorPanel() {
+    const model = getOverviewAdvisorModel();
+    return renderOverviewShell({
+      className: "oq-overview-advisor",
+      title: model.title,
+      copy: model.copy,
+      signature: getRenderSignature(model),
+      body: `
+        <div class="oq-overview-advisor-list">
+          ${renderOverviewAdvisorItems(model.recommendations)}
+        </div>
+      `,
+    });
+  }
+
   function getOverviewDhwModel() {
     const hasAnyDhw =
       hasEntity("dhwTankTop")

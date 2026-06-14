@@ -1,7 +1,6 @@
-/* Generated bundle: js/openquatt-app.js */
-/* Source files are in ./js/src and ./css/src. */
-/* Rebuild with: node openquatt/web/build-assets.mjs */
-/* --- js/src/00-config.js --- */
+﻿/* Generated bundle */
+
+/* --- js\src\00-config.js --- */
 (function () {
   const LOGO_MARKUP = `
     <img class="oq-helper-logo-mark" src="data:image/svg+xml;utf8,%3Csvg%20width=%22100%%22%20height=%22100%%22%20viewBox=%220%200%202680%20900%22%20version=%221.1%22%20xmlns=%22http://www.w3.org/2000/svg%22%20xmlns:xlink=%22http://www.w3.org/1999/xlink%22%20xml:space=%22preserve%22%20xmlns:serif=%22http://www.serif.com/%22%20style=%22fill-rule:evenodd;clip-rule:evenodd;stroke-linejoin:round;stroke-miterlimit:2;%22%3E%3Cg%3E%3Cpath%20d=%22M342.5,34.5C344.898,44.776%20347.898,54.776%20351.5,64.5C354.159,71.474%20356.826,78.474%20359.5,85.5C359.824,90.461%20361.491,94.794%20364.5,98.5C379.589,136.242%20397.089,172.909%20417,208.5C436.208,241.032%20456.208,273.032%20477,304.5C500.391,338.227%20523.391,372.227%20546,406.5C559.012,426.857%20570.179,448.19%20579.5,470.5C579.552,473.346%20580.552,475.68%20582.5,477.5C595.926,506.54%20603.426,537.207%20605,569.5C605.662,585.845%20605.495,602.178%20604.5,618.5C603.275,623.29%20602.608,628.29%20602.5,633.5C600.882,636.171%20600.215,639.171%20600.5,642.5C599.833,646.167%20599.167,649.833%20598.5,653.5C596.926,655.102%20596.259,657.102%20596.5,659.5L596.5,661.5C593.88,665.343%20592.213,669.676%20591.5,674.5C584.483,692.2%20576.15,709.2%20566.5,725.5C563.395,728.275%20561.062,731.608%20559.5,735.5C513.747,794.207%20454.081,828.873%20380.5,839.5C368.667,840.272%20357,841.272%20345.5,842.5C334.495,842.667%20323.495,842.5%20312.5,842C310.618,841.802%20308.952,841.302%20307.5,840.5C301.395,839.004%20295.062,838.337%20288.5,838.5L286.5,838.5C281.471,836.585%20276.137,835.585%20270.5,835.5C194.819,821.23%20137.319,780.897%2098,714.5C69.088,658.348%2060.088,599.014%2071,536.5C76.214,507.193%2085.214,479.193%2098,452.5C107.992,433.175%20118.992,414.508%20131,396.5C175.835,332.164%20219.168,266.83%20261,200.5C275.501,173.5%20289.501,146.167%20303,118.5C309.515,102.108%20316.182,85.775%20323,69.5C327.419,58.182%20331.086,46.516%20334,34.5C335.413,31.339%20337.08,28.339%20339,25.5C340.664,28.327%20341.83,31.327%20342.5,34.5Z%22%20style=%22fill:rgb(32,75,150);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M342.5,34.5C346.685,44.061%20349.685,54.061%20351.5,64.5C347.898,54.776%20344.898,44.776%20342.5,34.5Z%22%20style=%22fill:rgb(99,134,185);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M359.5,85.5C361.734,89.522%20363.401,93.856%20364.5,98.5C361.491,94.794%20359.824,90.461%20359.5,85.5Z%22%20style=%22fill:rgb(100,134,185);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M342.5,119.5C347.662,132.661%20352.329,145.995%20356.5,159.5C357.009,164.703%20358.676,169.37%20361.5,173.5L361.5,174.5C361.41,177.152%20362.076,179.485%20363.5,181.5C364.363,183.421%20365.029,185.421%20365.5,187.5C365.41,190.152%20366.076,192.485%20367.5,194.5C367.41,197.152%20368.076,199.485%20369.5,201.5C369.41,204.152%20370.076,206.485%20371.5,208.5C371.41,211.152%20372.076,213.485%20373.5,215.5C379.477,236.72%20383.811,258.387%20386.5,280.5C387.735,296.849%20389.235,313.182%20391,329.5C391.5,341.829%20391.667,354.162%20391.5,366.5L391.5,369.5C390.732,370.263%20390.232,371.263%20390,372.5C388.668,382.49%20387.501,392.49%20386.5,402.5C385.663,406.834%20385.163,411.168%20385,415.5C402.511,389.134%20412.345,360.134%20414.5,328.5C415.166,323.177%20415.499,317.677%20415.5,312C415.693,303.94%20415.027,296.107%20413.5,288.5C413.34,286.801%20413.506,285.134%20414,283.5C418.525,288.553%20422.025,294.219%20424.5,300.5C424.427,302.027%20425.094,303.027%20426.5,303.5C432.367,315.778%20438.033,328.112%20443.5,340.5C443.166,343.491%20444.166,345.824%20446.5,347.5C449.602,353.802%20451.936,360.469%20453.5,367.5C453.41,370.152%20454.076,372.485%20455.5,374.5C455.41,377.152%20456.076,379.485%20457.5,381.5C459.678,387.876%20461.011,394.543%20461.5,401.5C461.255,407.084%20461.922,412.417%20463.5,417.5C465.104,484.211%20437.437,534.878%20380.5,569.5C379.571,568.311%20379.238,566.978%20379.5,565.5C381.04,560.935%20381.707,556.102%20381.5,551C381.508,542.57%20380.508,534.403%20378.5,526.5C378.706,523.505%20378.04,520.838%20376.5,518.5C371.327,497.821%20362.16,479.154%20349,462.5C325.105,504.625%20306.438,548.958%20293,595.5C292,597.167%20291,598.833%20290,600.5C269.264,608.391%20247.764,613.558%20225.5,616C215.198,617.285%20204.865,618.118%20194.5,618.5C182.23,579.401%20181.397,540.068%20192,500.5C196.291,486.916%20201.958,473.916%20209,461.5C239.193,415.133%20266.86,367.133%20292,317.5C311.021,276.267%20324.521,233.267%20332.5,188.5C336.747,171.892%20339.08,154.892%20339.5,137.5C340.829,131.548%20341.829,125.548%20342.5,119.5Z%22%20style=%22fill:rgb(235,136,50);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M342.5,119.5C341.829,125.548%20340.829,131.548%20339.5,137.5C339.441,131.089%20340.108,124.756%20341.5,118.5C342.107,118.624%20342.44,118.957%20342.5,119.5Z%22%20style=%22fill:rgb(87,92,106);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M356.5,159.5C358.538,163.94%20360.204,168.607%20361.5,173.5C358.676,169.37%20357.009,164.703%20356.5,159.5Z%22%20style=%22fill:rgb(165,115,65);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M361.5,174.5C362.924,176.515%20363.59,178.848%20363.5,181.5C362.076,179.485%20361.41,177.152%20361.5,174.5Z%22%20style=%22fill:rgb(159,113,68);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M339.5,137.5C339.08,154.892%20336.747,171.892%20332.5,188.5C335.259,171.415%20337.592,154.415%20339.5,137.5Z%22%20style=%22fill:rgb(68,88,119);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M365.5,187.5C366.924,189.515%20367.59,191.848%20367.5,194.5C366.076,192.485%20365.41,190.152%20365.5,187.5Z%22%20style=%22fill:rgb(160,114,65);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M367.5,194.5C368.924,196.515%20369.59,198.848%20369.5,201.5C368.076,199.485%20367.41,197.152%20367.5,194.5Z%22%20style=%22fill:rgb(160,114,65);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M369.5,201.5C370.924,203.515%20371.59,205.848%20371.5,208.5C370.076,206.485%20369.41,204.152%20369.5,201.5Z%22%20style=%22fill:rgb(160,114,65);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M371.5,208.5C372.924,210.515%20373.59,212.848%20373.5,215.5C372.076,213.485%20371.41,211.152%20371.5,208.5Z%22%20style=%22fill:rgb(159,114,65);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M386.5,280.5C388.455,294.676%20390.288,309.009%20392,323.5C392.827,338.006%20392.661,352.339%20391.5,366.5C391.667,354.162%20391.5,341.829%20391,329.5C389.235,313.182%20387.735,296.849%20386.5,280.5Z%22%20style=%22fill:rgb(152,112,72);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M424.5,300.5C425.906,300.973%20426.573,301.973%20426.5,303.5C425.094,303.027%20424.427,302.027%20424.5,300.5Z%22%20style=%22fill:rgb(116,102,87);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M413.5,288.5C415.027,296.107%20415.693,303.94%20415.5,312C415.499,317.677%20415.166,323.177%20414.5,328.5C414.611,315.152%20414.277,301.819%20413.5,288.5Z%22%20style=%22fill:rgb(72,90,115);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M443.5,340.5C445.065,342.509%20446.065,344.843%20446.5,347.5C444.166,345.824%20443.166,343.491%20443.5,340.5Z%22%20style=%22fill:rgb(163,113,68);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M453.5,367.5C454.924,369.515%20455.59,371.848%20455.5,374.5C454.076,372.485%20453.41,370.152%20453.5,367.5Z%22%20style=%22fill:rgb(154,111,70);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M455.5,374.5C456.924,376.515%20457.59,378.848%20457.5,381.5C456.076,379.485%20455.41,377.152%20455.5,374.5Z%22%20style=%22fill:rgb(146,110,71);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M391.5,369.5C390.393,380.717%20388.726,391.717%20386.5,402.5C387.501,392.49%20388.668,382.49%20390,372.5C390.232,371.263%20390.732,370.263%20391.5,369.5Z%22%20style=%22fill:rgb(172,117,60);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M461.5,401.5C462.957,406.598%20463.624,411.931%20463.5,417.5C461.922,412.417%20461.255,407.084%20461.5,401.5Z%22%20style=%22fill:rgb(162,115,62);%22/%3E%3C/g%3E%3Cpath%20d=%22M770.5,570.5C770.624,558.467%20771.291,546.467%20772.5,534.5C784.157,497.354%20809.157,474.521%20847.5,466C880.205,459.456%20912.205,461.789%20943.5,473C982.389,491.928%201000.22,523.095%20997,566.5C993.473,609.041%20971.306,636.875%20930.5,650C898.056,657.651%20865.723,657.318%20833.5,649C795.64,636.312%20774.64,610.145%20770.5,570.5ZM871.5,499.5C850.829,501.845%20834.829,511.845%20823.5,529.5C817.349,545.355%20815.849,561.688%20819,578.5C827.176,602.001%20843.676,615.168%20868.5,618C880.872,618.843%20893.205,618.51%20905.5,617C916.036,614.068%20925.369,609.068%20933.5,602C947.743,586.159%20952.91,567.659%20949,546.5C945.933,530.572%20937.766,518.072%20924.5,509C907.738,501.231%20890.071,498.065%20871.5,499.5Z%22%20style=%22fill:rgb(58,137,243);%22/%3E%3Cg%3E%3Cpath%20d=%22M1730.5,462.5C1767.07,457.724%201800.07,466.224%201829.5,488C1854.6,510.952%201864.43,539.452%201859,573.5C1855.37,592.26%201846.87,608.426%201833.5,622C1843.36,630.945%201854.02,638.945%201865.5,646C1865.96,646.414%201866.29,646.914%201866.5,647.5C1855.27,655.867%201843.1,662.534%201830,667.5L1826.5,667C1817.17,658.83%201807.17,651.663%201796.5,645.5C1764.49,656.072%201732.16,657.239%201699.5,649C1657.04,634.356%201635.04,604.522%201633.5,559.5C1634.57,513.946%201656.57,483.78%201699.5,469C1709.73,465.721%201720.07,463.554%201730.5,462.5ZM1736.5,500.5C1734.03,501.317%201731.36,501.817%201728.5,502C1708.29,506.676%201694.12,518.51%201686,537.5C1677.76,564.709%201683.92,587.875%201704.5,607C1724.13,618.699%201744.8,620.699%201766.5,613C1766.96,612.586%201767.29,612.086%201767.5,611.5C1760.83,603.167%201754.17,594.833%201747.5,586.5C1757.11,584.807%201766.77,584.307%201776.5,585C1783.19,586.517%201788.86,589.85%201793.5,595C1794.83,595.667%201796.17,595.667%201797.5,595C1803.01,589.155%201806.84,582.321%201809,574.5C1816.34,548.188%201809.18,527.022%201787.5,511C1771.64,502.386%201754.64,498.886%201736.5,500.5Z%22%20style=%22fill:rgb(237,137,51);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M1567.5,469.5L1567.5,468.5L1613.5,468.5C1613.82,475.354%201613.49,482.021%201612.5,488.5L1612.5,469.5L1567.5,469.5Z%22%20style=%22fill:rgb(150,197,244);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M2250.5,648.5C2246.6,635.923%202241.93,623.589%202236.5,611.5L2148.5,611.5C2143.4,624.387%202138.06,637.221%202132.5,650C2115.84,650.5%202099.17,650.667%202082.5,650.5C2084.36,644.426%202086.52,638.426%202089,632.5C2113.11,579.272%202137.11,525.605%202161,471.5C2161.83,470.667%202162.67,469.833%202163.5,469C2181.5,468.333%202199.5,468.333%202217.5,469C2219.43,469.251%202221.27,469.751%202223,470.5C2249.4,530.543%202275.9,590.543%202302.5,650.5C2284.93,651.131%202267.6,650.464%202250.5,648.5ZM2191.5,506.5C2184.26,525.657%202176.43,544.657%202168,563.5C2166.19,568.435%202164.69,573.435%202163.5,578.5C2183.18,578.833%202202.84,578.5%202222.5,577.5C2212.84,555.691%202203.68,533.691%202195,511.5C2194.1,509.569%202192.93,507.903%202191.5,506.5Z%22%20style=%22fill:rgb(237,138,51);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M2485.5,469.5L2485.5,468.5L2665.5,468.5L2665.5,505.5L2597.5,505.5C2619.66,504.503%202641.99,504.169%202664.5,504.5L2664.5,469.5L2485.5,469.5Z%22%20style=%22fill:rgb(238,166,89);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M1140.5,469.5C1189.37,473.874%201212.21,500.541%201209,549.5C1203.39,574.448%201188.55,591.281%201164.5,600C1154.02,602.877%201143.36,604.544%201132.5,605C1111.84,605.5%201091.17,605.667%201070.5,605.5C1069.5,620.324%201069.17,635.324%201069.5,650.5L1026.5,650.5L1026.5,469.5L1140.5,469.5ZM1070.5,568.5C1088,569.662%201105.66,569.829%201123.5,569C1126.04,568.814%201128.37,568.314%201130.5,567.5C1143.25,567.715%201152.75,562.381%201159,551.5C1167.31,525.808%201158.15,510.641%201131.5,506C1111.17,505.5%201090.84,505.333%201070.5,505.5L1070.5,568.5Z%22%20style=%22fill:rgb(57,137,243);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M1280.5,592.5C1279.51,599.648%201279.18,606.981%201279.5,614.5L1391.5,614.5L1391.5,650.5C1339.62,651.155%201287.95,650.489%201236.5,648.5C1235.4,593.506%201235.24,538.506%201236,483.5C1236.17,478.798%201236.67,474.132%201237.5,469.5C1288.46,468.505%201339.46,468.171%201390.5,468.5L1390.5,505.5L1279.5,505.5L1279.5,543.5L1381.5,543.5L1381.5,577.5L1280.5,577.5L1280.5,592.5Z%22%20style=%22fill:rgb(59,138,243);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M1565.5,588.5C1565.78,589.289%201566.28,589.956%201567,590.5C1567.5,550.168%201567.67,509.835%201567.5,469.5L1612.5,469.5L1612.5,511.5C1611.5,557.664%201611.17,603.997%201611.5,650.5L1562.5,650.5C1557.11,644.758%201551.95,638.758%201547,632.5C1520.72,597.881%201494.05,563.547%201467,529.5C1466.5,569.832%201466.33,610.165%201466.5,650.5L1423.5,650.5C1423.74,649.209%201423.4,648.209%201422.5,647.5L1422.5,468.5C1438.86,468.217%201455.19,468.717%201471.5,470C1503.05,509.375%201534.38,548.875%201565.5,588.5Z%22%20style=%22fill:rgb(56,137,243);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M1567.5,468.5L1567.5,469.5C1567.67,509.835%201567.5,550.168%201567,590.5C1566.28,589.956%201565.78,589.289%201565.5,588.5C1566.17,548.5%201566.83,508.5%201567.5,468.5Z%22%20style=%22fill:rgb(207,231,249);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M1930.5,469.5C1931.33,507.331%201931.83,545.331%201932,583.5C1935.1,602.599%201946.27,613.766%201965.5,617C1976.97,618.124%201988.3,617.457%201999.5,615C2016.51,607.805%202025.18,594.972%202025.5,576.5C2026.5,541.004%202026.83,505.337%202026.5,469.5L2072.5,469.5L2072.5,585.5C2065.58,626.254%202041.58,649.087%202000.5,654C1983.83,654.667%201967.17,654.667%201950.5,654C1911.32,647.657%201889.32,624.823%201884.5,585.5L1884.5,469.5L1930.5,469.5Z%22%20style=%22fill:rgb(237,137,51);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M2072.5,585.5L2072.5,469.5L2026.5,469.5C2026.83,505.337%202026.5,541.004%202025.5,576.5L2025.5,468.5L2073.5,468.5C2073.83,507.67%202073.5,546.67%202072.5,585.5Z%22%20style=%22fill:rgb(241,189,131);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M2461.5,468.5C2462.92,469.451%202464.59,469.784%202466.5,469.5L2466.5,504.5C2442.33,504.169%202418.33,504.502%202394.5,505.5L2394.5,650.5L2348.5,650.5L2348.5,642.5C2349.5,596.67%202349.83,550.67%202349.5,504.5L2282.5,504.5L2282.5,469.5C2342.14,468.515%202401.81,468.182%202461.5,468.5Z%22%20style=%22fill:rgb(237,137,50);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M2485.5,469.5L2664.5,469.5L2664.5,504.5C2641.99,504.169%202619.66,504.503%202597.5,505.5L2597.5,650.5L2549.5,650.5L2549.5,505.5C2528.34,504.503%202507.01,504.169%202485.5,504.5L2485.5,469.5Z%22%20style=%22fill:rgb(237,137,50);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M579.5,470.5C581.065,472.509%20582.065,474.843%20582.5,477.5C580.552,475.68%20579.552,473.346%20579.5,470.5Z%22%20style=%22fill:rgb(115,147,192);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M2282.5,469.5L2282.5,504.5L2349.5,504.5C2349.83,550.67%202349.5,596.67%202348.5,642.5L2348.5,505.5L2281.5,505.5C2281.17,493.322%202281.5,481.322%202282.5,469.5Z%22%20style=%22fill:rgb(242,189,128);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M2461.5,468.5L2467.5,468.5L2467.5,505.5L2394.5,505.5C2418.33,504.502%202442.33,504.169%202466.5,504.5L2466.5,469.5C2464.59,469.784%202462.92,469.451%202461.5,468.5Z%22%20style=%22fill:rgb(242,189,130);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M2485.5,468.5L2485.5,504.5C2507.01,504.169%202528.34,504.503%202549.5,505.5L2484.5,505.5C2484.17,492.989%202484.5,480.655%202485.5,468.5Z%22%20style=%22fill:rgb(242,190,132);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M1930.5,469.5L1884.5,469.5L1884.5,585.5C1883.5,546.67%201883.17,507.67%201883.5,468.5C1899.34,468.17%201915.01,468.504%201930.5,469.5Z%22%20style=%22fill:rgb(237,158,73);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M376.5,518.5C378.04,520.838%20378.706,523.505%20378.5,526.5C377.232,524.095%20376.565,521.428%20376.5,518.5Z%22%20style=%22fill:rgb(87,94,104);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M378.5,526.5C380.508,534.403%20381.508,542.57%20381.5,551C381.707,556.102%20381.04,560.935%20379.5,565.5C379.633,552.484%20379.299,539.484%20378.5,526.5Z%22%20style=%22fill:rgb(85,90,113);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M772.5,534.5C771.291,546.467%20770.624,558.467%20770.5,570.5C769.343,562.344%20769.177,554.01%20770,545.5C770.419,541.608%20771.252,537.942%20772.5,534.5Z%22%20style=%22fill:rgb(133,185,245);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M557.5,586.5C558.058,587.79%20559.058,588.623%20560.5,589C522.875,585.446%20485.541,587.446%20448.5,595C434.071,598.718%20419.738,602.718%20405.5,607C370.079,620.14%20334.413,632.473%20298.5,644C273.593,650.707%20248.26,655.04%20222.5,657C190.507,659.068%20160.174,653.068%20131.5,639C123.345,633.67%20115.345,628.17%20107.5,622.5C105.421,616.1%20104.588,609.434%20105,602.5C116.716,610.408%20128.883,617.575%20141.5,624C155.181,628.731%20169.181,631.897%20183.5,633.5C212.901,636.3%20241.901,633.967%20270.5,626.5C281.24,624.319%20291.907,621.819%20302.5,619C334.064,607.256%20366.064,596.923%20398.5,588C425.538,580.804%20453.038,576.971%20481,576.5C507.102,575.435%20532.602,578.768%20557.5,586.5Z%22%20style=%22fill:rgb(129,203,242);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M557.5,586.5C562.457,587.989%20567.457,589.323%20572.5,590.5C564.464,682.071%20518.464,746.571%20434.5,784C365.129,810.657%20296.129,809.991%20227.5,782C160.3,749.489%20120.3,696.322%20107.5,622.5C115.345,628.17%20123.345,633.67%20131.5,639C160.174,653.068%20190.507,659.068%20222.5,657C248.26,655.04%20273.593,650.707%20298.5,644C334.413,632.473%20370.079,620.14%20405.5,607C419.738,602.718%20434.071,598.718%20448.5,595C485.541,587.446%20522.875,585.446%20560.5,589C559.058,588.623%20558.058,587.79%20557.5,586.5Z%22%20style=%22fill:rgb(56,136,242);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M1280.5,592.5L1280.5,613.5L1369.5,613.5L1369.5,614.5L1279.5,614.5C1279.18,606.981%201279.51,599.648%201280.5,592.5Z%22%20style=%22fill:rgb(201,224,248);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M604.5,618.5C604.698,623.75%20604.031,628.75%20602.5,633.5C602.608,628.29%20603.275,623.29%20604.5,618.5Z%22%20style=%22fill:rgb(166,187,215);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M270.5,626.5C241.901,633.967%20212.901,636.3%20183.5,633.5C201.187,633.711%20218.854,633.211%20236.5,632C247.833,630.055%20259.167,628.222%20270.5,626.5Z%22%20style=%22fill:rgb(58,111,176);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M602.5,633.5C602.785,636.829%20602.118,639.829%20600.5,642.5C600.215,639.171%20600.882,636.171%20602.5,633.5Z%22%20style=%22fill:rgb(131,159,199);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M1369.5,614.5L1369.5,613.5L1392.5,613.5L1392.5,651.5L1236.5,651.5L1236.5,648.5C1287.95,650.489%201339.62,651.155%201391.5,650.5L1391.5,614.5L1369.5,614.5Z%22%20style=%22fill:rgb(118,177,243);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M1422.5,647.5C1423.4,648.209%201423.74,649.209%201423.5,650.5L1466.5,650.5C1452.01,651.496%201437.34,651.829%201422.5,651.5L1422.5,647.5Z%22%20style=%22fill:rgb(152,199,248);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M1612.5,511.5L1612.5,651.5C1595.66,651.83%201578.99,651.497%201562.5,650.5L1611.5,650.5C1611.17,603.997%201611.5,557.664%201612.5,511.5Z%22%20style=%22fill:rgb(123,180,244);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M2394.5,505.5L2395.5,505.5L2395.5,651.5C2379.66,651.83%202363.99,651.496%202348.5,650.5L2394.5,650.5L2394.5,505.5Z%22%20style=%22fill:rgb(246,212,172);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M598.5,653.5C598.741,655.898%20598.074,657.898%20596.5,659.5C596.259,657.102%20596.926,655.102%20598.5,653.5Z%22%20style=%22fill:rgb(143,169,203);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M596.5,661.5C595.401,666.144%20593.734,670.478%20591.5,674.5C592.213,669.676%20593.88,665.343%20596.5,661.5Z%22%20style=%22fill:rgb(114,148,193);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M566.5,725.5C564.938,729.392%20562.605,732.725%20559.5,735.5C561.062,731.608%20563.395,728.275%20566.5,725.5Z%22%20style=%22fill:rgb(163,185,212);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M270.5,835.5C276.137,835.585%20281.471,836.585%20286.5,838.5C280.939,838.044%20275.606,837.044%20270.5,835.5Z%22%20style=%22fill:rgb(85,124,178);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M288.5,838.5C295.062,838.337%20301.395,839.004%20307.5,840.5C300.95,840.546%20294.617,839.879%20288.5,838.5Z%22%20style=%22fill:rgb(89,126,180);%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d=%22M380.5,839.5C369.102,841.86%20357.435,842.86%20345.5,842.5C357,841.272%20368.667,840.272%20380.5,839.5Z%22%20style=%22fill:rgb(125,154,196);%22/%3E%3C/g%3E%3C/svg%3E" alt="OpenQuatt logo">
@@ -128,6 +127,10 @@
     coolingWithoutDewPointMode: { domain: "select", name: "Cooling Without Dew Point", optional: true },
     flowControlMode: { domain: "select", name: "Flow Control Mode" },
     flowSetpoint: { domain: "number", name: "Flow Setpoint" },
+    flowSetpointHeating: { domain: "number", name: "Flow Setpoint Heating", optional: true },
+    flowSetpointCooling: { domain: "number", name: "Flow Setpoint Cooling", optional: true },
+    flowSetpointDhw: { domain: "number", name: "Flow Setpoint DHW", optional: true },
+    flowSetpointActive: { domain: "sensor", name: "Flow Setpoint Active", optional: true },
     manualIpwm: { domain: "number", name: "Manual iPWM" },
     controlModeLabel: { domain: "text_sensor", name: "Control Mode (Label)" },
     flowMode: { domain: "text_sensor", name: "Flow Mode" },
@@ -152,12 +155,25 @@
     dhwTankBottom: { domain: "sensor", name: "DHW tank bottom", optional: true },
     dhwCoilIn: { domain: "sensor", name: "DHW coil in", optional: true },
     dhwCoilOut: { domain: "sensor", name: "DHW coil out", optional: true },
-    dhwValveDhwPosition: { domain: "binary_sensor", name: "DHW valve aux (DHW position)", optional: true },
+    cwtCh1Top: { domain: "sensor", name: "CWT Ch1 — DHW Tank Top", optional: true },
+    cwtCh2Bottom: { domain: "sensor", name: "CWT Ch2 — DHW Tank Bottom", optional: true },
+    cwtCh3CoilIn: { domain: "sensor", name: "CWT Ch3 — DHW Coil In", optional: true },
+    cwtCh4CoilOut: { domain: "sensor", name: "CWT Ch4 — DHW Coil Out", optional: true },
+    cwtCh5Spare: { domain: "sensor", name: "CWT Ch5 — Spare 1", optional: true },
+    cwtCh6Spare: { domain: "sensor", name: "CWT Ch6 — Spare 2", optional: true },
+    cwtCh7Spare: { domain: "sensor", name: "CWT Ch7 — Spare 3", optional: true },
+    cwtCh8Spare: { domain: "sensor", name: "CWT Ch8 — Spare 4", optional: true },
     dhwTargetFlowTemp: { domain: "sensor", name: "DHW target flow temp", optional: true },
     dhwHpRequestActive: { domain: "binary_sensor", name: "DHW HP request active", optional: true },
     dhwBlockCvPriority: { domain: "binary_sensor", name: "DHW block CV priority", optional: true },
+    dhwValveDhwPosition: { domain: "binary_sensor", name: "DHW valve aux (DHW position)", optional: true },
     dhwLegionellaLastRun: { domain: "text_sensor", name: "DHW legionella laatste run", optional: true },
     dhwLegionellaNextRun: { domain: "text_sensor", name: "DHW legionella volgende run", optional: true },
+    dhwLegionellaEta: { domain: "sensor", name: "DHW legionella ETA", optional: true },
+    dhwLegionellaElapsed: { domain: "sensor", name: "DHW legionella elapsed", optional: true },
+    dhwLegionellaHpHandoverTemp: { domain: "number", name: "DHW legionella HP handover temp", optional: true },
+    dhwStopOnBottomEnable: { domain: "switch", name: "DHW stop on tank bottom", optional: true },
+    dhwHpStopBottom: { domain: "number", name: "DHW HP stop tank bottom", optional: true },
     systemHeatPower: { domain: "sensor", name: "System Heat Power", optional: true },
     flowSelected: { domain: "sensor", name: "Flow average (Selected)" },
     electricalEnergyDaily: { domain: "sensor", name: "Electrical Energy Daily", optional: true },
@@ -261,14 +277,51 @@
     hp2FourWay: { domain: "binary_sensor", name: "HP2 - 4-Way valve", optional: true },
     apply: { domain: "button", name: "Complete setup" },
     reset: { domain: "button", name: "Reset setup state" },
+    // Sensor calibration (oq_sensor_calibration.yaml)
+    calStart:        { domain: "button",      name: "Sensor Cal Start",              optional: true },
+    calStop:         { domain: "button",      name: "Sensor Cal Stop",               optional: true },
+    calApply:        { domain: "button",      name: "Sensor Cal Apply",              optional: true },
+    calReset:        { domain: "button",      name: "Sensor Cal Reset Offsets",      optional: true },
+    calStateText:    { domain: "text_sensor", name: "Sensor Cal State",              optional: true },
+    calStatusDetail: { domain: "text_sensor", name: "Sensor Cal Status Detail",      optional: true },
+    calRemaining:    { domain: "sensor",      name: "Sensor Cal Remaining",          optional: true },
+    calSamples:      { domain: "sensor",      name: "Sensor Cal Samples",            optional: true },
+    calHp1InRaw:     { domain: "sensor",      name: "Sensor Cal HP1 Water In Raw",   optional: true },
+    calHp1OutRaw:    { domain: "sensor",      name: "Sensor Cal HP1 Water Out Raw",  optional: true },
+    calHp2InRaw:     { domain: "sensor",      name: "Sensor Cal HP2 Water In Raw",   optional: true },
+    calHp2OutRaw:    { domain: "sensor",      name: "Sensor Cal HP2 Water Out Raw",  optional: true },
+    calSpread:       { domain: "sensor",      name: "Sensor Cal Spread",             optional: true },
+    calSupplyDiff:   { domain: "sensor",      name: "Sensor Cal Supply Diff",        optional: true },
+    calReference:    { domain: "sensor",      name: "Sensor Cal Reference",          optional: true },
+    calPropHp1In:    { domain: "sensor",      name: "Sensor Cal Proposed HP1 In",    optional: true },
+    calPropHp1Out:   { domain: "sensor",      name: "Sensor Cal Proposed HP1 Out",   optional: true },
+    calPropHp2In:    { domain: "sensor",      name: "Sensor Cal Proposed HP2 In",    optional: true },
+    calPropHp2Out:   { domain: "sensor",      name: "Sensor Cal Proposed HP2 Out",   optional: true },
+    calOffsetHp1In:  { domain: "sensor",      name: "HP1 Water In Cal Offset",       optional: true },
+    calOffsetHp1Out: { domain: "sensor",      name: "HP1 Water Out Cal Offset",      optional: true },
+    calOffsetHp2In:  { domain: "sensor",      name: "HP2 Water In Cal Offset",       optional: true },
+    calOffsetHp2Out: { domain: "sensor",      name: "HP2 Water Out Cal Offset",      optional: true },
+    calMaxDuration:  { domain: "number",      name: "Sensor Cal Max Duration",       optional: true },
+    calSpreadThreshold: { domain: "number",   name: "Sensor Cal Spread Threshold",   optional: true },
   };
+
+  const CAL_ENTITY_KEYS = [
+    "calStateText", "calStatusDetail", "calRemaining", "calSamples",
+    "calHp1InRaw", "calHp1OutRaw", "calHp2InRaw", "calHp2OutRaw",
+    "calSpread", "calSupplyDiff", "calReference",
+    "calPropHp1In", "calPropHp1Out", "calPropHp2In", "calPropHp2Out",
+    "calOffsetHp1In", "calOffsetHp1Out", "calOffsetHp2In", "calOffsetHp2Out",
+    "calMaxDuration", "calSpreadThreshold",
+    // live sensor readings (calibrated; raw = calibrated - offset)
+    "hp1WaterIn", "hp1WaterOut", "hp2WaterIn", "hp2WaterOut",
+  ];
 
   const QUICK_START_VIEW = "quickstart";
   const APP_VIEWS = [
-    { id: QUICK_START_VIEW, label: "Quick Start" },
     { id: "overview", label: "Overzicht" },
     { id: "energy", label: "Energie" },
     { id: "settings", label: "Instellingen" },
+    { id: "service", label: "Service" },
   ];
   const APP_VIEW_IDS = new Set(APP_VIEWS.map((view) => view.id));
   const HP_PANEL_CONFIGS = [
@@ -353,7 +406,7 @@
     "phDemandFallTime",
   ];
   const LIMIT_KEYS = ["dayMax", "silentMax", "maxWater"];
-  const FLOW_SETTING_KEYS = ["flowControlMode", "flowSetpoint", "manualIpwm"];
+  const FLOW_SETTING_KEYS = ["flowControlMode", "flowSetpoint", "flowSetpointHeating", "flowSetpointCooling", "flowSetpointDhw", "manualIpwm"];
   const COOLING_SETTING_KEYS = [
     "coolingWithoutDewPointMode",
     "coolingGuardMode",
@@ -414,15 +467,28 @@
     "dhwState",
     "dhwFault",
     "dhwTankTop",
+    "cwtCh1Top",
+    "cwtCh2Bottom",
+    "cwtCh3CoilIn",
+    "cwtCh4CoilOut",
+    "cwtCh5Spare",
+    "cwtCh6Spare",
+    "cwtCh7Spare",
+    "cwtCh8Spare",
     "dhwTankBottom",
     "dhwCoilIn",
     "dhwCoilOut",
-    "dhwValveDhwPosition",
     "dhwTargetFlowTemp",
     "dhwHpRequestActive",
     "dhwBlockCvPriority",
+    "dhwValveDhwPosition",
     "dhwLegionellaLastRun",
     "dhwLegionellaNextRun",
+    "dhwLegionellaEta",
+    "dhwLegionellaElapsed",
+    "dhwLegionellaHpHandoverTemp",
+    "dhwStopOnBottomEnable",
+    "dhwHpStopBottom",
     "systemHeatPower",
     "electricalEnergyDaily",
     "electricalEnergyCumulative",
@@ -443,6 +509,10 @@
     "systemThermalEnergyDaily",
     "systemThermalEnergyCumulative",
     "flowSelected",
+    "flowSetpointHeating",
+    "flowSetpointCooling",
+    "flowSetpointDhw",
+    "flowSetpointActive",
     "roomTemp",
     "roomSetpoint",
     "supplyTemp",
@@ -508,7 +578,7 @@
           tone: "orange",
           groups: [
             { title: "Warmtepomp", rows: [["Elektrisch vermogen", "heatingPowerInput"], ["Warmteafgifte", "totalHeat"], ["COP", "totalCop"]] },
-            { title: "CV-ketel", rows: [["Warmteafgifte", "boilerHeatPower"]] },
+            { title: "DHW Element", rows: [["Warmteafgifte", "boilerHeatPower"]] },
             { title: "Systeem", rows: [["Warmteafgifte", "systemHeatPower"]] },
           ],
         },
@@ -539,7 +609,7 @@
           tone: "orange",
           groups: [
             { title: "Warmtepomp", rows: [["Elektriciteit", "heatingElectricalEnergyDaily"], ["Warmte", "heatpumpThermalEnergyDaily"], ["COP", "heatpumpCopDaily"]] },
-            { title: "CV-ketel", rows: [["Warmte", "boilerThermalEnergyDaily"]] },
+            { title: "DHW Element", rows: [["Warmte", "boilerThermalEnergyDaily"]] },
             { title: "Systeem", rows: [["Warmte", "systemThermalEnergyDaily"]] },
           ],
         },
@@ -548,7 +618,7 @@
           tone: "orange",
           groups: [
             { title: "Boiler", rows: [["Warmte", "boilerThermalEnergyDaily"]] },
-            { title: "Legionella", rows: [["Laatste run", "dhwLegionellaLastRun"], ["Volgende run", "dhwLegionellaNextRun"]] },
+            { title: "Legionella", rows: [["Laatste run", "dhwLegionellaLastRun"], ["Volgende run", "dhwLegionellaNextRun"], ["ETA huidige run (min)", "dhwLegionellaEta"], ["Verstreken (min)", "dhwLegionellaElapsed"]] },
           ],
         },
         {
@@ -569,7 +639,7 @@
           tone: "orange",
           groups: [
             { title: "Warmtepomp", rows: [["Elektriciteit", "heatingElectricalEnergyCumulative"], ["Warmte", "heatpumpThermalEnergyCumulative"], ["COP", "heatpumpCopCumulative"]] },
-            { title: "CV-ketel", rows: [["Warmte", "boilerThermalEnergyCumulative"]] },
+            { title: "DHW Element", rows: [["Warmte", "boilerThermalEnergyCumulative"]] },
             { title: "Systeem", rows: [["Warmte", "systemThermalEnergyCumulative"]] },
           ],
         },
@@ -578,7 +648,7 @@
           tone: "orange",
           groups: [
             { title: "Boiler", rows: [["Warmte", "boilerThermalEnergyCumulative"]] },
-            { title: "Legionella", rows: [["Laatste run", "dhwLegionellaLastRun"], ["Volgende run", "dhwLegionellaNextRun"]] },
+            { title: "Legionella", rows: [["Laatste run", "dhwLegionellaLastRun"], ["Volgende run", "dhwLegionellaNextRun"], ["ETA huidige run (min)", "dhwLegionellaEta"], ["Verstreken (min)", "dhwLegionellaElapsed"]] },
           ],
         },
         {
@@ -610,7 +680,7 @@
   const FAN_ROTATION_DEG_PER_SEC = 360 / 3.2;
   const OPENQUATT_RESUME_CLEAR_VALUE = "2000-01-01 00:00:00";
 
-/* --- js/src/01-runtime.js --- */
+/* --- js\src\01-runtime.js --- */
   const state = {
     mounted: false,
     root: null,
@@ -764,7 +834,7 @@
   }
 
   function getDefaultAppView() {
-    return state.complete ? "overview" : QUICK_START_VIEW;
+    return "overview";
   }
 
   function hasLoadedEntities() {
@@ -778,6 +848,17 @@
     }
     state.motionStartedAt = 0;
     clearLegacyMotionVariables();
+  }
+
+  function shouldAnimateMotion() {
+    return Boolean(
+      state.mounted
+      && !state.nativeOpen
+      && !state.loadingEntities
+      && hasLoadedEntities()
+      && state.appView === "overview"
+      && state.hpVisualMode === "schematic",
+    );
   }
 
   function startEntityPolling() {
@@ -805,7 +886,11 @@
       return;
     }
 
-    startMotionLoop();
+    if (shouldAnimateMotion()) {
+      startMotionLoop();
+    } else {
+      stopMotionLoop();
+    }
     startEntityPolling();
 
     if (options.refresh === false) {
@@ -819,7 +904,7 @@
   }
 
   function normalizeAppView(view) {
-    return APP_VIEW_IDS.has(view) ? view : "";
+    return view === QUICK_START_VIEW ? "overview" : APP_VIEW_IDS.has(view) ? view : "";
   }
 
   function getUrlAppView() {
@@ -1109,6 +1194,10 @@
   }
 
   function tickMotion(now) {
+    if (!shouldAnimateMotion()) {
+      stopMotionLoop();
+      return;
+    }
     syncMotionVariables(now);
     state.motionFrame = window.requestAnimationFrame(tickMotion);
   }
@@ -1129,7 +1218,7 @@
     return path === "" ? "" : path;
   }
 
-/* --- js/src/02-firmware-header.js --- */
+/* --- js\src\02-firmware-header.js --- */
   function buildEntityPath(domain, name, action = "") {
     const suffix = action ? `/${action}` : "";
     return `${getBasePath()}/${domain}/${encodeURIComponent(name)}${suffix}`;
@@ -2331,7 +2420,7 @@
     return "";
   }
 
-/* --- js/src/03-entities-controls.js --- */
+/* --- js\src\03-entities-controls.js --- */
   function getEntityValue(key) {
     if (Object.prototype.hasOwnProperty.call(state.drafts, key)) {
       return state.drafts[key];
@@ -2622,8 +2711,8 @@
   function applyDerivedState() {
     state.complete = hasEntity("setupComplete")
       ? isEntityActive("setupComplete")
-      : false;
-    state.stage = state.complete ? "Gereed" : "Quick Start";
+      : true;
+    state.stage = "Gereed";
     state.summary = renderAppSummary();
     if (!state.appView) {
       setAppView(getUrlAppView() || getDefaultAppView(), { syncMode: "replace", forceSync: true });
@@ -2654,7 +2743,9 @@
       ? [...OVERVIEW_KEYS, ...HEADER_ENTITY_KEYS, "setupComplete", ...FIRMWARE_ENTITY_KEYS]
       : state.appView === "settings"
         ? ["setupComplete", ...FIRMWARE_ENTITY_KEYS, ...HEADER_ENTITY_KEYS, ...SETTINGS_KEYS]
-        : [
+        : state.appView === "service"
+          ? [...CAL_ENTITY_KEYS, ...HEADER_ENTITY_KEYS, "setupComplete", ...FIRMWARE_ENTITY_KEYS]
+          : [
             "setupComplete",
             ...FIRMWARE_ENTITY_KEYS,
             ...HEADER_ENTITY_KEYS,
@@ -3120,6 +3211,24 @@
 
     if (action === "apply" || action === "reset") {
       triggerButton(action);
+      return;
+    }
+
+    // Sensor calibration actions
+    if (action === "cal-start") {
+      void triggerNamedButton("calStart", { refreshKeys: CAL_ENTITY_KEYS });
+      return;
+    }
+    if (action === "cal-stop") {
+      void triggerNamedButton("calStop", { refreshKeys: CAL_ENTITY_KEYS });
+      return;
+    }
+    if (action === "cal-apply") {
+      void triggerNamedButton("calApply", { refreshKeys: CAL_ENTITY_KEYS });
+      return;
+    }
+    if (action === "cal-reset") {
+      void triggerNamedButton("calReset", { refreshKeys: CAL_ENTITY_KEYS });
       return;
     }
 
@@ -3637,7 +3746,7 @@
     `;
   }
 
-/* --- js/src/05-app-shared.js --- */
+/* --- js\src\05-app-shared.js --- */
   function renderAppSummary() {
     const parts = [];
     parts.push(isCurveMode() ? "Stooklijn" : "Power House");
@@ -3775,7 +3884,7 @@
     }
   }
 
-/* --- js/src/10-settings.js --- */
+/* --- js\src\10-settings.js --- */
   function renderSettingsInfoToggle(infoId, title, copy) {
     if (!copy) {
       return "";
@@ -4643,7 +4752,7 @@
     `;
   }
 
-/* --- js/src/15-quickstart.js --- */
+/* --- js\src\15-quickstart.js --- */
   function renderStrategyWorkspace() {
     return `
       <section class="oq-helper-panel">
@@ -4931,7 +5040,7 @@
     `;
   }
 
-/* --- js/src/20-overview.js --- */
+/* --- js\src\20-overview.js --- */
   function renderOverviewStatCardMarkup({ label, value, tone, note, status = false }) {
     return `
       <article class="oq-overview-stat oq-overview-stat--${escapeHtml(tone)}${status ? " oq-overview-stat--status" : ""}">
@@ -5631,6 +5740,97 @@
     });
   }
 
+  function getOverviewAdvisorModel() {
+    const recommendations = [];
+    const flow = getEntityNumericValue("flowSelected");
+    const supply = getEntityNumericValue("supplyTemp");
+    const outside = getEntityNumericValue("outsideTempSelected");
+    const maxWater = getEntityNumericValue("maxWater");
+    const capacity = getEntityNumericValue("hpCapacity");
+    const requestedPower = getEntityNumericValue("strategyRequestedPower");
+    const curveTarget = getEntityNumericValue("curveSupplyTarget");
+    const coolingActive = isCoolingOverviewActive();
+    const controlMode = getEntityStateText("controlModeLabel", "Onbekend");
+
+    if (!coolingActive && !Number.isNaN(flow) && flow < 12) {
+      recommendations.push({
+        tone: "warn",
+        title: "Flow is laag voor stabiele afgifte",
+        detail: "Controleer flow-regeling of ontluchting. Een iets hogere flow helpt vaak tegen pendelen.",
+      });
+    }
+
+    if (!coolingActive && !Number.isNaN(maxWater) && !Number.isNaN(outside) && outside > 10 && maxWater >= 50) {
+      recommendations.push({
+        tone: "tip",
+        title: "Maximale watertemperatuur lijkt hoog",
+        detail: "Bij zachte buitentemperaturen kan een lagere max-waterlimiet meestal zuiniger draaien zonder comfortverlies.",
+      });
+    }
+
+    if (!coolingActive && !Number.isNaN(supply) && !Number.isNaN(curveTarget) && (supply - curveTarget) > 3.0) {
+      recommendations.push({
+        tone: "note",
+        title: "Aanvoer ligt boven de stooklijn",
+        detail: "De installatie levert warmer water dan gevraagd. Overweeg een rustiger responsprofiel of lagere limieten.",
+      });
+    }
+
+    if (!coolingActive && !Number.isNaN(requestedPower) && !Number.isNaN(capacity) && requestedPower > capacity + 500) {
+      recommendations.push({
+        tone: "warn",
+        title: "Warmtevraag boven actuele capaciteit",
+        detail: "Verlaag tijdelijk vraagpieken (setpointstappen) of laat de regeling rustiger opschakelen.",
+      });
+    }
+
+    if (coolingActive && !Number.isNaN(supply) && supply < 17) {
+      recommendations.push({
+        tone: "warn",
+        title: "Lage aanvoer tijdens koelen",
+        detail: "Controleer dauwpuntveiligheid en condensrisico, vooral in vochtige ruimtes.",
+      });
+    }
+
+    return {
+      title: "Slimme assistent",
+      copy: `Live aanbevelingen op basis van de huidige regeling (${controlMode}).`,
+      recommendations,
+    };
+  }
+
+  function renderOverviewAdvisorItems(items) {
+    if (!items.length) {
+      return `
+        <article class="oq-overview-advisor-item oq-overview-advisor-item--ok">
+          <strong>Geen directe aandachtspunten</strong>
+          <p>De belangrijkste signalen lijken op dit moment stabiel.</p>
+        </article>
+      `;
+    }
+    return items.map((item) => `
+      <article class="oq-overview-advisor-item oq-overview-advisor-item--${escapeHtml(item.tone)}">
+        <strong>${escapeHtml(item.title)}</strong>
+        <p>${escapeHtml(item.detail)}</p>
+      </article>
+    `).join("");
+  }
+
+  function renderOverviewAdvisorPanel() {
+    const model = getOverviewAdvisorModel();
+    return renderOverviewShell({
+      className: "oq-overview-advisor",
+      title: model.title,
+      copy: model.copy,
+      signature: getRenderSignature(model),
+      body: `
+        <div class="oq-overview-advisor-list">
+          ${renderOverviewAdvisorItems(model.recommendations)}
+        </div>
+      `,
+    });
+  }
+
   function getOverviewDhwModel() {
     const hasAnyDhw =
       hasEntity("dhwTankTop")
@@ -5650,10 +5850,10 @@
       valveText: hasEntity("dhwValveDhwPosition")
         ? (isEntityActive("dhwValveDhwPosition") ? "DHW" : "CV")
         : "Onbekend",
-      coilInText: getEntityStateText("dhwCoilIn", "-"),
-      coilOutText: getEntityStateText("dhwCoilOut", "-"),
-      tapInText: getEntityStateText("dhwTankBottom", "-"),
-      tapOutText: getEntityStateText("dhwTankTop", "-"),
+      coilInText: getEntityStateText("dhwCoilIn", "—"),
+      coilOutText: getEntityStateText("dhwCoilOut", "—"),
+      tapInText: getEntityStateText("dhwTankBottom", "—"),
+      tapOutText: getEntityStateText("dhwTankTop", "—"),
     };
   }
 
@@ -5693,7 +5893,7 @@
     `;
   }
 
-/* --- js/src/30-energy.js --- */
+/* --- js\src\30-energy.js --- */
   function renderOverviewEnergyRow([label, key]) {
     if (!hasEntity(key)) {
       return "";
@@ -5783,7 +5983,7 @@
     `;
   }
 
-/* --- js/src/40-heatpump.js --- */
+/* --- js\src\40-heatpump.js --- */
   function getHeatPumpRuntimeModel(title, keys, accent) {
     const mode = formatWorkingMode(getEntityStateText(keys.mode, "Unknown"));
     const defrostActive = isEntityActive(keys.defrost);
@@ -5837,7 +6037,7 @@
   function formatComponentPositionLabel(key) {
     const entity = state.entities[key];
     if (!entity) {
-      return "Positie: â€”";
+      return "Positie: -";
     }
     const numeric = getEntityNumericValue(key);
     if (!Number.isNaN(numeric)) {
@@ -5848,7 +6048,7 @@
 
   function formatFourWayPositionLabel(key) {
     if (!hasEntity(key)) {
-      return "Positie: â€”";
+      return "Positie: -";
     }
     return `Positie: ${isEntityActive(key) ? "Koelen/Defrost" : "Verwarmen"}`;
   }
@@ -6594,6 +6794,7 @@
           <div class="oq-overview-main">
             ${renderOverviewNarrativePanel(getOverviewStrategySectionModel())}
             ${renderOverviewTempsPanel()}
+            ${renderOverviewAdvisorPanel()}
           </div>
           ${heatPumpControls ? `<div class="oq-overview-hp-tools">${heatPumpControls}</div>` : ""}
           <div class="oq-overview-hp-grid ${heatPumpPanels.length === 1 ? "oq-overview-hp-grid--single" : ""} ${heatPumpPanels.length > 1 ? `oq-overview-hp-grid--${hpLayoutMode}` : ""}">
@@ -6779,7 +6980,7 @@
     });
   }
 
-  function patchHeatPumpPanel(panel, title, keys, accent, layoutAction = null, runtime = null) {
+  function patchHeatPumpPanel(panel, title, keys, accent, layoutAction = null, runtime = null, options = {}) {
     if (!panel) {
       return;
     }
@@ -6884,7 +7085,9 @@
       updatePipeGroup(board, id.replace(/[A-Z]/g, (match) => `-${match.toLowerCase()}`), pipe.tone, pipe.d);
     });
     ensureTechTooltipLayering(board);
-    refreshMotionTargets();
+    if (options.refreshMotionTargets !== false) {
+      refreshMotionTargets();
+    }
   }
 
   function patchOverviewDom() {
@@ -6901,10 +7104,15 @@
     const summaryShell = board.querySelector(".oq-overview-summary-shell");
     const system = board.querySelector(".oq-overview-system");
     const temps = board.querySelector(".oq-overview-temps");
+    const advisor = board.querySelector(".oq-overview-advisor");
     const dhw = board.querySelector(".oq-overview-dhw");
     const hpTools = board.querySelector(".oq-overview-hp-tools");
     const hpGrid = board.querySelector(".oq-overview-hp-grid");
     const heatPumpPanels = getHeatPumpPanels();
+    const strategySectionModel = getOverviewStrategySectionModel();
+    const tempsModel = getOverviewTempsModel();
+    const nextDhwModel = getOverviewDhwModel();
+    const nextDhwMarkup = nextDhwModel ? renderOverviewDhwPanel() : "";
 
     if (summaryShell) {
       const top = summaryShell.querySelector(".oq-overview-top");
@@ -6935,30 +7143,34 @@
     if (system) {
       replaceOuterHtmlIfSignatureChanged(
         system,
-        getRenderSignature(getOverviewStrategySectionModel()),
-        renderOverviewNarrativePanel(getOverviewStrategySectionModel()),
+        getRenderSignature(strategySectionModel),
+        renderOverviewNarrativePanel(strategySectionModel),
       );
     }
 
     if (temps) {
       replaceOuterHtmlIfSignatureChanged(
         temps,
-        getRenderSignature(getOverviewTempsModel()),
+        getRenderSignature(tempsModel),
         renderOverviewTempsPanel(),
       );
     }
 
-    const nextDhwMarkup = renderOverviewDhwPanel();
+    if (advisor) {
+      replaceOuterHtmlIfSignatureChanged(
+        advisor,
+        getRenderSignature(getOverviewAdvisorModel()),
+        renderOverviewAdvisorPanel(),
+      );
+    }
+
     if (dhw) {
       if (nextDhwMarkup) {
-        const nextDhwModel = getOverviewDhwModel();
-        if (nextDhwModel) {
-          replaceOuterHtmlIfSignatureChanged(
-            dhw,
-            getRenderSignature(nextDhwModel),
-            nextDhwMarkup,
-          );
-        }
+        replaceOuterHtmlIfSignatureChanged(
+          dhw,
+          getRenderSignature(nextDhwModel),
+          nextDhwMarkup,
+        );
       } else {
         dhw.remove();
       }
@@ -6979,19 +7191,391 @@
 
     const hpLayoutMode = getEffectiveHpLayoutMode(heatPumpPanels);
     setVariantClass(hpGrid, "oq-overview-hp-grid--", heatPumpPanels.length === 1 ? "single" : hpLayoutMode, ["single", "equal", "focus-hp1", "focus-hp2"]);
+    const panelNodes = Array.from(renderedPanels);
+    const panelNodeByTitle = new Map(panelNodes.map((node) => [node.getAttribute("data-oq-hp-panel"), node]));
     heatPumpPanels.forEach((panel, index) => {
-      const panelNode = board.querySelector(`[data-oq-hp-panel="${panel.title}"]`);
+      const panelNode = panelNodeByTitle.get(panel.title);
       if (panelNode) {
         const runtime = getHeatPumpRuntimeModel(panel.title, panel.keys, panel.accent);
         setVariantClass(panelNode, "oq-overview-hp--", getHeatPumpPanelEmphasis(index, heatPumpPanels, hpLayoutMode), ["normal", "focus", "muted"]);
-        patchHeatPumpPanel(panelNode, panel.title, panel.keys, panel.accent, getHeatPumpPanelLayoutAction(index, heatPumpPanels, hpLayoutMode), runtime);
+        patchHeatPumpPanel(
+          panelNode,
+          panel.title,
+          panel.keys,
+          panel.accent,
+          getHeatPumpPanelLayoutAction(index, heatPumpPanels, hpLayoutMode),
+          runtime,
+          { refreshMotionTargets: false },
+        );
       }
     });
+    refreshMotionTargets();
 
     return true;
   }
 
-/* --- js/src/90-shell.js --- */
+/* --- js\src\50-service.js --- */
+  // ============================================================
+  // Service view — Temperatuursensor kalibratie wizard
+  // ============================================================
+
+  // Derive wizard step (0/1/2) from firmware state text.
+  function calWizardStep() {
+    const txt = String(getEntityValue("calStateText") || "").toLowerCase();
+    if (txt.startsWith("meting klaar") || txt.startsWith("klaar")) return 2;
+    if (txt.startsWith("meting bezig") || txt.startsWith("fout")) return 1;
+    return 0;
+  }
+
+  function calFmt(key, decimals = 2, fallback = "—") {
+    const v = getEntityNumericValue(key);
+    if (Number.isNaN(v)) return fallback;
+    return v.toFixed(decimals) + " °C";
+  }
+
+  function calOffsetBadge(value) {
+    if (Number.isNaN(value)) return `<span class="oq-cal-offset-badge oq-cal-offset-badge--zero">—</span>`;
+    const sign = value >= 0 ? "+" : "";
+    const cls = Math.abs(value) < 0.005
+      ? "oq-cal-offset-badge--zero"
+      : value > 0
+        ? "oq-cal-offset-badge--pos"
+        : "oq-cal-offset-badge--neg";
+    return `<span class="oq-cal-offset-badge ${cls}">${sign}${value.toFixed(2)} °C</span>`;
+  }
+
+  function renderCalStepIndicator(activeStep) {
+    const steps = [
+      { label: "Voorbereiding" },
+      { label: "Meting" },
+      { label: "Offsets toepassen" },
+    ];
+    return `
+      <div class="oq-cal-steps">
+        ${steps.map((s, i) => {
+          const cls = i < activeStep ? "oq-cal-step--done"
+            : i === activeStep ? "oq-cal-step--active"
+            : "oq-cal-step--pending";
+          const inner = i < activeStep
+            ? `<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M9,20.42L2.79,14.21L5.62,11.38L9,14.77L18.88,4.88L21.71,7.71L9,20.42Z"/></svg>`
+            : String(i + 1);
+          const connector = i < steps.length - 1
+            ? `<div style="flex:1;height:1px;background:var(--oq-helper-line-strong);margin:0 8px;"></div>`
+            : "";
+          return `
+            <div class="oq-cal-step ${cls}" style="display:flex;align-items:center;gap:8px;">
+              <div class="oq-cal-step-circle">${inner}</div>
+              <span class="oq-cal-step-label">${escapeHtml(s.label)}</span>
+            </div>
+            ${connector}
+          `;
+        }).join("")}
+      </div>
+    `;
+  }
+
+  function renderCalBodyStep0() {
+    return `
+      <div class="oq-cal-body">
+        <div class="oq-cal-info-box">
+          <p>Zorg dat het systeem niet aan het verwarmen of koelen is.
+          Klik op <strong>Kalibratie starten</strong> — de firmware zet de CM Override automatisch op
+          <em>Force CM1</em> zodat de pomp circuleert zonder compressor.
+          Wacht daarna tot alle 4 sensoren dezelfde temperatuur meten.</p>
+        </div>
+        ${renderCalActiveOffsets()}
+      </div>
+    `;
+  }
+
+  function renderCalBodyStep1() {
+    const stateText = getEntityValue("calStateText") || "Meting bezig";
+    const remaining = getEntityNumericValue("calRemaining");
+    const maxDur = getEntityNumericValue("calMaxDuration") || 300;
+    const elapsed = Number.isNaN(remaining) ? 0 : Math.max(0, maxDur - remaining);
+    const pct = Number.isNaN(remaining) ? 0 : Math.min(100, (elapsed / maxDur) * 100);
+
+    const spread = getEntityNumericValue("calSpread");
+    const threshold = getEntityNumericValue("calSpreadThreshold") || 0.25;
+    const spreadOk = !Number.isNaN(spread) && spread < threshold;
+
+    const remainingLabel = Number.isNaN(remaining)
+      ? ""
+      : ` - max. ${Math.ceil(remaining)} s resterend`;
+
+    return `
+      <div class="oq-cal-body">
+        <div class="oq-cal-status-box oq-cal-status-box--measuring">
+          <div class="oq-cal-status-box-title">Meting bezig${remainingLabel}</div>
+          <div class="oq-cal-status-box-copy">
+            De waterpomp circuleert zonder compressor. De firmware stopt zodra het laatste
+            meetvenster binnen de spreiding- en driftgrenzen valt.
+          </div>
+          <span class="oq-cal-status-badge ${spreadOk ? "oq-cal-status-badge--ok" : "oq-cal-status-badge--waiting"}">
+            ${spreadOk ? "Binnen grenzen" : "Nog niet binnen grenzen"}
+          </span>
+          <div class="oq-cal-progress-wrap">
+            <div class="oq-cal-progress-bar" style="width:${pct.toFixed(1)}%"></div>
+          </div>
+        </div>
+
+        <div class="oq-cal-readings">
+          <div class="oq-cal-reading">
+            <div class="oq-cal-reading-label">HP1 water in</div>
+            <div class="oq-cal-reading-value">${calFmt("calHp1InRaw")}</div>
+          </div>
+          <div class="oq-cal-reading">
+            <div class="oq-cal-reading-label">HP1 water uit</div>
+            <div class="oq-cal-reading-value">${calFmt("calHp1OutRaw")}</div>
+          </div>
+          <div class="oq-cal-reading">
+            <div class="oq-cal-reading-label">HP2 water in</div>
+            <div class="oq-cal-reading-value">${calFmt("calHp2InRaw")}</div>
+          </div>
+          <div class="oq-cal-reading">
+            <div class="oq-cal-reading-label">HP2 water uit</div>
+            <div class="oq-cal-reading-value">${calFmt("calHp2OutRaw")}</div>
+          </div>
+        </div>
+
+        <div class="oq-cal-meta-row">
+          <div class="oq-cal-meta-item${!Number.isNaN(spread) && spread >= threshold ? " oq-cal-meta-item--highlight" : ""}">
+            <div class="oq-cal-meta-label">Spreiding</div>
+            <div class="oq-cal-meta-value">${calFmt("calSpread")}</div>
+          </div>
+          <div class="oq-cal-meta-item">
+            <div class="oq-cal-meta-label">Supply verschil</div>
+            <div class="oq-cal-meta-value">${calFmt("calSupplyDiff")}</div>
+          </div>
+        </div>
+
+        <p class="oq-cal-supply-note">Supply wordt alleen als diagnose getoond en niet automatisch gecorrigeerd.</p>
+      </div>
+    `;
+  }
+
+  function renderCalBodyStep2() {
+    const ref     = getEntityNumericValue("calReference");
+    const supDiff = getEntityNumericValue("calSupplyDiff");
+    const spread  = getEntityNumericValue("calSpread");
+
+    const rows = [
+      { label: "HP1 water in",  rawKey: "calHp1InRaw",  propKey: "calPropHp1In",  offKey: "calOffsetHp1In" },
+      { label: "HP1 water uit", rawKey: "calHp1OutRaw", propKey: "calPropHp1Out", offKey: "calOffsetHp1Out" },
+      { label: "HP2 water in",  rawKey: "calHp2InRaw",  propKey: "calPropHp2In",  offKey: "calOffsetHp2In" },
+      { label: "HP2 water uit", rawKey: "calHp2OutRaw", propKey: "calPropHp2Out", offKey: "calOffsetHp2Out" },
+    ];
+
+    const spreadLabel = Number.isNaN(spread) ? "" : ` — spreiding ${spread.toFixed(2)} °C`;
+
+    return `
+      <div class="oq-cal-body">
+        <div class="oq-cal-status-box oq-cal-status-box--done">
+          <div class="oq-cal-status-box-title">Meting klaar${spreadLabel}</div>
+          <div class="oq-cal-status-box-copy">Controleer de voorgestelde offsets en pas ze toe.</div>
+          <span class="oq-cal-status-badge oq-cal-status-badge--ok">Resultaat beschikbaar</span>
+        </div>
+
+        <div class="oq-cal-chips">
+          <span class="oq-cal-chip">Referentie ${Number.isNaN(ref) ? "—" : ref.toFixed(2) + " °C"}</span>
+          <span class="oq-cal-chip">Supply verschil ${Number.isNaN(supDiff) ? "—" : supDiff.toFixed(2) + " °C"}</span>
+        </div>
+
+        <table class="oq-cal-table">
+          <thead>
+            <tr>
+              <th>Sensor</th>
+              <th>Raw gemiddelde</th>
+              <th>Huidig actief</th>
+              <th>Voorstel</th>
+              <th>Na toepassen</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(row => {
+              const raw    = getEntityNumericValue(row.rawKey);
+              const prop   = getEntityNumericValue(row.propKey);
+              const active = getEntityNumericValue(row.offKey);
+              const after  = !Number.isNaN(raw) && !Number.isNaN(prop) ? (raw + prop).toFixed(2) + " °C" : "—";
+              return `
+                <tr>
+                  <td>${escapeHtml(row.label)}</td>
+                  <td>${Number.isNaN(raw)    ? "—" : raw.toFixed(2)    + " °C"}</td>
+                  <td>${Number.isNaN(active) ? "—" : active.toFixed(2) + " °C"}</td>
+                  <td>${calOffsetBadge(prop)}</td>
+                  <td>${after}</td>
+                </tr>
+              `;
+            }).join("")}
+          </tbody>
+        </table>
+
+        <p class="oq-cal-supply-note">Supply wordt alleen als diagnose getoond en niet automatisch gecorrigeerd.</p>
+      </div>
+    `;
+  }
+
+  function renderCalActiveOffsets() {
+    const sensors = [
+      { label: "HP1 water in",  offKey: "calOffsetHp1In",  liveKey: "hp1WaterIn"  },
+      { label: "HP1 water uit", offKey: "calOffsetHp1Out", liveKey: "hp1WaterOut" },
+      { label: "HP2 water in",  offKey: "calOffsetHp2In",  liveKey: "hp2WaterIn"  },
+      { label: "HP2 water uit", offKey: "calOffsetHp2Out", liveKey: "hp2WaterOut" },
+    ];
+
+    const anyNonZero = sensors.some(s => {
+      const v = getEntityNumericValue(s.offKey);
+      return !Number.isNaN(v) && Math.abs(v) > 0.005;
+    });
+
+    // Check if we have any live readings to show
+    const anyLive = sensors.some(s => !Number.isNaN(getEntityNumericValue(s.liveKey)));
+
+    return `
+      <div class="oq-cal-offsets-info">
+        <div class="oq-cal-offsets-info-title">Actieve kalibratie-offsets</div>
+
+        ${anyLive ? `
+          <table class="oq-cal-table" style="margin-bottom:12px;">
+            <thead>
+              <tr>
+                <th>Sensor</th>
+                <th>Ruw (nu)</th>
+                <th>Gecalibreerd (nu)</th>
+                <th>Offset</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${sensors.map(s => {
+                const cal    = getEntityNumericValue(s.liveKey);
+                const offset = getEntityNumericValue(s.offKey);
+                const raw    = (!Number.isNaN(cal) && !Number.isNaN(offset)) ? cal - offset : NaN;
+                const rawTxt = Number.isNaN(raw)    ? "—" : raw.toFixed(2)    + " °C";
+                const calTxt = Number.isNaN(cal)    ? "—" : cal.toFixed(2)    + " °C";
+                return `
+                  <tr>
+                    <td>${escapeHtml(s.label)}</td>
+                    <td style="color:var(--oq-helper-faint)">${rawTxt}</td>
+                    <td style="font-weight:600">${calTxt}</td>
+                    <td>${calOffsetBadge(Number.isNaN(offset) ? NaN : offset)}</td>
+                  </tr>
+                `;
+              }).join("")}
+            </tbody>
+          </table>
+        ` : `
+          <div class="oq-cal-offsets-grid" style="margin-bottom:8px;">
+            ${sensors.map(s => {
+              const v = getEntityNumericValue(s.offKey);
+              const label = Number.isNaN(v) ? "—" : (v >= 0 ? "+" : "") + v.toFixed(2) + " °C";
+              return `
+                <div class="oq-cal-offset-row">
+                  <span class="oq-cal-offset-row-label">${escapeHtml(s.label)}</span>
+                  <span class="oq-cal-offset-row-value">${label}</span>
+                </div>
+              `;
+            }).join("")}
+          </div>
+        `}
+
+        ${anyNonZero ? `
+          <button class="oq-cal-reset-link" type="button" data-oq-action="cal-reset">
+            Alle offsets terugzetten naar 0
+          </button>
+        ` : ""}
+      </div>
+    `;
+  }
+
+  function renderCalFooter(step) {
+    const busy = state.busyAction && state.busyAction.startsWith("cal");
+    if (step === 0) {
+      return `
+        <div class="oq-cal-footer-status">
+          <div class="oq-cal-footer-status-label">Huidige status</div>
+          <div class="oq-cal-footer-status-copy">
+            Gereed. Druk op 'Kalibratie starten' om te beginnen.
+          </div>
+        </div>
+        <div class="oq-cal-footer">
+          <button class="oq-cal-btn oq-cal-btn--primary" type="button"
+            data-oq-action="cal-start" ${busy ? "disabled" : ""}>
+            Kalibratie starten
+          </button>
+        </div>
+      `;
+    }
+    if (step === 1) {
+      const statusDetail = getEntityValue("calStatusDetail") || "De pomp draait en de firmware wacht op een stabiel temperatuurbeeld.";
+      return `
+        <div class="oq-cal-footer-status">
+          <div class="oq-cal-footer-status-label">Huidige status</div>
+          <div class="oq-cal-footer-status-copy">${escapeHtml(statusDetail)}</div>
+        </div>
+        <div class="oq-cal-footer">
+          <button class="oq-cal-btn oq-cal-btn--secondary" type="button"
+            data-oq-action="cal-stop" ${busy ? "disabled" : ""}>
+            Meting stoppen
+          </button>
+          <button class="oq-cal-btn oq-cal-btn--primary" type="button"
+            data-oq-action="cal-apply" disabled>
+            Offsets toepassen
+          </button>
+        </div>
+      `;
+    }
+    // step 2
+    return `
+      <div class="oq-cal-footer-status">
+        <div class="oq-cal-footer-status-label">Huidige status</div>
+        <div class="oq-cal-footer-status-copy">
+          Klaar om toe te passen. Controleer de voorgestelde offsets voordat je ze toepast.
+        </div>
+      </div>
+      <div class="oq-cal-footer">
+        <button class="oq-cal-btn oq-cal-btn--secondary" type="button"
+          data-oq-action="cal-start" ${busy ? "disabled" : ""}>
+          Kalibratie starten
+        </button>
+        <button class="oq-cal-btn oq-cal-btn--primary" type="button"
+          data-oq-action="cal-apply" ${busy ? "disabled" : ""}>
+          Offsets toepassen
+        </button>
+      </div>
+    `;
+  }
+
+  function renderServiceView() {
+    const step = calWizardStep();
+
+    const bodyHtml = step === 2 ? renderCalBodyStep2()
+      : step === 1 ? renderCalBodyStep1()
+      : renderCalBodyStep0();
+
+    return `
+      <section class="oq-cal-panel">
+        <p class="oq-cal-kicker">Service</p>
+        <h2 class="oq-cal-title">Temperatuursensoren kalibreren</h2>
+        <p class="oq-cal-subtitle">Laat de waterpomp draaien zonder compressor en bepaal offsets voor HP1/HP2 water in/out.</p>
+
+        <div class="oq-cal-wizard">
+          <div class="oq-cal-wizard-head">
+            <h3>Temperatuursensoren kalibreren</h3>
+            <p>Doorloop voorbereiding, meting en toepassen in vaste volgorde.
+               De meting stopt eerder zodra de sensoren stabiel genoeg zijn.</p>
+            <p class="oq-cal-note">De voorgestelde waarden worden pas actief wanneer je ze toepast; supply blijft een diagnosewaarde.</p>
+            ${renderCalStepIndicator(step)}
+          </div>
+
+          ${bodyHtml}
+
+          ${renderCalFooter(step)}
+        </div>
+      </section>
+    `;
+  }
+
+/* --- js\src\90-shell.js --- */
   function renderSettingsView() {
     return `
       <section class="oq-helper-panel">
@@ -7015,7 +7599,7 @@
       <section class="oq-helper-panel">
         <p class="oq-helper-label">OpenQuatt</p>
         <h2 class="oq-helper-section-title">Interface laden</h2>
-        <p class="oq-helper-section-copy">We bepalen eerst even of Quick Start al is afgerond, zodat je direct op de juiste plek binnenkomt.</p>
+        <p class="oq-helper-section-copy">We laden de belangrijkste statuswaarden, zodat je direct in het overzicht binnenkomt.</p>
       </section>
     `;
   }
@@ -7049,7 +7633,9 @@
       ? renderEnergyView()
       : state.appView === "settings"
         ? renderSettingsView()
-        : `
+        : state.appView === "service"
+          ? renderServiceView()
+          : `
           <div class="oq-helper-grid oq-helper-grid--quickstart">
             ${renderActiveStep()}
             ${renderQuickStartSidebar()}
@@ -7086,6 +7672,11 @@
     clearLegacyMotionVariables();
     syncTechTooltipLayers();
     refreshMotionTargets();
+    if (shouldAnimateMotion()) {
+      startMotionLoop();
+    } else {
+      stopMotionLoop();
+    }
     syncNativeVisibility();
     bindHeaderDevControls();
     syncDocumentTheme();

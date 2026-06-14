@@ -194,6 +194,18 @@ switch:
       sorting_group_id: oq_boiler
 
   - platform: template
+    id: oq_dhw_element_enable
+    name: "Element inschakelen"
+    icon: mdi:water-boiler-off
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    turn_on_action: []
+    turn_off_action:
+      - switch.turn_off: boiler_relay
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
     id: oq_dhw_manual_test_mode
     name: "DHW manual test mode"
     icon: mdi:hand-back-right
@@ -455,6 +467,12 @@ sensor:
       }
       return NAN;
 
+  # ---------------------------------------------------------------
+  # DHW temperature inputs — priority chain (first valid wins):
+  #   1. CWT-TM-8PT Modbus PT1000 sensors (v0.40, primary source)
+  #   2. HA-provided sensor (cloud/manual)
+  #   3. Local override slider (oq_dhw_src_*)
+  # ---------------------------------------------------------------
   - platform: template
     id: dhw_tank_top_input
     name: "DHW tank top"
@@ -467,8 +485,8 @@ sensor:
     web_server:
       sorting_group_id: oq_boiler
     lambda: |-
-      if (id(dhw_mb_tank_top_c).has_state() && !isnan(id(dhw_mb_tank_top_c).state)) {
-        return id(dhw_mb_tank_top_c).state;
+      if (id(cwt_pt_ch1_c).has_state() && !isnan(id(cwt_pt_ch1_c).state)) {
+        return id(cwt_pt_ch1_c).state;
       }
       if (id(dhw_tank_top_ha).has_state() && !isnan(id(dhw_tank_top_ha).state)) {
         return id(dhw_tank_top_ha).state;
@@ -487,8 +505,8 @@ sensor:
     web_server:
       sorting_group_id: oq_boiler
     lambda: |-
-      if (id(dhw_mb_tank_bottom_c).has_state() && !isnan(id(dhw_mb_tank_bottom_c).state)) {
-        return id(dhw_mb_tank_bottom_c).state;
+      if (id(cwt_pt_ch2_c).has_state() && !isnan(id(cwt_pt_ch2_c).state)) {
+        return id(cwt_pt_ch2_c).state;
       }
       if (id(dhw_tank_bottom_ha).has_state() && !isnan(id(dhw_tank_bottom_ha).state)) {
         return id(dhw_tank_bottom_ha).state;
@@ -507,8 +525,8 @@ sensor:
     web_server:
       sorting_group_id: oq_boiler
     lambda: |-
-      if (id(dhw_pt1000_coil_in_cal_c).has_state() && !isnan(id(dhw_pt1000_coil_in_cal_c).state)) {
-        return id(dhw_pt1000_coil_in_cal_c).state;
+      if (id(cwt_pt_ch3_c).has_state() && !isnan(id(cwt_pt_ch3_c).state)) {
+        return id(cwt_pt_ch3_c).state;
       }
       if (id(dhw_coil_in_ha).has_state() && !isnan(id(dhw_coil_in_ha).state)) {
         return id(dhw_coil_in_ha).state;
@@ -527,8 +545,8 @@ sensor:
     web_server:
       sorting_group_id: oq_boiler
     lambda: |-
-      if (id(dhw_pt1000_coil_out_cal_c).has_state() && !isnan(id(dhw_pt1000_coil_out_cal_c).state)) {
-        return id(dhw_pt1000_coil_out_cal_c).state;
+      if (id(cwt_pt_ch4_c).has_state() && !isnan(id(cwt_pt_ch4_c).state)) {
+        return id(cwt_pt_ch4_c).state;
       }
       if (id(dhw_coil_out_ha).has_state() && !isnan(id(dhw_coil_out_ha).state)) {
         return id(dhw_coil_out_ha).state;
@@ -855,7 +873,8 @@ interval:
             }
 
             const bool valve_boiler_confirmed = !in.valve_feedback_valid || !in.valve_feedback_cv;
-            const bool element_drive = out.element_on && valve_boiler_confirmed;
+            const bool element_drive = out.element_on && valve_boiler_confirmed
+                                       && id(oq_dhw_element_enable).state;
 
             if (element_drive) {
               if (!id(boiler_relay).state) id(boiler_relay).turn_on();

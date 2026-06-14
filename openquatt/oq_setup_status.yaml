@@ -1,22 +1,20 @@
 # ==============================================================================
-# OpenQuatt - Quick Start Status
+# OpenQuatt - Quick Start Compatibility State
 # ==============================================================================
 #
 # Purpose:
-#   Stores only the lightweight Quick Start completion state used by the custom
-#   web app. This replaces the older broad onboarding package.
+#   Keep the old Quick Start setup symbols available for compatibility, without
+#   exposing them in the classic ESPHome web UI.
 #
 # Exposes:
-#   - "Setup Complete" binary sensor
-#   - "Complete setup" button
-#   - "Reset setup state" button
+#   - no visible web UI entities
 # ==============================================================================
 
 globals:
   - id: oq_setup_complete
     type: bool
     restore_value: true
-    initial_value: 'false'
+    initial_value: 'true'
 
 button:
   - platform: template
@@ -24,8 +22,7 @@ button:
     name: "Complete setup"
     icon: mdi:check-bold
     entity_category: config
-    web_server:
-      sorting_group_id: oq_setup
+    internal: true
     on_press:
       - lambda: |-
           id(oq_setup_complete) = true;
@@ -35,11 +32,10 @@ button:
     name: "Reset setup state"
     icon: mdi:restart
     entity_category: config
-    web_server:
-      sorting_group_id: oq_setup
+    internal: true
     on_press:
       - lambda: |-
-          id(oq_setup_complete) = false;
+          id(oq_setup_complete) = true;
 
 binary_sensor:
   - platform: template
@@ -48,7 +44,6 @@ binary_sensor:
     icon: mdi:check-circle-outline
     device_class: running
     entity_category: diagnostic
+    internal: true
     lambda: |-
       return id(oq_setup_complete);
-    web_server:
-      sorting_group_id: oq_setup

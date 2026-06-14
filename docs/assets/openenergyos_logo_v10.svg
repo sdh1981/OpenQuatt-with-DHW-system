@@ -1,0 +1,96 @@
+<svg width="100%" viewBox="0 0 391.56 310" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title>Open Energy OS for OpenQuatt logo</title>
+  <desc>Logo met druppel en vier energiebronnen</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0a1628"/>
+      <stop offset="100%" stop-color="#0d2240"/>
+    </linearGradient>
+    <linearGradient id="dropBody" x1="0.3" y1="0" x2="0.7" y2="1">
+      <stop offset="0%" stop-color="#5DCAA5"/>
+      <stop offset="60%" stop-color="#185FA5"/>
+      <stop offset="100%" stop-color="#0a2a5e"/>
+    </linearGradient>
+    <linearGradient id="dropShineL" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="waveGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#378ADD" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#0F6E56"/>
+    </linearGradient>
+    <linearGradient id="flameGrad" x1="0.5" y1="1" x2="0.5" y2="0">
+      <stop offset="0%" stop-color="#EF9F27"/>
+      <stop offset="50%" stop-color="#E24B4A"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.9"/>
+    </linearGradient>
+    <linearGradient id="textGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#7ecfff"/>
+      <stop offset="40%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#5DCAA5"/>
+    </linearGradient>
+    <linearGradient id="subGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#378ADD"/>
+      <stop offset="100%" stop-color="#5DCAA5"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="380" height="300" rx="16" fill="url(#bg)"/>
+
+  <!-- gloed ringen -->
+  <ellipse cx="95" cy="155" rx="58" ry="58" fill="#1a3a6e" opacity="0.5"/>
+  <ellipse cx="95" cy="155" rx="44" ry="44" fill="#1a3a6e" opacity="0.4"/>
+
+  <!-- druppel -->
+  <path d="M95 212 C68 212 46 190 46 163 C46 128 95 48 95 48 C95 48 144 128 144 163 C144 190 122 212 95 212 Z" fill="url(#dropBody)"/>
+  <path d="M95 212 C68 212 46 190 46 163 C46 128 95 48 95 48 C95 48 144 128 144 163 C144 190 122 212 95 212 Z" fill="url(#dropShineL)"/>
+  <path d="M46 178 C58 169 74 167 95 171 C116 167 132 169 144 178 C141 198 120 212 95 212 C70 212 49 198 46 178 Z" fill="url(#waveGrad)" opacity="0.95"/>
+  <path d="M85 168 L90 143 L78 153 L93 115 L91 136 L106 126 L85 168 Z" fill="url(#flameGrad)"/>
+  <path d="M95 48 C95 48 99 60 103 75 C99 68 95 62 95 62 C95 62 91 68 87 75 C91 60 95 48 95 48 Z" fill="#ffffff" opacity="0.3"/>
+
+  <!-- BOVEN: Zonnepanelen -->
+  <line x1="95" y1="47" x2="95" y2="28" stroke="#EF9F27" stroke-width="1.5" stroke-dasharray="3,3" opacity="0.8"/>
+  <circle cx="95" cy="26" r="2" fill="#EF9F27" opacity="0.9"/>
+  <rect x="74" y="7" width="42" height="17" rx="2" fill="none" stroke="#EF9F27" stroke-width="1.2" opacity="0.85"/>
+  <line x1="88" y1="7" x2="88" y2="24" stroke="#EF9F27" stroke-width="0.8" opacity="0.7"/>
+  <line x1="102" y1="7" x2="102" y2="24" stroke="#EF9F27" stroke-width="0.8" opacity="0.7"/>
+  <line x1="74" y1="15" x2="116" y2="15" stroke="#EF9F27" stroke-width="0.8" opacity="0.7"/>
+  <line x1="95" y1="24" x2="95" y2="27" stroke="#EF9F27" stroke-width="1" opacity="0.6"/>
+
+  <!-- ONDER: Boiler cilinder -->
+  <line x1="95" y1="213" x2="95" y2="242" stroke="#378ADD" stroke-width="1.5" stroke-dasharray="3,3" opacity="0.8"/>
+  <circle cx="95" cy="244" r="2" fill="#378ADD" opacity="0.9"/>
+  <rect x="80" y="247" width="30" height="36" rx="0" fill="none" stroke="#378ADD" stroke-width="1.2" opacity="0.85"/>
+  <ellipse cx="95" cy="247" rx="15" ry="4" fill="none" stroke="#378ADD" stroke-width="1.2" opacity="0.85"/>
+  <ellipse cx="95" cy="283" rx="15" ry="4" fill="none" stroke="#378ADD" stroke-width="1.2" opacity="0.85"/>
+  <line x1="88" y1="257" x2="80" y2="257" stroke="#378ADD" stroke-width="1" opacity="0.5"/>
+  <line x1="102" y1="264" x2="110" y2="264" stroke="#378ADD" stroke-width="1" opacity="0.5"/>
+
+  <!-- LINKS: Quatt warmtepomp buitenunit -->
+  <line x1="46" y1="155" x2="30" y2="148" stroke="#5DCAA5" stroke-width="1.5" stroke-dasharray="3,3" opacity="0.8"/>
+  <circle cx="28" cy="147" r="2" fill="#5DCAA5" opacity="0.9"/>
+  <rect x="4" y="126" width="22" height="40" rx="5" fill="none" stroke="#5DCAA5" stroke-width="1.3" opacity="0.9"/>
+  <line x1="7" y1="133" x2="23" y2="133" stroke="#5DCAA5" stroke-width="0.9" opacity="0.6"/>
+  <line x1="7" y1="138" x2="23" y2="138" stroke="#5DCAA5" stroke-width="0.9" opacity="0.6"/>
+  <line x1="7" y1="143" x2="23" y2="143" stroke="#5DCAA5" stroke-width="0.9" opacity="0.6"/>
+  <line x1="7" y1="148" x2="23" y2="148" stroke="#5DCAA5" stroke-width="0.9" opacity="0.6"/>
+  <line x1="7" y1="153" x2="23" y2="153" stroke="#5DCAA5" stroke-width="0.9" opacity="0.6"/>
+  <line x1="7" y1="158" x2="23" y2="158" stroke="#5DCAA5" stroke-width="0.9" opacity="0.6"/>
+  <path d="M15 129 C15 129 18 133 18 135 C18 137 16.6 138 15 138 C13.4 138 12 137 12 135 C12 133 15 129 15 129 Z" fill="#5DCAA5" opacity="0.7"/>
+  <line x1="7" y1="166" x2="23" y2="166" stroke="#5DCAA5" stroke-width="1.2" opacity="0.5"/>
+
+  <!-- RECHTS: Batterij -->
+  <line x1="144" y1="155" x2="160" y2="148" stroke="#9FE1CB" stroke-width="1.5" stroke-dasharray="3,3" opacity="0.8"/>
+  <circle cx="162" cy="147" r="2" fill="#9FE1CB" opacity="0.9"/>
+  <rect x="165" y="133" width="22" height="36" rx="3" fill="none" stroke="#9FE1CB" stroke-width="1.2" opacity="0.85"/>
+  <rect x="171" y="130" width="10" height="4" rx="1.5" fill="none" stroke="#9FE1CB" stroke-width="1" opacity="0.7"/>
+  <rect x="168" y="156" width="16" height="6" rx="1" fill="#9FE1CB" opacity="0.7"/>
+  <rect x="168" y="148" width="16" height="6" rx="1" fill="#9FE1CB" opacity="0.45"/>
+  <rect x="168" y="140" width="16" height="6" rx="1" fill="#9FE1CB" opacity="0.2"/>
+
+  <!-- Merktekst rechts -->
+  <text x="200" y="118" font-family="Georgia, 'Times New Roman', serif" font-size="28" font-weight="700" letter-spacing="-0.5" fill="url(#textGrad)">Open Energy</text>
+  <text x="200" y="160" font-family="Georgia, 'Times New Roman', serif" font-size="46" font-weight="700" letter-spacing="2" fill="#ffffff">OS</text>
+  <rect x="200" y="174" width="150" height="1" fill="url(#subGrad)" opacity="0.6"/>
+  <text x="200" y="196" font-family="Georgia, 'Times New Roman', serif" font-size="16" font-weight="400" fill="#7eb8d4" letter-spacing="0.5">for <tspan font-weight="700" fill="#5DCAA5">Open</tspan><tspan font-weight="700" fill="#378ADD">Quatt</tspan></text>
+</svg>

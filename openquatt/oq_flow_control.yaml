@@ -70,6 +70,8 @@ globals:
 # TUNING INPUTS
 # ----------------------------
 number:
+  # Legacy single setpoint — kept as fallback when the per-mode setpoints below
+  # are 0/NaN (e.g. fresh installs that haven't touched them yet).
   - platform: template
     id: oq_flow_setpoint_lph
     name: "Flow Setpoint"
@@ -84,6 +86,56 @@ number:
     restore_value: true
     optimistic: true
     initial_value: 800
+
+  # Per-mode flow setpoints. The PI loop picks the right one based on the
+  # active control mode (CM1/2 = heating, CM4 = DHW, CM5 = cooling).
+  # Cooling needs higher flow because the available ΔT is smaller (~3–5°C vs
+  # ~7–10°C for heating) — same kW requires roughly 2× the flow.
+  # DHW benefits from higher flow for better heat exchange in the tank coil.
+  - platform: template
+    id: oq_flow_setpoint_heating_lph
+    name: "Flow Setpoint Heating"
+    icon: mdi:radiator
+    unit_of_measurement: "L/h"
+    mode: slider
+    web_server:
+      sorting_group_id: oq_control
+    min_value: 0
+    max_value: 1500
+    step: 10
+    restore_value: true
+    optimistic: true
+    initial_value: 800
+
+  - platform: template
+    id: oq_flow_setpoint_cooling_lph
+    name: "Flow Setpoint Cooling"
+    icon: mdi:snowflake
+    unit_of_measurement: "L/h"
+    mode: slider
+    web_server:
+      sorting_group_id: oq_control
+    min_value: 0
+    max_value: 1500
+    step: 10
+    restore_value: true
+    optimistic: true
+    initial_value: 1000
+
+  - platform: template
+    id: oq_flow_setpoint_dhw_lph
+    name: "Flow Setpoint DHW"
+    icon: mdi:water-boiler
+    unit_of_measurement: "L/h"
+    mode: slider
+    web_server:
+      sorting_group_id: oq_control
+    min_value: 0
+    max_value: 1500
+    step: 10
+    restore_value: true
+    optimistic: true
+    initial_value: 1000
 
   - platform: template
     id: oq_flow_manual_pwm
@@ -182,9 +234,58 @@ select:
       sorting_group_id: oq_control
 
 # ----------------------------
+# Phantom flow suppression switch (v0.40)
+# Runtime-toggleable. ON = filter actief, OFF = raw sensor (rollback).
+# Zie comment in oq_HP_io.yaml bij ${hp_id}_flow voor uitleg.
+# ----------------------------
+switch:
+  - platform: template
+    id: oq_flow_phantom_suppression_enable
+    name: "Flow Phantom Suppression"
+    icon: mdi:water-off-outline
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    turn_on_action: []
+    turn_off_action: []
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_hydraulics
+
+# ----------------------------
 # SENSORS
 # ----------------------------
 sensor:
+  # Active flow setpoint (diagnostic) — shows which of the per-mode setpoints
+  # is currently used by the PI loop. Matches the selection logic in run_auto_pi.
+  - platform: template
+    id: oq_flow_setpoint_active_lph
+    name: "Flow Setpoint Active"
+    icon: mdi:waves-arrow-right
+    unit_of_measurement: "L/h"
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 5s
+    web_server:
+      sorting_group_id: oq_control
+    lambda: |-
+      float sp = NAN;
+      const int cm_code = id(oq_control_mode_code);
+      switch (cm_code) {
+        case 1: case 2:
+          sp = id(oq_flow_setpoint_heating_lph).state;
+          break;
+        case 4:
+          sp = id(oq_flow_setpoint_dhw_lph).state;
+          break;
+        case 5:
+          sp = id(oq_flow_setpoint_cooling_lph).state;
+          break;
+        default:
+          sp = NAN;
+      }
+      if (isnan(sp) || sp <= 0.0f) sp = id(oq_flow_setpoint_lph).state;
+      return sp;
+
   # Average flow HP1/HP2
   - platform: template
     id: flow_rate_hp_avg
@@ -400,7 +501,32 @@ interval:
           // AUTO PI path only: setpoint ramp, PI, startup-hold, and last_good tracking.
           auto run_auto_pi = [&](int pwm_seed) -> int {
             int pwm_local = pwm_seed;
-            float sp_target = id(oq_flow_setpoint_lph).state;
+
+            // Pick the active flow setpoint based on the current control mode.
+            // Falls back to the legacy single setpoint when the per-mode value
+            // is missing / 0 / NaN — preserves behaviour for fresh installs and
+            // for control modes that don't fit one of the three categories.
+            float sp_target = NAN;
+            const int cm_code = id(oq_control_mode_code);
+            switch (cm_code) {
+              case 1:  // CM1 - Preflow/Postflow (treat as heating-side)
+              case 2:  // CM2 - Heating heat pump
+                sp_target = id(oq_flow_setpoint_heating_lph).state;
+                break;
+              case 4:  // CM4 - DHW heat pump
+                sp_target = id(oq_flow_setpoint_dhw_lph).state;
+                break;
+              case 5:  // CM5 - Cooling
+                sp_target = id(oq_flow_setpoint_cooling_lph).state;
+                break;
+              default:
+                sp_target = NAN;
+                break;
+            }
+            if (isnan(sp_target) || sp_target <= 0.0f) {
+              sp_target = id(oq_flow_setpoint_lph).state;  // legacy fallback
+            }
+
             float pv = id(flow_rate_selected).state;
 
             // Treat 0 L/h as a valid measurement (no-flow state), not as sensor failure.
@@ -515,6 +641,28 @@ interval:
 
           const int cm_code = id(oq_control_mode_code);
           const bool is_cm0 = (cm_code == 0);
+
+          // ============================================================
+          // CM97 - Air Purge override
+          // The purge state machine in oq_supervisory_controlmode.yaml writes
+          // oq_purge_target_ipwm every second. We push that value directly to
+          // the HP pump(s) and bypass the regular PI / submode logic entirely.
+          // ============================================================
+          if (cm_code == 97) {
+            int purge_ipwm = id(oq_purge_target_ipwm);
+            if (purge_ipwm < 0) purge_ipwm = 0;
+            if (purge_ipwm > 1000) purge_ipwm = 1000;
+            write_pump_pwm_if_changed(id(hp1_pump_speed), purge_ipwm);
+            if (${flow_secondary_enabled} != 0) {
+              write_pump_pwm_if_changed(id(${flow_secondary_pump_speed_id}), purge_ipwm);
+            }
+            id(oq_flow_last_pwm) = purge_ipwm;
+            if (last_mode != "CM97-PURGE") {
+              id(oq_flow_mode).publish_state("CM97-PURGE");
+              last_mode = "CM97-PURGE";
+            }
+            return;
+          }
 
           // Flow submode select (within CM1/CM2/CM3): AUTO vs MANUAL PWM
           const int flow_mode_code = (id(oq_flow_control_mode).active_index().value_or(0) == 1) ? 1 : 0;

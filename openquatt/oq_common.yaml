@@ -164,6 +164,18 @@ globals:
 # ==============================================================================
 select:
   - platform: template
+    name: "Control Owner"
+    id: oq_control_owner
+    icon: mdi:toggle-switch-variant
+    web_server:
+      sorting_group_id: oq_control
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    options: ["OpenQuatt", "CiC"]
+    initial_option: "OpenQuatt"
+
+  - platform: template
     name: "Firmware Update Channel"
     id: oq_firmware_update_channel
     icon: mdi:source-branch
@@ -344,7 +356,12 @@ sensor:
     web_server:
       sorting_group_id: oq_system_diagnostics
 
+  # v0.40: deze is de enige internal_temperature sensor in de build.
+  # De duplicate-registratie in oq_cic_modbus_slave.yaml (die FAILED gaf)
+  # is verwijderd. Dashboards verwijzen naar entity
+  # `sensor.openquatt_esp_internal_temperature`.
   - platform: internal_temperature
+    id: esp32_internal_temp
     name: ESP Internal Temperature
     icon: mdi:thermometer
     update_interval: 60s
@@ -466,8 +483,12 @@ update:
     id: oq_firmware_update
     name: Firmware Update
     source: ${release_manifest_url}
-    update_interval: 4h
+    # Auto-polling disabled — this is a custom build, we don't want it pulling
+    # the upstream jeroen85/OpenQuatt release manifest (which returns 404 anyway
+    # if no matching asset is published). Manual update.check is still possible.
+    update_interval: never
     icon: mdi:update
     entity_category: diagnostic
+    disabled_by_default: true
     web_server:
       sorting_group_id: oq_system_diagnostics

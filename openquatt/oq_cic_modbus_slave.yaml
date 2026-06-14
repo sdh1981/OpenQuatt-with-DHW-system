@@ -40,6 +40,7 @@
 substitutions:
   cic_modbus_slave_address: "3"                         # CIC-facing Modbus slave address on RS485 #2.
   cic_modbus_push_interval_ms: "300"                   # Active push interval on RS485 #2.
+  cic_verbose_log_min_interval_ms: "250"
   # APA102 physical index mapping on LilyGO T-Connect:
   # center LED = 4, side LEDs = 0..3
   cic_led_idx_bus1: "0"
@@ -83,14 +84,71 @@ globals:
     type: bool
     restore_value: false
     initial_value: 'false'
+  - id: cic_bridge_last_addr
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: cic_bridge_last_reg
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: cic_bridge_last_val
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: cic_bridge_last_ok
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: cic_bridge_last_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: cic_verbose_log_enabled
+    type: bool
+    restore_value: true
+    initial_value: 'false'
+  - id: cic_verbose_last_publish_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
 
 switch:
+  - platform: template
+    id: cic_verbose_logger
+    name: "CIC - Verbose Modbus Logger"
+    icon: mdi:text-box-search
+    lambda: |-
+      return id(cic_verbose_log_enabled);
+    turn_on_action:
+      - lambda: |-
+          id(cic_verbose_log_enabled) = true;
+    turn_off_action:
+      - lambda: |-
+          id(cic_verbose_log_enabled) = false;
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    web_server:
+      sorting_group_id: oq_cic
+
   - platform: template
     id: cic_modbus_push_enable
     name: "CIC - Modbus Active Push Enable"
     icon: mdi:transmission-tower
     optimistic: true
     restore_mode: RESTORE_DEFAULT_ON
+    web_server:
+      sorting_group_id: oq_cic
+
+select:
+  - platform: template
+    id: cic_decode_profile
+    name: "CIC - Modbus Decode Profile"
+    icon: mdi:format-list-bulleted-type
+    optimistic: true
+    restore_value: true
+    options: ["Off", "Basic", "Full"]
+    initial_option: "Full"
     web_server:
       sorting_group_id: oq_cic
 
@@ -130,6 +188,9 @@ uart:
               return;
             }
 
+            // Reused across every frame to avoid per-frame heap allocation.
+            static std::vector<uint8_t> s_resp;
+
             auto modbus_crc = [](const uint8_t *data, size_t len) -> uint16_t {
               uint16_t crc = 0xFFFF;
               for (size_t i = 0; i < len; i++) {
@@ -166,19 +227,149 @@ uart:
             id(cic_last_master_request_ms) = millis();
 
             const uint8_t fn = bytes[1];
+            auto bytes_to_hex = [&](const uint8_t *data, size_t len) -> std::string {
+              static const char *h = "0123456789ABCDEF";
+              std::string s;
+              s.reserve(len * 3);
+              for (size_t i = 0; i < len; i++) {
+                if (i) s.push_back(' ');
+                const uint8_t b = data[i];
+                s.push_back(h[(b >> 4) & 0x0F]);
+                s.push_back(h[b & 0x0F]);
+              }
+              return s;
+            };
+            auto hp_name = [&](uint8_t a) -> const char * {
+              if (a == 0x01) return "HP1";
+              if (a == 0x02) return "HP2";
+              return "HP?";
+            };
+            auto mode_name = [&](uint16_t v) -> const char * {
+              if (v == 0) return "Standby";
+              if (v == 1) return "Cooling";
+              if (v == 2) return "Heating";
+              if (v == 3) return "HotWater(req)";
+              return "Unknown";
+            };
+            auto reg_name = [&](uint16_t reg) -> const char * {
+              if (reg == 3999 || reg == 2099) return "working_mode";
+              if (reg == 1999 || reg == 2109) return "compressor_level";
+              if (reg == 2006) return "silent_mode";
+              if (reg == 2010) return "pump_mode";
+              if (reg == 2015) return "pump_speed";
+              return "unknown";
+            };
+            auto verbose_can_publish = [&]() -> bool {
+              if (!id(cic_verbose_log_enabled)) return false;
+              const uint32_t now = millis();
+              if ((now - id(cic_verbose_last_publish_ms)) < (uint32_t) ${cic_verbose_log_min_interval_ms}) return false;
+              id(cic_verbose_last_publish_ms) = now;
+              return true;
+            };
+            auto publish_event = [&](const std::string &msg) { id(cic_last_modbus_event).publish_state(msg); };
+            auto publish_rx_decoded = [&](const std::string &msg) {
+              id(cic_last_modbus_rx_decoded).publish_state(msg);
+              id(cic_last_modbus_decoded).publish_state(msg);
+            };
+            auto publish_tx_decoded = [&](const std::string &msg) { id(cic_last_modbus_tx_decoded).publish_state(msg); };
+            auto publish_rx_verbose = [&]() {
+              if (!verbose_can_publish()) return;
+              id(cic_last_modbus_rx_hex).publish_state(bytes_to_hex(bytes.data(), bytes.size()));
+              char b[96];
+              snprintf(b, sizeof(b), "RX addr=0x%02X fn=0x%02X len=%u", (unsigned) addr, (unsigned) fn, (unsigned) bytes.size());
+              publish_event(std::string(b));
+            };
+            auto publish_tx_verbose = [&](const std::vector<uint8_t> &out, const char *tag) {
+              if (!id(cic_verbose_log_enabled)) return;
+              id(cic_last_modbus_tx_hex).publish_state(bytes_to_hex(out.data(), out.size()));
+              char b[96];
+              snprintf(b, sizeof(b), "TX %s addr=0x%02X fn=0x%02X len=%u",
+                       tag,
+                       (unsigned) (out.size() > 0 ? out[0] : 0U),
+                       (unsigned) (out.size() > 1 ? out[1] : 0U),
+                       (unsigned) out.size());
+              publish_event(std::string(b));
+            };
+            publish_rx_verbose();
             auto send_exception = [&](uint8_t exception_code) {
-              std::vector<uint8_t> out;
-              out.reserve(5);
-              out.push_back(addr);
-              out.push_back(static_cast<uint8_t>(fn | 0x80));
-              out.push_back(exception_code);
-              const uint16_t crc = modbus_crc(out.data(), out.size());
-              out.push_back(static_cast<uint8_t>(crc & 0xFF));
-              out.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
-              id(cic_rs485_slave_uart).write_array(out.data(), out.size());
+              s_resp.clear();
+              s_resp.reserve(5);
+              s_resp.push_back(addr);
+              s_resp.push_back(static_cast<uint8_t>(fn | 0x80));
+              s_resp.push_back(exception_code);
+              const uint16_t crc = modbus_crc(s_resp.data(), s_resp.size());
+              s_resp.push_back(static_cast<uint8_t>(crc & 0xFF));
+              s_resp.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
+              publish_tx_verbose(s_resp, "exception");
+              publish_tx_decoded(std::string("EXCEPTION ") + hp_name(addr));
+              id(cic_rs485_slave_uart).write_array(s_resp.data(), s_resp.size());
               id(cic_rs485_slave_uart).flush();
               id(cic_slave_responses)++;
               id(cic_slave_response_count).publish_state((float) id(cic_slave_responses));
+            };
+
+            auto apply_hp_write = [&](bool hp1, uint16_t reg, uint16_t value) -> bool {
+              const bool cic_is_owner =
+                  id(oq_control_owner).has_state() && id(oq_control_owner).current_option() == "CiC";
+              if (!cic_is_owner) return false;
+
+              if (reg == 3999 || reg == 2099) {
+                const char *opt = nullptr;
+                if (value == 0) opt = "Standby";
+                else if (value == 1) opt = "Cooling";
+                else if (value == 2 || value == 3) opt = "Heating";
+                else return false;
+                auto *sel = (hp1 ? id(hp1_set_working_mode) : id(hp2_set_working_mode));
+                if (!sel->has_state() || sel->current_option() != opt) {
+                  auto c = sel->make_call();
+                  c.set_option(opt);
+                  c.perform();
+                }
+              } else if (reg == 1999 || reg == 2109) {
+                if (value > 10) return false;
+                const char *lvl_opts[11] = {"0","1","2","3","4","5","6","7","8","9","10"};
+                auto *sel = (hp1 ? id(hp1_compressor_level) : id(hp2_compressor_level));
+                if (!sel->has_state() || sel->current_option() != lvl_opts[value]) {
+                  auto c = sel->make_call();
+                  c.set_option(lvl_opts[value]);
+                  c.perform();
+                }
+              } else if (reg == 2006) {
+                const char *opt = (value == 0) ? "Off" : ((value == 1) ? "On" : nullptr);
+                if (!opt) return false;
+                auto *sel = (hp1 ? id(hp1_low_noise_mode) : id(hp2_low_noise_mode));
+                if (!sel->has_state() || sel->current_option() != opt) {
+                  auto c = sel->make_call();
+                  c.set_option(opt);
+                  c.perform();
+                }
+              } else if (reg == 2010) {
+                const char *opt = (value == 0) ? "Off" : ((value == 4096) ? "On" : nullptr);
+                if (!opt) return false;
+                auto *sel = (hp1 ? id(hp1_set_pump_mode) : id(hp2_set_pump_mode));
+                if (!sel->has_state() || sel->current_option() != opt) {
+                  auto c = sel->make_call();
+                  c.set_option(opt);
+                  c.perform();
+                }
+              } else if (reg == 2015) {
+                if (value > 1000) return false;
+                auto *num = (hp1 ? id(hp1_pump_speed) : id(hp2_pump_speed));
+                if (isnan(num->state) || fabsf(num->state - (float) value) > 0.5f) {
+                  auto c = num->make_call();
+                  c.set_value((float) value);
+                  c.perform();
+                }
+              } else {
+                return false;
+              }
+
+              id(cic_bridge_last_addr) = hp1 ? 1U : 2U;
+              id(cic_bridge_last_reg) = reg;
+              id(cic_bridge_last_val) = value;
+              id(cic_bridge_last_ok) = true;
+              id(cic_bridge_last_ms) = millis();
+              return true;
             };
 
             if (fn == 0x06) {
@@ -186,18 +377,48 @@ uart:
                 send_exception(0x03);  // Illegal data value
                 return;
               }
-              std::vector<uint8_t> out;
-              out.reserve(8);
-              out.push_back(addr);
-              out.push_back(fn);
-              out.push_back(bytes[2]);
-              out.push_back(bytes[3]);
-              out.push_back(bytes[4]);
-              out.push_back(bytes[5]);
-              const uint16_t crc = modbus_crc(out.data(), out.size());
-              out.push_back(static_cast<uint8_t>(crc & 0xFF));
-              out.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
-              id(cic_rs485_slave_uart).write_array(out.data(), out.size());
+              const uint16_t reg = (static_cast<uint16_t>(bytes[2]) << 8) | bytes[3];
+              const uint16_t val = (static_cast<uint16_t>(bytes[4]) << 8) | bytes[5];
+              {
+                char d[220];
+                if (reg == 3999 || reg == 2099) {
+                  snprintf(d, sizeof(d), "WRITE_SINGLE %s %s = %s (%u)",
+                           hp_name(addr), reg_name(reg), mode_name(val), (unsigned) val);
+                } else {
+                  snprintf(d, sizeof(d), "WRITE_SINGLE %s %s = %u",
+                           hp_name(addr), reg_name(reg), (unsigned) val);
+                }
+                publish_rx_decoded(std::string(d));
+              }
+              const bool hp1_target = (addr == 0x01);
+              const bool hp2_target = (addr == 0x02);
+              if ((hp1_target || hp2_target) && !apply_hp_write(hp1_target, reg, val)) {
+                id(cic_bridge_last_addr) = hp1_target ? 1U : (hp2_target ? 2U : (uint32_t) addr);
+                id(cic_bridge_last_reg) = reg;
+                id(cic_bridge_last_val) = val;
+                id(cic_bridge_last_ok) = false;
+                id(cic_bridge_last_ms) = millis();
+                send_exception(0x02);
+                return;
+              }
+              s_resp.clear();
+              s_resp.reserve(8);
+              s_resp.push_back(addr);
+              s_resp.push_back(fn);
+              s_resp.push_back(bytes[2]);
+              s_resp.push_back(bytes[3]);
+              s_resp.push_back(bytes[4]);
+              s_resp.push_back(bytes[5]);
+              const uint16_t crc = modbus_crc(s_resp.data(), s_resp.size());
+              s_resp.push_back(static_cast<uint8_t>(crc & 0xFF));
+              s_resp.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
+              publish_tx_verbose(s_resp, "write-single-ack");
+              {
+                char d[200];
+                snprintf(d, sizeof(d), "ACK WRITE_SINGLE %s reg=%u", hp_name(addr), (unsigned) reg);
+                publish_tx_decoded(std::string(d));
+              }
+              id(cic_rs485_slave_uart).write_array(s_resp.data(), s_resp.size());
               id(cic_rs485_slave_uart).flush();
               id(cic_slave_responses)++;
               id(cic_slave_response_count).publish_state((float) id(cic_slave_responses));
@@ -221,20 +442,51 @@ uart:
                 return;
               }
 
-              // ACK only: accept CIC writes locally so CIC stays healthy,
-              // but never forward/write anything to HP bus on RS485 #1.
-              std::vector<uint8_t> out;
-              out.reserve(8);
-              out.push_back(addr);
-              out.push_back(fn);
-              out.push_back(static_cast<uint8_t>((start_addr >> 8) & 0xFF));
-              out.push_back(static_cast<uint8_t>(start_addr & 0xFF));
-              out.push_back(static_cast<uint8_t>((quantity >> 8) & 0xFF));
-              out.push_back(static_cast<uint8_t>(quantity & 0xFF));
-              const uint16_t crc = modbus_crc(out.data(), out.size());
-              out.push_back(static_cast<uint8_t>(crc & 0xFF));
-              out.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
-              id(cic_rs485_slave_uart).write_array(out.data(), out.size());
+              {
+                const uint16_t first_val = (static_cast<uint16_t>(bytes[7]) << 8) | bytes[8];
+                char d[240];
+                if (start_addr == 3999 || start_addr == 2099) {
+                  snprintf(d, sizeof(d), "WRITE_MULTI %s %s qty=%u first=%s (%u)",
+                           hp_name(addr), reg_name(start_addr), (unsigned) quantity,
+                           mode_name(first_val), (unsigned) first_val);
+                } else {
+                  snprintf(d, sizeof(d), "WRITE_MULTI %s %s qty=%u first=%u",
+                           hp_name(addr), reg_name(start_addr), (unsigned) quantity, (unsigned) first_val);
+                }
+                publish_rx_decoded(std::string(d));
+              }
+              const bool hp1_target = (addr == 0x01);
+              const bool hp2_target = (addr == 0x02);
+              if (hp1_target || hp2_target) {
+                for (uint16_t i = 0; i < quantity; i++) {
+                  const uint16_t reg = static_cast<uint16_t>(start_addr + i);
+                  const size_t data_off = 7 + static_cast<size_t>(i) * 2U;
+                  const uint16_t val = (static_cast<uint16_t>(bytes[data_off]) << 8) | bytes[data_off + 1];
+                  if (!apply_hp_write(hp1_target, reg, val)) {
+                    id(cic_bridge_last_addr) = hp1_target ? 1U : 2U;
+                    id(cic_bridge_last_reg) = reg;
+                    id(cic_bridge_last_val) = val;
+                    id(cic_bridge_last_ok) = false;
+                    id(cic_bridge_last_ms) = millis();
+                    send_exception(0x02);
+                    return;
+                  }
+                }
+              }
+              s_resp.clear();
+              s_resp.reserve(8);
+              s_resp.push_back(addr);
+              s_resp.push_back(fn);
+              s_resp.push_back(static_cast<uint8_t>((start_addr >> 8) & 0xFF));
+              s_resp.push_back(static_cast<uint8_t>(start_addr & 0xFF));
+              s_resp.push_back(static_cast<uint8_t>((quantity >> 8) & 0xFF));
+              s_resp.push_back(static_cast<uint8_t>(quantity & 0xFF));
+              const uint16_t crc = modbus_crc(s_resp.data(), s_resp.size());
+              s_resp.push_back(static_cast<uint8_t>(crc & 0xFF));
+              s_resp.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
+              publish_tx_verbose(s_resp, "write-multi-ack");
+              publish_tx_decoded(std::string("ACK WRITE_MULTI ") + hp_name(addr));
+              id(cic_rs485_slave_uart).write_array(s_resp.data(), s_resp.size());
               id(cic_rs485_slave_uart).flush();
               id(cic_slave_responses)++;
               id(cic_slave_response_count).publish_state((float) id(cic_slave_responses));
@@ -353,35 +605,114 @@ uart:
               }
             };
 
-            std::vector<uint8_t> out;
-            out.reserve(5 + quantity * 2);
-            out.push_back(addr);
-            out.push_back(fn);
-            out.push_back(static_cast<uint8_t>(quantity * 2));
+            s_resp.clear();
+            s_resp.reserve(5 + quantity * 2);
+            s_resp.push_back(addr);
+            s_resp.push_back(fn);
+            s_resp.push_back(static_cast<uint8_t>(quantity * 2));
 
             for (uint16_t i = 0; i < quantity; i++) {
               const uint16_t value = get_register(start_addr + i);
-              out.push_back(static_cast<uint8_t>((value >> 8) & 0xFF));
-              out.push_back(static_cast<uint8_t>(value & 0xFF));
+              s_resp.push_back(static_cast<uint8_t>((value >> 8) & 0xFF));
+              s_resp.push_back(static_cast<uint8_t>(value & 0xFF));
             }
 
-            const uint16_t crc = modbus_crc(out.data(), out.size());
-            out.push_back(static_cast<uint8_t>(crc & 0xFF));
-            out.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
+            const uint16_t crc = modbus_crc(s_resp.data(), s_resp.size());
+            s_resp.push_back(static_cast<uint8_t>(crc & 0xFF));
+            s_resp.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
+            publish_tx_verbose(s_resp, "read-response");
+            publish_tx_decoded(std::string("RESP READ ") + hp_name(addr));
 
-            id(cic_rs485_slave_uart).write_array(out.data(), out.size());
+            id(cic_rs485_slave_uart).write_array(s_resp.data(), s_resp.size());
             id(cic_rs485_slave_uart).flush();
 
             id(cic_slave_responses)++;
             id(cic_slave_response_count).publish_state((float) id(cic_slave_responses));
 
-sensor:
-  - platform: internal_temperature
-    id: cic_esp32_internal_temp
-    name: "CIC - ESP32S3 Internal Temperature"
-    icon: mdi:thermometer
+text_sensor:
+  - platform: template
+    id: cic_last_modbus_decoded
+    name: "CIC - Last Modbus Decoded"
+    icon: mdi:translate
+    update_interval: never
+    entity_category: diagnostic
     web_server:
-      sorting_group_id: oq_system_diagnostics
+      sorting_group_id: oq_cic
+
+  - platform: template
+    id: cic_last_modbus_rx_decoded
+    name: "CIC - Last Modbus RX Decoded"
+    icon: mdi:message-text-fast
+    update_interval: never
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_cic
+
+  - platform: template
+    id: cic_last_modbus_tx_decoded
+    name: "CIC - Last Modbus TX Decoded"
+    icon: mdi:message-text-clock
+    update_interval: never
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_cic
+
+  - platform: template
+    id: cic_last_modbus_event
+    name: "CIC - Last Modbus Event"
+    icon: mdi:message-text-outline
+    update_interval: never
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_cic
+
+  - platform: template
+    id: cic_last_modbus_rx_hex
+    name: "CIC - Last Modbus RX HEX"
+    icon: mdi:arrow-down-bold-hexagon-outline
+    update_interval: never
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_cic
+
+  - platform: template
+    id: cic_last_modbus_tx_hex
+    name: "CIC - Last Modbus TX HEX"
+    icon: mdi:arrow-up-bold-hexagon-outline
+    update_interval: never
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_cic
+
+  - platform: template
+    id: cic_bridge_last_write
+    name: "CIC - Last Bridged Write"
+    icon: mdi:swap-horizontal-bold
+    update_interval: 1s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_cic
+    lambda: |-
+      if (id(cic_bridge_last_ms) == 0U) return std::string("none");
+      char b[160];
+      const uint32_t age_s = (millis() - id(cic_bridge_last_ms)) / 1000U;
+      snprintf(
+          b, sizeof(b),
+          "addr=%lu reg=%lu value=%lu status=%s age=%lus",
+          (unsigned long) id(cic_bridge_last_addr),
+          (unsigned long) id(cic_bridge_last_reg),
+          (unsigned long) id(cic_bridge_last_val),
+          id(cic_bridge_last_ok) ? "OK" : "REJECTED",
+          (unsigned long) age_s);
+      return std::string(b);
+
+sensor:
+  # v0.40: duplicate internal_temperature sensors verwijderd. ESPHome kan
+  # er maar één per chip registreren — de tweede gaf "FAILED: unspecified".
+  # De canonieke ESP-temperatuur staat nu alleen in oq_common.yaml met
+  # id `esp32_internal_temp` en HA entity sensor.openquatt_esp_internal_temperature.
+  # Een wrapper-template voor CIC-sortering is ook overbodig: dezelfde entity
+  # kan via HA dashboards in elke sortering geplaatst worden.
 
   - platform: debug
     free:

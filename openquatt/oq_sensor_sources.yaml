@@ -27,6 +27,10 @@ globals:
     type: bool
     restore_value: false
     initial_value: 'false'
+  - id: oq_pt1000_supply_fallback_active
+    type: bool
+    restore_value: false
+    initial_value: 'false'
 
   - id: oq_outside_temp_selected_last_valid_c
     type: float
@@ -79,6 +83,7 @@ select:
       - Local
       - CIC
       - HA input
+      - PT1000
     initial_option: Local
     web_server:
       sorting_group_id: oq_sensor_selection
@@ -137,7 +142,6 @@ select:
     restore_value: true
     options:
       - CIC
-      - OT thermostat
       - HA input
     initial_option: CIC
     web_server:
@@ -152,7 +156,6 @@ select:
     restore_value: true
     options:
       - CIC
-      - OT thermostat
       - HA input
     initial_option: CIC
     web_server:
@@ -306,6 +309,7 @@ sensor:
       const uint32_t hold_ms = (uint32_t)(${oq_selected_input_stale_hold_s}UL * 1000UL);
       const uint32_t now_ms = (uint32_t) millis();
 
+      id(oq_pt1000_supply_fallback_active) = false;
       float selected_c = NAN;
       if (source == "CIC") {
         if (id(water_supply_temp_cic).has_state()) selected_c = id(water_supply_temp_cic).state;
@@ -315,6 +319,18 @@ sensor:
       }
       if (source == "Local") {
         if (id(water_supply_temp_esp).has_state()) selected_c = id(water_supply_temp_esp).state;
+      }
+      if (source == "PT1000") {
+        const float pt1000_c = id(cwt_pt_ch5_c).has_state() ? id(cwt_pt_ch5_c).state : NAN;
+        const bool pt1000_valid = !isnan(pt1000_c) && pt1000_c > -20.0f && pt1000_c < 90.0f;
+        if (pt1000_valid) {
+          selected_c = pt1000_c;
+        } else {
+          // PT1000 ongeldig (NAN, buiten bereik of Modbus-fout) — val terug op HP2 uitlaattemp.
+          id(oq_pt1000_supply_fallback_active) = true;
+          if (id(hp2_water_out_temp).has_state() && !isnan(id(hp2_water_out_temp).state))
+            selected_c = id(hp2_water_out_temp).state;
+        }
       }
 
       const bool selected_valid = !isnan(selected_c);
@@ -459,9 +475,8 @@ sensor:
       if (source == "HA input") {
         if (id(thermostat_room_temp_ha).has_state()) selected_c = id(thermostat_room_temp_ha).state;
       }
-      if (source == "OT thermostat") {
-        if (id(ot_thermostat_room_temp).has_state()) selected_c = id(ot_thermostat_room_temp).state;
-      }
+      // v0.40: OT thermostat source verwijderd (package niet meer geïncludeerd).
+      // Selectie van "OT thermostat" levert nu NaN op.
       if (source == "CIC") {
         if (id(cic_room_temp).has_state()) selected_c = id(cic_room_temp).state;
       }
@@ -509,9 +524,7 @@ sensor:
       if (source == "HA input") {
         if (id(thermostat_setpoint_ha).has_state()) selected_c = id(thermostat_setpoint_ha).state;
       }
-      if (source == "OT thermostat") {
-        if (id(ot_thermostat_room_setpoint).has_state()) selected_c = id(ot_thermostat_room_setpoint).state;
-      }
+      // v0.40: OT thermostat source verwijderd (package niet meer geïncludeerd).
       if (source == "CIC") {
         if (id(cic_room_setpoint).has_state()) selected_c = id(cic_room_setpoint).state;
       }
@@ -537,3 +550,28 @@ sensor:
       return NAN;
     web_server:
       sorting_group_id: oq_temperatures
+
+binary_sensor:
+  - platform: template
+    id: oq_pt1000_supply_fallback
+    name: "T-Aanvoer PT1000 fallback actief"
+    icon: mdi:alert-circle-outline
+    device_class: problem
+    entity_category: diagnostic
+    update_interval: 10s
+    lambda: return id(oq_pt1000_supply_fallback_active);
+    on_press:
+      - homeassistant.service:
+          service: persistent_notification.create
+          data:
+            notification_id: oq_pt1000_supply_fallback
+            title: "OpenQuatt — T-Aanvoer sensor fallback"
+            message: >-
+              PT1000 Ch5 (T-Aanvoer) geeft geen geldige meting.
+              De regeling gebruikt HP2 uitlaattemperatuur als tijdelijke vervanging.
+              Controleer de PT1000-sensor en de Modbus-verbinding van de CWT-module.
+    on_release:
+      - homeassistant.service:
+          service: persistent_notification.dismiss
+          data:
+            notification_id: oq_pt1000_supply_fallback

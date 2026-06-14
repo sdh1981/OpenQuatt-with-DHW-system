@@ -124,6 +124,10 @@
     coolingWithoutDewPointMode: { domain: "select", name: "Cooling Without Dew Point", optional: true },
     flowControlMode: { domain: "select", name: "Flow Control Mode" },
     flowSetpoint: { domain: "number", name: "Flow Setpoint" },
+    flowSetpointHeating: { domain: "number", name: "Flow Setpoint Heating", optional: true },
+    flowSetpointCooling: { domain: "number", name: "Flow Setpoint Cooling", optional: true },
+    flowSetpointDhw: { domain: "number", name: "Flow Setpoint DHW", optional: true },
+    flowSetpointActive: { domain: "sensor", name: "Flow Setpoint Active", optional: true },
     manualIpwm: { domain: "number", name: "Manual iPWM" },
     controlModeLabel: { domain: "text_sensor", name: "Control Mode (Label)" },
     flowMode: { domain: "text_sensor", name: "Flow Mode" },
@@ -148,12 +152,25 @@
     dhwTankBottom: { domain: "sensor", name: "DHW tank bottom", optional: true },
     dhwCoilIn: { domain: "sensor", name: "DHW coil in", optional: true },
     dhwCoilOut: { domain: "sensor", name: "DHW coil out", optional: true },
+    cwtCh1Top: { domain: "sensor", name: "CWT Ch1 — DHW Tank Top", optional: true },
+    cwtCh2Bottom: { domain: "sensor", name: "CWT Ch2 — DHW Tank Bottom", optional: true },
+    cwtCh3CoilIn: { domain: "sensor", name: "CWT Ch3 — DHW Coil In", optional: true },
+    cwtCh4CoilOut: { domain: "sensor", name: "CWT Ch4 — DHW Coil Out", optional: true },
+    cwtCh5Spare: { domain: "sensor", name: "CWT Ch5 — Spare 1", optional: true },
+    cwtCh6Spare: { domain: "sensor", name: "CWT Ch6 — Spare 2", optional: true },
+    cwtCh7Spare: { domain: "sensor", name: "CWT Ch7 — Spare 3", optional: true },
+    cwtCh8Spare: { domain: "sensor", name: "CWT Ch8 — Spare 4", optional: true },
     dhwTargetFlowTemp: { domain: "sensor", name: "DHW target flow temp", optional: true },
     dhwHpRequestActive: { domain: "binary_sensor", name: "DHW HP request active", optional: true },
     dhwBlockCvPriority: { domain: "binary_sensor", name: "DHW block CV priority", optional: true },
     dhwValveDhwPosition: { domain: "binary_sensor", name: "DHW valve aux (DHW position)", optional: true },
     dhwLegionellaLastRun: { domain: "text_sensor", name: "DHW legionella laatste run", optional: true },
     dhwLegionellaNextRun: { domain: "text_sensor", name: "DHW legionella volgende run", optional: true },
+    dhwLegionellaEta: { domain: "sensor", name: "DHW legionella ETA", optional: true },
+    dhwLegionellaElapsed: { domain: "sensor", name: "DHW legionella elapsed", optional: true },
+    dhwLegionellaHpHandoverTemp: { domain: "number", name: "DHW legionella HP handover temp", optional: true },
+    dhwStopOnBottomEnable: { domain: "switch", name: "DHW stop on tank bottom", optional: true },
+    dhwHpStopBottom: { domain: "number", name: "DHW HP stop tank bottom", optional: true },
     systemHeatPower: { domain: "sensor", name: "System Heat Power", optional: true },
     flowSelected: { domain: "sensor", name: "Flow average (Selected)" },
     electricalEnergyDaily: { domain: "sensor", name: "Electrical Energy Daily", optional: true },
@@ -257,14 +274,51 @@
     hp2FourWay: { domain: "binary_sensor", name: "HP2 - 4-Way valve", optional: true },
     apply: { domain: "button", name: "Complete setup" },
     reset: { domain: "button", name: "Reset setup state" },
+    // Sensor calibration (oq_sensor_calibration.yaml)
+    calStart:        { domain: "button",      name: "Sensor Cal Start",              optional: true },
+    calStop:         { domain: "button",      name: "Sensor Cal Stop",               optional: true },
+    calApply:        { domain: "button",      name: "Sensor Cal Apply",              optional: true },
+    calReset:        { domain: "button",      name: "Sensor Cal Reset Offsets",      optional: true },
+    calStateText:    { domain: "text_sensor", name: "Sensor Cal State",              optional: true },
+    calStatusDetail: { domain: "text_sensor", name: "Sensor Cal Status Detail",      optional: true },
+    calRemaining:    { domain: "sensor",      name: "Sensor Cal Remaining",          optional: true },
+    calSamples:      { domain: "sensor",      name: "Sensor Cal Samples",            optional: true },
+    calHp1InRaw:     { domain: "sensor",      name: "Sensor Cal HP1 Water In Raw",   optional: true },
+    calHp1OutRaw:    { domain: "sensor",      name: "Sensor Cal HP1 Water Out Raw",  optional: true },
+    calHp2InRaw:     { domain: "sensor",      name: "Sensor Cal HP2 Water In Raw",   optional: true },
+    calHp2OutRaw:    { domain: "sensor",      name: "Sensor Cal HP2 Water Out Raw",  optional: true },
+    calSpread:       { domain: "sensor",      name: "Sensor Cal Spread",             optional: true },
+    calSupplyDiff:   { domain: "sensor",      name: "Sensor Cal Supply Diff",        optional: true },
+    calReference:    { domain: "sensor",      name: "Sensor Cal Reference",          optional: true },
+    calPropHp1In:    { domain: "sensor",      name: "Sensor Cal Proposed HP1 In",    optional: true },
+    calPropHp1Out:   { domain: "sensor",      name: "Sensor Cal Proposed HP1 Out",   optional: true },
+    calPropHp2In:    { domain: "sensor",      name: "Sensor Cal Proposed HP2 In",    optional: true },
+    calPropHp2Out:   { domain: "sensor",      name: "Sensor Cal Proposed HP2 Out",   optional: true },
+    calOffsetHp1In:  { domain: "sensor",      name: "HP1 Water In Cal Offset",       optional: true },
+    calOffsetHp1Out: { domain: "sensor",      name: "HP1 Water Out Cal Offset",      optional: true },
+    calOffsetHp2In:  { domain: "sensor",      name: "HP2 Water In Cal Offset",       optional: true },
+    calOffsetHp2Out: { domain: "sensor",      name: "HP2 Water Out Cal Offset",      optional: true },
+    calMaxDuration:  { domain: "number",      name: "Sensor Cal Max Duration",       optional: true },
+    calSpreadThreshold: { domain: "number",   name: "Sensor Cal Spread Threshold",   optional: true },
   };
+
+  const CAL_ENTITY_KEYS = [
+    "calStateText", "calStatusDetail", "calRemaining", "calSamples",
+    "calHp1InRaw", "calHp1OutRaw", "calHp2InRaw", "calHp2OutRaw",
+    "calSpread", "calSupplyDiff", "calReference",
+    "calPropHp1In", "calPropHp1Out", "calPropHp2In", "calPropHp2Out",
+    "calOffsetHp1In", "calOffsetHp1Out", "calOffsetHp2In", "calOffsetHp2Out",
+    "calMaxDuration", "calSpreadThreshold",
+    // live sensor readings (calibrated; raw = calibrated - offset)
+    "hp1WaterIn", "hp1WaterOut", "hp2WaterIn", "hp2WaterOut",
+  ];
 
   const QUICK_START_VIEW = "quickstart";
   const APP_VIEWS = [
-    { id: QUICK_START_VIEW, label: "Quick Start" },
     { id: "overview", label: "Overzicht" },
     { id: "energy", label: "Energie" },
     { id: "settings", label: "Instellingen" },
+    { id: "service", label: "Service" },
   ];
   const APP_VIEW_IDS = new Set(APP_VIEWS.map((view) => view.id));
   const HP_PANEL_CONFIGS = [
@@ -349,7 +403,7 @@
     "phDemandFallTime",
   ];
   const LIMIT_KEYS = ["dayMax", "silentMax", "maxWater"];
-  const FLOW_SETTING_KEYS = ["flowControlMode", "flowSetpoint", "manualIpwm"];
+  const FLOW_SETTING_KEYS = ["flowControlMode", "flowSetpoint", "flowSetpointHeating", "flowSetpointCooling", "flowSetpointDhw", "manualIpwm"];
   const COOLING_SETTING_KEYS = [
     "coolingWithoutDewPointMode",
     "coolingGuardMode",
@@ -410,6 +464,14 @@
     "dhwState",
     "dhwFault",
     "dhwTankTop",
+    "cwtCh1Top",
+    "cwtCh2Bottom",
+    "cwtCh3CoilIn",
+    "cwtCh4CoilOut",
+    "cwtCh5Spare",
+    "cwtCh6Spare",
+    "cwtCh7Spare",
+    "cwtCh8Spare",
     "dhwTankBottom",
     "dhwCoilIn",
     "dhwCoilOut",
@@ -419,6 +481,11 @@
     "dhwValveDhwPosition",
     "dhwLegionellaLastRun",
     "dhwLegionellaNextRun",
+    "dhwLegionellaEta",
+    "dhwLegionellaElapsed",
+    "dhwLegionellaHpHandoverTemp",
+    "dhwStopOnBottomEnable",
+    "dhwHpStopBottom",
     "systemHeatPower",
     "electricalEnergyDaily",
     "electricalEnergyCumulative",
@@ -439,6 +506,10 @@
     "systemThermalEnergyDaily",
     "systemThermalEnergyCumulative",
     "flowSelected",
+    "flowSetpointHeating",
+    "flowSetpointCooling",
+    "flowSetpointDhw",
+    "flowSetpointActive",
     "roomTemp",
     "roomSetpoint",
     "supplyTemp",
@@ -504,7 +575,7 @@
           tone: "orange",
           groups: [
             { title: "Warmtepomp", rows: [["Elektrisch vermogen", "heatingPowerInput"], ["Warmteafgifte", "totalHeat"], ["COP", "totalCop"]] },
-            { title: "CV-ketel", rows: [["Warmteafgifte", "boilerHeatPower"]] },
+            { title: "DHW Element", rows: [["Warmteafgifte", "boilerHeatPower"]] },
             { title: "Systeem", rows: [["Warmteafgifte", "systemHeatPower"]] },
           ],
         },
@@ -535,7 +606,7 @@
           tone: "orange",
           groups: [
             { title: "Warmtepomp", rows: [["Elektriciteit", "heatingElectricalEnergyDaily"], ["Warmte", "heatpumpThermalEnergyDaily"], ["COP", "heatpumpCopDaily"]] },
-            { title: "CV-ketel", rows: [["Warmte", "boilerThermalEnergyDaily"]] },
+            { title: "DHW Element", rows: [["Warmte", "boilerThermalEnergyDaily"]] },
             { title: "Systeem", rows: [["Warmte", "systemThermalEnergyDaily"]] },
           ],
         },
@@ -544,7 +615,7 @@
           tone: "orange",
           groups: [
             { title: "Boiler", rows: [["Warmte", "boilerThermalEnergyDaily"]] },
-            { title: "Legionella", rows: [["Laatste run", "dhwLegionellaLastRun"], ["Volgende run", "dhwLegionellaNextRun"]] },
+            { title: "Legionella", rows: [["Laatste run", "dhwLegionellaLastRun"], ["Volgende run", "dhwLegionellaNextRun"], ["ETA huidige run (min)", "dhwLegionellaEta"], ["Verstreken (min)", "dhwLegionellaElapsed"]] },
           ],
         },
         {
@@ -565,7 +636,7 @@
           tone: "orange",
           groups: [
             { title: "Warmtepomp", rows: [["Elektriciteit", "heatingElectricalEnergyCumulative"], ["Warmte", "heatpumpThermalEnergyCumulative"], ["COP", "heatpumpCopCumulative"]] },
-            { title: "CV-ketel", rows: [["Warmte", "boilerThermalEnergyCumulative"]] },
+            { title: "DHW Element", rows: [["Warmte", "boilerThermalEnergyCumulative"]] },
             { title: "Systeem", rows: [["Warmte", "systemThermalEnergyCumulative"]] },
           ],
         },
@@ -574,7 +645,7 @@
           tone: "orange",
           groups: [
             { title: "Boiler", rows: [["Warmte", "boilerThermalEnergyCumulative"]] },
-            { title: "Legionella", rows: [["Laatste run", "dhwLegionellaLastRun"], ["Volgende run", "dhwLegionellaNextRun"]] },
+            { title: "Legionella", rows: [["Laatste run", "dhwLegionellaLastRun"], ["Volgende run", "dhwLegionellaNextRun"], ["ETA huidige run (min)", "dhwLegionellaEta"], ["Verstreken (min)", "dhwLegionellaElapsed"]] },
           ],
         },
         {

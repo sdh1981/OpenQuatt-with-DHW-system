@@ -1,0 +1,34 @@
+<svg width="100%" viewBox="0 0 390 240" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title>Open Energy Source for OpenQuatt logo</title>
+  <desc>Druppelvorm logo met vlam en golf, tekst ernaast uitlijnd</desc>
+
+  <defs>
+    <linearGradient id="dropGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1D9E75"/>
+      <stop offset="100%" stop-color="#0C447C"/>
+    </linearGradient>
+    <linearGradient id="flameGrad" x1="0" y1="1" x2="0.3" y2="0">
+      <stop offset="0%" stop-color="#EF9F27"/>
+      <stop offset="100%" stop-color="#E24B4A"/>
+    </linearGradient>
+    <linearGradient id="waveGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#378ADD"/>
+      <stop offset="100%" stop-color="#1D9E75"/>
+    </linearGradient>
+  </defs>
+
+  <path d="M80 210 C58 210 40 192 40 170 C40 140 80 60 80 60 C80 60 120 140 120 170 C120 192 102 210 80 210 Z" fill="url(#dropGrad)"/>
+  <path d="M40 182 C50 174 65 172 80 175 C95 172 110 174 120 182 C117 198 100 210 80 210 C60 210 43 198 40 182 Z" fill="url(#waveGrad)" opacity="0.9"/>
+  <path d="M72 168 L76 147 L66 155 L79 124 L77 143 L88 136 L72 168 Z" fill="url(#flameGrad)"/>
+
+  <text x="113.12" y="118" font-family="Georgia, 'Times New Roman', serif" font-size="26" font-weight="700" letter-spacing="-0.3">
+    <tspan fill="#185FA5">Open </tspan><tspan fill="#378ADD">Energy</tspan><tspan fill="#185FA5"> Source</tspan>
+  </text>
+
+  <line x1="140" y1="130" x2="350" y2="130" stroke="#D3D1C7" stroke-width="0.5"/>
+
+  <text x="174" y="155" font-family="Georgia, 'Times New Roman', serif" font-size="18" font-weight="400" fill="#5F5E5A">for</text>
+  <text x="205" y="155" font-family="Georgia, 'Times New Roman', serif" font-size="18" font-weight="700">
+    <tspan fill="#185FA5">Open</tspan><tspan fill="#378ADD">Quatt</tspan>
+  </text>
+</svg>

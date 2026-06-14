@@ -128,7 +128,7 @@ views:
             vertical: false
             features_position: bottom
           - type: tile
-            entity: binary_sensor.openquatt_boiler_active
+            entity: binary_sensor.openquatt_dhw_element_active
             name: Ketel actief
             vertical: false
             features_position: bottom
@@ -1274,12 +1274,18 @@ views:
                 name: Dauwpunt veiligheidsmarge
               - entity: sensor.openquatt_cooling_minimum_safe_supply_temp
                 name: Minimale veilige aanvoer
-              - entity: sensor.openquatt_cooling_effective_min_supply_temp
+              - entity: sensor.openquatt_cooling_effective_minimum_supply_temp
                 name: Actieve minimale aanvoer
-              - entity: sensor.openquatt_cooling_fallback_min_supply_temp
+              - entity: sensor.openquatt_cooling_fallback_minimum_supply_temp
                 name: Fallback minimale aanvoer
-              - entity: sensor.openquatt_cooling_fallback_night_min_outdoor_temp
+              - entity: sensor.openquatt_cooling_fallback_night_minimum_outdoor_temp
                 name: Nachtminimum buitentemperatuur
+              - entity: sensor.openquatt_cooling_dew_point_trend
+                name: Dauwpunttrend (°C/u)
+              - entity: sensor.openquatt_cooling_dynamic_safety_margin
+                name: Dynamische veiligheidsmarge
+              - entity: binary_sensor.openquatt_cooling_night_free_cooling_active
+                name: Nachtkoeling actief
       - type: grid
         cards:
           - type: heading
@@ -1304,6 +1310,14 @@ views:
               - entity: number.openquatt_cooling_safety_margin
                 name: Cooling safety margin
                 icon: mdi:delta
+              - entity: number.openquatt_cooling_minimum_runtime
+                name: Minimale koellooptijd (s)
+              - entity: number.openquatt_cooling_night_free_cooling_threshold
+                name: Nachtkoeling drempel (°C)
+              - entity: sensor.openquatt_cooling_stop_reason
+                name: Cooling stop reason
+              - entity: sensor.openquatt_cooling_stop_reason_code
+                name: Cooling stop reason code
     cards: []
     header:
       card:

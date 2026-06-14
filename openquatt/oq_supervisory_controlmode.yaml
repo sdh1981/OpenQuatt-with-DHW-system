@@ -138,6 +138,43 @@ globals:
     type: uint32_t
     restore_value: false
     initial_value: '0'
+
+  # ----------------------------
+  # CM97 - Air Purge protocol state
+  # Activated via "Force CM97" override. 3-phase sequence over ~5 min:
+  #   Phase 1 (60s):  CV side, low steady flow (iPWM ~250)
+  #   Phase 2 (120s): CV side, pulse high/low (30s @ 1000 / 10s @ 50)
+  #   Phase 3 (120s): DHW side, pulse high/low (30s @ 1000 / 10s @ 100)
+  - id: oq_cm97_active_since_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: oq_purge_phase
+    type: int
+    restore_value: false
+    initial_value: '0'  # 0=inactive, 1/2/3 = phase
+  - id: oq_purge_target_ipwm
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: oq_purge_target_valve_dhw
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+  # ----------------------------
+  # CM6 - Element Only Heating
+  # Exclusive mode where the 3 kW DHW tank element heats the tank
+  # thermostatically (target ± hysteresis). HP compressors stay in Standby.
+  - id: oq_cm6_element_on
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: oq_cm6_run_started_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
   - id: oq_control_mode_code
     type: int
     restore_value: false
@@ -204,16 +241,84 @@ select:
       - Force CM0
       - Force CM1
       - Force CM98
+      - Force CM97
     initial_option: Auto
     restore_value: false
     optimistic: true
     entity_category: config
     web_server:
       sorting_group_id: oq_control
+
+# ----------------------------
+# CM6 - Element-Only Heating switch
+# ----------------------------
+switch:
+  - platform: template
+    id: oq_dhw_element_only_enable
+    name: "DHW Element Only Heating"
+    icon: mdi:radiator
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action: []
+    turn_off_action: []
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
 # ----------------------------
 # TUNING
 # ----------------------------
 number:
+  # CM6 - Element Only Heating: target temperature for tank bottom
+  - platform: template
+    id: oq_dhw_element_only_target_c
+    name: "DHW Element Only Target"
+    icon: mdi:thermometer-high
+    unit_of_measurement: "°C"
+    min_value: 35
+    max_value: 65
+    step: 0.5
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 50
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  # CM6 - Element Only Heating: off-delta (hysteresis) for restart
+  - platform: template
+    id: oq_dhw_element_only_off_delta_c
+    name: "DHW Element Only Off Delta"
+    icon: mdi:thermometer-low
+    unit_of_measurement: "°C"
+    min_value: 1
+    max_value: 10
+    step: 0.5
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 5
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_purge_duration_min
+    name: "Air Purge Duration"
+    icon: mdi:bubble
+    unit_of_measurement: "min"
+    min_value: 5
+    max_value: 30
+    step: 1
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 12
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_control
+
   - platform: template
     id: oq_sticky_pwm
     name: "Sticky pump iPWM"
@@ -417,6 +522,41 @@ binary_sensor:
 
 text_sensor:
   - platform: template
+    id: oq_cm6_state_text
+    name: "DHW Element Only State"
+    icon: mdi:radiator
+    update_interval: 5s
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      if (!id(oq_dhw_element_only_enable).state) return std::string("Off");
+      if (id(oq_control_mode_code) != 6) return std::string("Waiting");
+      if (id(oq_cm6_element_on)) return std::string("Heating");
+      return std::string("Idle (target reached)");
+
+  - platform: template
+    id: oq_purge_phase_text
+    name: "Air Purge Phase Text"
+    icon: mdi:bubble
+    update_interval: 1s
+    web_server:
+      sorting_group_id: oq_control
+    lambda: |-
+      if (id(oq_control_mode_code) != 97) return std::string("Inactief");
+      switch (id(oq_purge_phase)) {
+        case 1: return std::string("Cyclus 1 - Settle (pomp uit)");
+        case 2: return std::string("Cyclus 1 - CV pulse");
+        case 3: return std::string("Cyclus 1 - DHW pulse");
+        case 4: return std::string("Cyclus 2 - Settle (pomp uit)");
+        case 5: return std::string("Cyclus 2 - CV pulse");
+        case 6: return std::string("Cyclus 2 - DHW pulse");
+        case 7: return std::string("Cyclus 3 - Settle (pomp uit)");
+        case 8: return std::string("Cyclus 3 - CV pulse");
+        case 9: return std::string("Cyclus 3 - DHW pulse");
+        default: return std::string("Opstartend");
+      }
+
+  - platform: template
     id: oq_control_mode
     name: "Control Mode"
     icon: mdi:state-machine
@@ -494,6 +634,57 @@ text_sensor:
   # DEBUG-RUNTIME END
 sensor:
   - platform: template
+    id: oq_purge_remaining_s
+    name: "Air Purge Remaining"
+    icon: mdi:timer-sand
+    unit_of_measurement: "s"
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 1s
+    web_server:
+      sorting_group_id: oq_control
+    lambda: |-
+      if (id(oq_control_mode_code) != 97) return NAN;
+      const uint32_t since_ms = id(oq_cm97_active_since_ms);
+      if (since_ms == 0) return NAN;
+      const uint32_t now_ms = (uint32_t) millis();
+      const uint32_t total_ms = (uint32_t)(id(oq_purge_duration_min).state * 60.0f * 1000.0f);
+      const uint32_t elapsed_ms = (now_ms >= since_ms) ? (now_ms - since_ms) : 0;
+      const uint32_t remaining_ms = (elapsed_ms < total_ms) ? (total_ms - elapsed_ms) : 0;
+      return (float)remaining_ms / 1000.0f;
+
+  - platform: template
+    id: oq_purge_phase_sensor
+    name: "Air Purge Phase"
+    icon: mdi:numeric
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 1s
+    web_server:
+      sorting_group_id: oq_control
+    lambda: |-
+      return (float) id(oq_purge_phase);
+
+  # CM6 - Element Only: elapsed time since run started (for diagnostics)
+  - platform: template
+    id: oq_cm6_elapsed_min
+    name: "DHW Element Only Elapsed"
+    icon: mdi:timer-play-outline
+    unit_of_measurement: "min"
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 10s
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      if (id(oq_control_mode_code) != 6) return NAN;
+      const uint32_t started = id(oq_cm6_run_started_ms);
+      if (started == 0) return NAN;
+      const uint32_t now_ms = (uint32_t) millis();
+      const uint32_t elapsed = (now_ms >= started) ? (now_ms - started) : 0;
+      return (float)elapsed / 60000.0f;
+
+  - platform: template
     id: power_cap_level
     name: "Power cap demand"
     internal: true
@@ -515,6 +706,99 @@ sensor:
 # MAIN LOOP
 # ----------------------------
 interval:
+  # ============================================================
+  # CM97 - Air Purge state machine (runs every second when active)
+  # ============================================================
+  # Multi-cycle strategie: 3 cycli over de configureerbare totale duur
+  # (default 12 min). Elke cyclus = settle + CV pulse + DHW pulse.
+  # Tussentijdse settle-pauzes geven lucht tijd om vrij te komen.
+  - interval: 1s
+    then:
+      - lambda: |-
+          if (id(oq_control_mode_code) != 97) {
+            // Not in purge: reset state, publish idle phase
+            if (id(oq_purge_phase) != 0) {
+              id(oq_purge_phase) = 0;
+              id(oq_purge_target_ipwm) = 0;
+              id(oq_purge_target_valve_dhw) = false;
+            }
+            return;
+          }
+
+          const uint32_t now_ms = (uint32_t) millis();
+          const uint32_t since_ms = id(oq_cm97_active_since_ms);
+          if (since_ms == 0) return;
+          const uint32_t elapsed_ms = (now_ms >= since_ms) ? (now_ms - since_ms) : 0;
+
+          const uint32_t total_ms = (uint32_t)(id(oq_purge_duration_min).state * 60.0f * 1000.0f);
+          if (total_ms == 0) return;
+
+          int phase = 0;
+          int target_ipwm = 0;
+          bool target_valve_dhw = false;
+
+          // BELANGRIJK: iPWM is INVERS t.o.v. pomp-toerental (Profile C PWM):
+          //   iPWM 0    = pomp 100% (max toerental, max flow)
+          //   iPWM 1000 = pomp 0% (stop, 0 L/h)
+          //
+          // Multi-cycle strategie (3 cycli × {settle + CV pulse + DHW pulse}):
+          //
+          //   Cyclus N (N = 1..3):
+          //     [0%   .. 20%)  Settle  — pomp uit, valve op CV stand,
+          //                              lucht stijgt vrij naar ontluchter
+          //     [20%  .. 60%)  CV pulse — valve CV, 20s @ max / 10s @ stop
+          //     [60%  .. 100%) DHW pulse — valve DHW, 20s @ max / 10s @ stop
+          //
+          // Waarom werkt dit beter dan single-pass:
+          //   - Settle-pauzes geven opgeloste lucht tijd om vrij te komen
+          //     (Henry's law: trage drukdaling = gas komt uit oplossing)
+          //   - Klepwisseling gebeurt tijdens settle (pomp uit) — geen
+          //     mechanische schok op de klep
+          //   - Elke pulse-cyclus vangt nieuwe lucht uit oplossing op
+          //   - Drie passes geven het systeem 3 kansen om alles op te ruimen
+          //
+          // Phase numbering: 1..9 = (cycle-1)*3 + subphase
+          //   cycle 1: phases 1 (settle), 2 (CV pulse), 3 (DHW pulse)
+          //   cycle 2: phases 4 (settle), 5 (CV pulse), 6 (DHW pulse)
+          //   cycle 3: phases 7 (settle), 8 (CV pulse), 9 (DHW pulse)
+
+          const uint32_t cycle_ms = total_ms / 3UL;
+          const uint32_t which_cycle = (elapsed_ms / cycle_ms);  // 0, 1, 2
+          const uint32_t cycle_elapsed = elapsed_ms - (which_cycle * cycle_ms);
+
+          const uint32_t settle_end_ms   = cycle_ms / 5UL;          // 20%
+          const uint32_t cvpulse_end_ms  = (cycle_ms * 3UL) / 5UL;  // 60%
+          // dhwpulse: from cvpulse_end_ms to cycle_ms
+
+          const uint32_t pulse_period_ms = 30000UL;  // 30s puls cyclus
+          const uint32_t pulse_high_ms   = 20000UL;  // 20s @ max flow
+
+          if (cycle_elapsed < settle_end_ms) {
+            // Settle — pomp uit, valve naar CV (klepwisseling gebeurt hier
+            // tijdens pomp-uit, dus geen druk-schok)
+            phase = (int)(which_cycle * 3UL + 1UL);
+            target_valve_dhw = false;
+            target_ipwm = 1000;  // pomp stop
+          } else if (cycle_elapsed < cvpulse_end_ms) {
+            // CV pulse — valve CV, pulse 20s max / 10s stop
+            phase = (int)(which_cycle * 3UL + 2UL);
+            target_valve_dhw = false;
+            const uint32_t pe = cycle_elapsed - settle_end_ms;
+            const uint32_t in_pulse = pe % pulse_period_ms;
+            target_ipwm = (in_pulse < pulse_high_ms) ? 50 : 1000;
+          } else {
+            // DHW pulse — valve DHW, pulse 20s max / 10s stop
+            phase = (int)(which_cycle * 3UL + 3UL);
+            target_valve_dhw = true;
+            const uint32_t pe = cycle_elapsed - cvpulse_end_ms;
+            const uint32_t in_pulse = pe % pulse_period_ms;
+            target_ipwm = (in_pulse < pulse_high_ms) ? 50 : 1000;
+          }
+
+          id(oq_purge_phase) = phase;
+          id(oq_purge_target_ipwm) = target_ipwm;
+          id(oq_purge_target_valve_dhw) = target_valve_dhw;
+
   - interval: ${oq_supervisory_loop_s}s
     startup_delay: 0s
     then:
@@ -611,10 +895,13 @@ interval:
           const float min_flow_lph = ${oq_cm_min_flow_lph};
           const uint32_t flow_fault_ms = (uint32_t)(${oq_cm_flow_fault_s}UL * 1000UL);
           const uint32_t flow_recover_ms = (uint32_t)(${oq_cm_flow_recover_s}UL * 1000UL);
+          const bool oq_controls_enabled =
+              !id(oq_control_owner).has_state() || id(oq_control_owner).current_option() == "OpenQuatt";
           // -------------------------------------------------
           // Helpers: minimize Modbus writes (write-on-change)
           // -------------------------------------------------
           auto set_select_option = [&](auto *sel, const char *opt) {
+            if (!oq_controls_enabled) return;
             if (sel == nullptr) return;
             if (!sel->has_state() || sel->current_option() != opt) {
               auto c = sel->make_call();
@@ -624,6 +911,7 @@ interval:
           };
 
           auto set_number_value = [&](auto *num, float value, float tol) {
+            if (!oq_controls_enabled) return;
             if (num == nullptr) return;
             const float cur = num->state;
             if (isnan(cur) || fabsf(cur - value) > tol) {
@@ -645,6 +933,8 @@ interval:
           };
           auto cm_code_to_id = [](int cm) -> const char* {
             if (cm == 98) return "CM98";
+            if (cm == 97) return "CM97";
+            if (cm == 6) return "CM6";
             if (cm == 5) return "CM5";
             if (cm == 4) return "CM4";
             if (cm == 3) return "CM3";
@@ -660,11 +950,16 @@ interval:
             if (strcmp(cm_id, "CM3") == 0) return std::string("CM3 - Heating - Heat Pump + Boiler");
             if (strcmp(cm_id, "CM4") == 0) return std::string("CM4 - DHW - Hot Water");
             if (strcmp(cm_id, "CM5") == 0) return std::string("CM5 - Passive Cooling");
+            if (strcmp(cm_id, "CM6") == 0) return std::string("CM6 - DHW - Element Only");
+            if (strcmp(cm_id, "CM97") == 0) return std::string("CM97 - Air Purge Protocol");
             if (strcmp(cm_id, "CM98") == 0) return std::string("CM98 - Anti-Freeze Protection - Water Circulation");
             return std::string("Unknown");
           };
           auto ms_window_active = [&](uint32_t until_ms)->bool {
             if (until_ms == 0) return false;
+            // Wraparound-safe: (until_ms - now_ms) is unsigned subtraction.
+            // Result < 2^31 means until_ms is in the future (within 24.8 days).
+            // Result >= 2^31 means now_ms has passed until_ms (window expired).
             return static_cast<uint32_t>(until_ms - now_ms) < 0x80000000UL;
           };
 
@@ -1046,12 +1341,20 @@ interval:
             // - Auto (normal logic)
             // - Force CM0 / Force CM1
             // - Force CM98 (auto-expire after 30 min)
-            int override_mode = id(oq_cm_override).active_index().value_or(0); // 0=AUTO,1=CM0,2=CM1,3=CM98_DIAG
-            if (override_mode < 0 || override_mode > 3) override_mode = 0;
-            // Track entry into CM98 diagnostic override for auto-expire
+            // - Force CM97 (auto-expire after oq_purge_duration_min)
+            int override_mode = id(oq_cm_override).active_index().value_or(0); // 0=AUTO,1=CM0,2=CM1,3=CM98_DIAG,4=CM97_PURGE
+            if (override_mode < 0 || override_mode > 4) override_mode = 0;
+            // Track entry into a timed override (CM98 / CM97) for auto-expire
             if (override_mode != id(oq_override_last_mode)) {
               id(oq_override_last_mode) = override_mode;
               id(oq_override_cm98_since_ms) = (override_mode == 3) ? now_ms : 0;
+              id(oq_cm97_active_since_ms) = (override_mode == 4) ? now_ms : 0;
+              if (override_mode != 4) {
+                // Leaving CM97 — clear purge state machine
+                id(oq_purge_phase) = 0;
+                id(oq_purge_target_ipwm) = 0;
+                id(oq_purge_target_valve_dhw) = false;
+              }
             }
             // Auto-expire Diagnostic CM98 after 30 minutes
             if (override_mode == 3) {
@@ -1065,6 +1368,21 @@ interval:
                 id(oq_override_cm98_since_ms) = 0;
               }
             }
+            // Auto-expire Air Purge CM97 after configured duration
+            if (override_mode == 4) {
+              const uint32_t MAX_MS = (uint32_t)(id(oq_purge_duration_min).state * 60.0f * 1000.0f);
+              if (id(oq_cm97_active_since_ms) != 0 && (uint32_t)(now_ms - id(oq_cm97_active_since_ms)) >= MAX_MS) {
+                auto call = id(oq_cm_override).make_call();
+                call.set_option("Auto");
+                call.perform();
+                override_mode = 0;
+                id(oq_override_last_mode) = 0;
+                id(oq_cm97_active_since_ms) = 0;
+                id(oq_purge_phase) = 0;
+                id(oq_purge_target_ipwm) = 0;
+                id(oq_purge_target_valve_dhw) = false;
+              }
+            }
 
             int desired_local = 0;
             if (override_mode != 0) {
@@ -1076,6 +1394,7 @@ interval:
               if (override_mode == 1) desired_local = 0;       // CM0
               else if (override_mode == 2) desired_local = 1;  // CM1
               else if (override_mode == 3) desired_local = 98; // CM98
+              else if (override_mode == 4) desired_local = 97; // CM97
             } else {
               // Snapshot CM1 timer state (before we touch globals)
               const bool cm1_timer_active  = (id(oq_cm1_until_ms) != 0);
@@ -1134,18 +1453,12 @@ interval:
                   id(oq_cm1_next_after) = 0;
                 }
 
-                if (cooling_req) {
-                  if (base_target == 5) {
-                    if (strcmp(cur_cm, "CM5") == 0) {
-                      desired_local = 5;
-                    } else {
-                      start_cm1(5);
-                      desired_local = 1;
-                    }
-                  } else {
-                    desired_local = 1; // flow interlock holding state
-                  }
-                } else if (dhw_req) {
+                // Priority order must match base_target assignment above:
+                // DHW (4) > cooling (5) > heating (2) > frost (98) > idle (0).
+                // Checking cooling_req before dhw_req was a bug: when both are active,
+                // base_target==4 (DHW wins) but the cooling branch fell through to
+                // desired_local=1 (CM1), aborting the running DHW cycle.
+                if (dhw_req) {
                   if (base_target == 4) {
                     if (strcmp(cur_cm, "CM4") == 0) {
                       desired_local = 4;
@@ -1156,11 +1469,26 @@ interval:
                   } else {
                     desired_local = 1; // flow interlock holding state
                   }
+                } else if (cooling_req) {
+                  if (base_target == 5) {
+                    // Skip CM1 preflow when the pump is already running (CM2/CM4/CM5).
+                    // CM1 is only needed when starting from a fully idle state (CM0).
+                    if (strcmp(cur_cm, "CM5") == 0 || strcmp(cur_cm, "CM2") == 0 ||
+                        strcmp(cur_cm, "CM4") == 0) {
+                      desired_local = 5;
+                    } else {
+                      start_cm1(5);
+                      desired_local = 1;
+                    }
+                  } else {
+                    desired_local = 1; // flow interlock holding state
+                  }
                 } else if (heating_req) {
                   if (base_target == 2) {
-                    // Keep active heating transitions inside the heating states. CM3 -> CM2
-                    // should not force an artificial CM1 detour that drops compressor requests.
-                    if (strcmp(cur_cm, "CM2") == 0 || strcmp(cur_cm, "CM3") == 0) {
+                    // Skip CM1 preflow when the pump is already running (CM2/CM3/CM4/CM5).
+                    // CM1 is only needed when starting from a fully idle state (CM0).
+                    if (strcmp(cur_cm, "CM2") == 0 || strcmp(cur_cm, "CM3") == 0 ||
+                        strcmp(cur_cm, "CM4") == 0 || strcmp(cur_cm, "CM5") == 0) {
                       desired_local = 2;
                     } else {
                       start_cm1(2);
@@ -1194,7 +1522,13 @@ interval:
                   (strcmp(cur_cm, "CM5") == 0) ? 5 :
                   (strcmp(cur_cm, "CM1") == 0) ? 1 :
                   (strcmp(cur_cm, "CM98") == 0) ? 98 : 0;
-              if (power_house_active) {
+              // Feature flag: CV boiler hardware presence. When 0 (default in this
+              // build because the CV boiler has been physically removed), the CM2<->CM3
+              // promotion logic is suppressed entirely. The system never enters CM3
+              // because there is no boiler to provide auxiliary heating. This is safe
+              // for DHW: no DHW path depends on CM3 — see analysis in commit history.
+              constexpr bool cv_boiler_present = (${oq_cv_boiler_present} != 0);
+              if (power_house_active && cv_boiler_present) {
                 // CM3 (boiler assist) auto-switching
                 // Promote/Demote: deficit-based (thermal deficit) + timers/hysteresis
                 const float deficit_w = id(oq_P_deficit_w);
@@ -1230,6 +1564,8 @@ interval:
                   id(oq_cm3_demote_since_ms) = 0;
                 }
               } else {
+                // Either Power House isn't driving, or CV boiler is absent.
+                // Clear timers and force any lingering CM3 state back to CM2.
                 id(oq_cm3_need_since_ms) = 0;
                 id(oq_cm3_demote_since_ms) = 0;
                 if (cm_now == 3 && heating_req && base_target == 2) {
@@ -1237,6 +1573,24 @@ interval:
                 }
               }
             }
+
+            // CM6 - Element Only Heating override
+            // Highest priority for "normal" modes (below override CM0/CM1/97/98).
+            // Wins over heating/cooling/DHW HP/CM1, because the user explicitly
+            // enabled element-only mode. Legionella (DHW state == 4) still takes
+            // priority for hygiene reasons. CM6 takes effect immediately — geen
+            // CM1 preflow/postflow nodig omdat de HPs toch direct naar Standby
+            // gaan en het element geen flow nodig heeft.
+            if (override_mode == 0 &&
+                id(oq_dhw_element_only_enable).state &&
+                id(oq_dhw_state_code) != 4) {
+              desired_local = 6;
+              // Wis pending CM1-overgangen zodat het systeem na CM6 ook geen
+              // achterstallige preflow/postflow stap meer gaat doen.
+              id(oq_cm1_until_ms) = 0;
+              id(oq_cm1_next_after) = 0;
+            }
+
             return desired_local;
           };
           const int desired = resolve_desired_cm();
@@ -1255,6 +1609,54 @@ interval:
           }
           static std::string last_control_mode_label;
           publish_text_if_changed(id(oq_control_mode_label), cm_code_to_label(desired), last_control_mode_label);
+
+          // ============================================================
+          // CM6 - Element Only Heating: thermostatic loop
+          // Runs every supervisor tick (5s). When CM6 active, evaluates
+          // tank-bottom temperature against target ± off-delta and toggles
+          // oq_cm6_element_on accordingly. boiler_control reads this flag
+          // and drives the element relay.
+          // ============================================================
+          {
+            // static: persists across invocations; tied to ${oq_supervisory_loop_s}s interval.
+            static int  cm6_prev_cm_code = 0;
+            const bool  is_cm6 = (desired == 6);
+            const bool  just_entered_cm6 = (is_cm6 && cm6_prev_cm_code != 6);
+            const bool  just_left_cm6 = (!is_cm6 && cm6_prev_cm_code == 6);
+            cm6_prev_cm_code = desired;
+
+            if (just_entered_cm6) {
+              id(oq_cm6_run_started_ms) = now_ms;
+            }
+            if (just_left_cm6) {
+              id(oq_cm6_run_started_ms) = 0;
+              id(oq_cm6_element_on) = false;
+            }
+
+            if (is_cm6) {
+              const float tank_bottom = id(dhw_tank_bottom_input).has_state()
+                  ? id(dhw_tank_bottom_input).state : NAN;
+              const float target = id(oq_dhw_element_only_target_c).state;
+              const float off_delta = id(oq_dhw_element_only_off_delta_c).state;
+
+              if (isnan(tank_bottom)) {
+                // Sensor invalid → element off (safety)
+                id(oq_cm6_element_on) = false;
+              } else if (just_entered_cm6) {
+                // Bootstrap on entry: heat if below target (no hysteresis yet)
+                id(oq_cm6_element_on) = (tank_bottom < target);
+              } else if (tank_bottom >= target) {
+                // Target reached → off
+                id(oq_cm6_element_on) = false;
+              } else if (tank_bottom < (target - off_delta)) {
+                // Below hysteresis low → on
+                id(oq_cm6_element_on) = true;
+              }
+              // else: in hysteresis band, keep current state
+            } else {
+              id(oq_cm6_element_on) = false;
+            }
+          }
 
           auto apply_silent_window = [&]() -> void {
             // Silent window + diagnostics + low-noise mode selection.

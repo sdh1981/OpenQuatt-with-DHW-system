@@ -1,0 +1,42 @@
+# ==============================================================================
+# OpenQuatt - Duo Topology Main Config (LilyGO T-Connect + CIC)
+# ==============================================================================
+# Revision management:
+# - Bump `config_revision` for each functional change.
+# - Add one line to `config_revision_log` describing what changed.
+# config_revision: v1.4.5
+# config_revision_date: 2026-03-27
+# config_revision_log:
+#   - v1.4.5 (2026-03-28): Restored original OpenQuatt node identity (name/friendly_name/project.name) for default openquatt_* entities.
+#   - v1.4.4 (2026-03-28): Renamed ESPHome node identity to openquatt-t-connect so HA entities use openquatt_t_connect_* prefix.
+#   - v1.4.3 (2026-03-28): Increased active Modbus2 push rate from 1000ms to 300ms for steadier CIC data visibility.
+#   - v1.4.2 (2026-03-28): Added ESP32-S3 diagnostics (internal temperature, free heap, max heap block, loop time, CPU frequency).
+#   - v1.4.1 (2026-03-28): Enabled active Modbus push frames on RS485 #2 (HP1 + HP2 telemetry broadcast every interval).
+#   - v1.4.0 (2026-03-28): Added software Modbus slave on RS485 #2 that serves HP1/HP2 telemetry from OpenQuatt (RS485 #1), without bus1 mirror hook.
+#   - v1.3.3 (2026-03-27): Rolled back Modbus1->Modbus2 RX mirror hook to restore stable HP1/HP2 Modbus communication.
+#   - v1.3.2 (2026-03-27): Added Modbus1 RX -> Modbus2 mirror forwarding for +CIC build.
+#   - v1.3.1 (2026-03-27): Gave +CIC variant a unique ESPHome identity (name/friendly_name/project.name) to prevent project/entity mixing.
+#   - v1.3.0 (2026-03-27): Enabled dual-bus mode: RS485 #1 back to full OpenQuatt control (master read/write), RS485 #2 kept as CIC feedback channel.
+#   - v1.2.0 (2026-03-27): Switched +CIC to read-only listener base and added RS485 #2 Modbus feedback sniffer (HP1/HP2 frame feedback).
+#   - v1.1.0 (2026-03-27): Created dedicated +CIC config variant from LilyGO base config.
+#   - v1.0.0 (2026-03-27): Initial LilyGO T-Connect config created from waveshare template.
+substitutions:
+  <<: !include openquatt/oq_substitutions_common.yaml
+  # Force explicit MAX31865 pin mapping on LilyGO T-Connect (ESP32-S3).
+  max31865_spi_sck_pin: "GPIO41"
+  max31865_spi_mosi_pin: "GPIO39"
+  max31865_spi_miso_pin: "GPIO38"
+  max31865_1_cs_pin: "GPIO47"
+  max31865_2_cs_pin: "GPIO2"
+
+esphome:
+  name: openquatt
+  friendly_name: OpenQuatt
+  project:
+    name: "openquatt.esp32"
+  build_path: build/openquatt_duo_lilygo_tconnect+cic
+
+packages:
+  openquatt_hw_profile: !include openquatt/profiles/oq_substitutions_lilygo_tconnect_cic.yaml
+  openquatt_base: !include openquatt_base.yaml
+  oq_cic_modbus_slave: !include openquatt/oq_cic_modbus_slave.yaml

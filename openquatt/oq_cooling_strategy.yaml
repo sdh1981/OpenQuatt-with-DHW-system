@@ -68,6 +68,32 @@ globals:
     restore_value: false
     initial_value: '0'
 
+  # Minimum runtime tracking
+  - id: oq_cooling_min_runtime_start_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: oq_cooling_min_runtime_active
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+  # Slew rate: last applied demand level (for ±1/tick rate limiting)
+  - id: oq_cooling_last_f
+    type: int
+    restore_value: false
+    initial_value: '0'
+
+  # Auto dual-HP cooling tracking
+  - id: oq_cooling_auto_dual_hp_elapsed_accum_min
+    type: float
+    restore_value: false
+    initial_value: '0.0'
+  - id: oq_cooling_auto_dual_hp_enabled
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
   # Cooling stop reason diagnostics:
   # 0=running_or_idle_normal, 1=disabled, 2=no_cooling_request, 3=not_permitted,
   # 4=target_invalid, 5=supply_invalid, 6=demand_max_zero, 7=safe_floor_stop,
@@ -127,6 +153,8 @@ select:
               set_number_value(id(cooling_hp2_assist_level), 2.0f);
               set_number_value(id(cooling_safety_margin), 1.8f);
               set_number_value(id(cooling_min_supply_temp), 12.0f);
+              set_number_value(id(cooling_min_runtime_s), 480.0f);
+              set_number_value(id(cooling_auto_dual_demand_threshold), 3.0f);
             } else if (x == "Vloerkoeling") {
               set_number_value(id(cooling_request_on_delta), 0.6f);
               set_number_value(id(cooling_request_off_delta), 0.3f);
@@ -137,6 +165,9 @@ select:
               set_number_value(id(cooling_hp2_assist_level), 0.0f);
               set_number_value(id(cooling_safety_margin), 2.2f);
               set_number_value(id(cooling_min_supply_temp), 18.0f);
+              set_number_value(id(cooling_min_runtime_s), 900.0f);
+              // 20 = above the demand_max_f of 4 → auto dual-HP never triggers for floor cooling
+              set_number_value(id(cooling_auto_dual_demand_threshold), 20.0f);
             }
 
 number:
@@ -168,6 +199,38 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 4
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_cooling
+
+  - platform: template
+    id: cooling_min_runtime_s
+    name: "Cooling Minimum Runtime"
+    icon: mdi:timer-outline
+    unit_of_measurement: "s"
+    min_value: 0
+    max_value: 1800
+    step: 60
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 600
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_cooling
+
+  - platform: template
+    id: cooling_auto_dual_demand_threshold
+    name: "Cooling Auto Dual HP Demand Threshold"
+    icon: mdi:heat-pump
+    unit_of_measurement: "step"
+    min_value: 1
+    max_value: 10
+    step: 1
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 3
     entity_category: config
     web_server:
       sorting_group_id: oq_cooling
@@ -269,18 +332,31 @@ sensor:
         base_floor_c = fmaxf(base_floor_c, id(cooling_effective_min_supply_temp).state);
       }
 
+      // Comfort offset: raises the supply target when the room is already close to
+      // setpoint (small error), giving slower but quieter cooling. When the room is
+      // significantly above setpoint (large error > 1.2 K) the offset is removed so
+      // the system can cool at full capacity. Fallback 0.8 K when room data unavailable.
+      // Thresholds derived empirically for Dutch residential radiant floor/ceiling panels.
       float comfort_offset_c = 0.8f;
       if (id(room_temp_selected).has_state() && !isnan(id(room_temp_selected).state) &&
           id(room_setpoint_selected).has_state() && !isnan(id(room_setpoint_selected).state)) {
         const float room_error_c = id(room_temp_selected).state - id(room_setpoint_selected).state;
-        if (room_error_c > 1.2f) comfort_offset_c = 0.0f;
-        else if (room_error_c > 0.8f) comfort_offset_c = 0.4f;
-        else if (room_error_c > 0.4f) comfort_offset_c = 0.8f;
-        else if (room_error_c > 0.2f) comfort_offset_c = 1.2f;
-        else comfort_offset_c = 1.6f;
+        if (room_error_c > 1.2f) comfort_offset_c = 0.0f;       // large overshoot  → no offset
+        else if (room_error_c > 0.8f) comfort_offset_c = 0.4f;  // moderate overshoot
+        else if (room_error_c > 0.4f) comfort_offset_c = 0.8f;  // small overshoot
+        else if (room_error_c > 0.2f) comfort_offset_c = 1.2f;  // near setpoint
+        else comfort_offset_c = 1.6f;                            // at/below setpoint → gentlest
       }
 
-      float target_c = base_floor_c + comfort_offset_c;
+      // Outdoor correction: linear ramp starting at 28°C ambient, adding up to 1.5 K
+      // of extra cooling below the comfort target. At 38°C outdoor the full 1.5 K is
+      // applied (28 + 10 * 0.15 = 1.5). Clamped [0, 1.5] to avoid over-cooling on cool days.
+      float outdoor_correction_c = 0.0f;
+      if (id(outside_temp_selected).has_state() && !isnan(id(outside_temp_selected).state)) {
+        outdoor_correction_c = std::max(0.0f, std::min(1.5f, (id(outside_temp_selected).state - 28.0f) * 0.15f));
+      }
+
+      float target_c = base_floor_c + comfort_offset_c - outdoor_correction_c;
       if (target_c < base_floor_c) target_c = base_floor_c;
       return target_c;
     web_server:
@@ -332,6 +408,8 @@ text_sensor:
         case 7: return {"safe_floor_stop"};
         case 8: return {"not_in_cm5"};
         case 9: return {"no_owner_available"};
+        case 10: return {"dhw_active"};
+        case 11: return {"night_free_cooling"};
         default: return {"running_or_idle_normal"};
       }
     web_server:
@@ -341,8 +419,7 @@ interval:
   - interval: 5s
     then:
       - lambda: |-
-          const float near_safe_floor_limit_c = 0.30f;
-          const float stop_safe_floor_limit_c = 0.10f;
+          // Safe-floor constants removed at user request.
           const float simmer_room_error_min_c = 0.20f;
           const float simmer_supply_error_max_c = 0.45f;
 
@@ -371,6 +448,47 @@ interval:
             else if (!id(cooling_supply_target).has_state() || isnan(id(cooling_supply_target).state)) stop_reason = 4;
             else if (!id(oq_system_supply_temp).has_state() || isnan(id(oq_system_supply_temp).state)) stop_reason = 5;
             id(oq_cooling_stop_reason_code) = stop_reason;
+            id(oq_cooling_demand_raw) = 0;
+            id(oq_cooling_pid_integral) = 0.0f;
+            id(oq_cooling_pid_last_error_c) = 0.0f;
+            // Hard reset (cooling disabled or safety trip): clear min-runtime fully.
+            // Soft stop (room request gone, stop_reason==2): keep min-runtime alive so
+            // the heat-loop interval can still enforce the minimum compressor runtime and
+            // prevent short-cycling / pendelen.
+            const bool hard_reset =
+                !id(cooling_enable_selected).state || !id(cooling_permitted).state;
+            if (hard_reset) {
+              id(oq_cooling_min_runtime_active) = false;
+              id(oq_cooling_min_runtime_start_ms) = 0;
+              id(oq_cooling_auto_dual_hp_enabled) = false;
+              id(oq_cooling_auto_dual_hp_elapsed_accum_min) = 0.0f;
+            }
+            return;
+          }
+
+          // DHW conflict: stop cooling while DHW is active (valve in boiler position).
+          // Exception: legionella element-only phase (oq_dhw_state_code==4 AND
+          // oq_dhw_block_cv_priority==false). In this phase the HP is done, the
+          // valve is already in CV position, and the element heats the tank
+          // independently. The HP compressors are free to run in cooling mode
+          // concurrently without any conflict.
+          const bool legionella_element_only =
+              (id(oq_dhw_state_code) == 4) && !id(oq_dhw_block_cv_priority);
+          if (id(oq_dhw_state_code) != 0 && !legionella_element_only) {
+            id(oq_cooling_stop_reason_code) = 10;
+            id(oq_cooling_demand_raw) = 0;
+            id(oq_cooling_pid_integral) = 0.0f;
+            id(oq_cooling_pid_last_error_c) = 0.0f;
+            id(oq_cooling_min_runtime_active) = false;
+            id(oq_cooling_min_runtime_start_ms) = 0;
+            id(oq_cooling_auto_dual_hp_enabled) = false;
+            id(oq_cooling_auto_dual_hp_elapsed_accum_min) = 0.0f;
+            return;
+          }
+
+          // Night/free cooling: outdoor is already cool enough, suppress active HP cooling.
+          if (id(cooling_night_mode_active).state) {
+            id(oq_cooling_stop_reason_code) = 11;
             id(oq_cooling_demand_raw) = 0;
             id(oq_cooling_pid_integral) = 0.0f;
             id(oq_cooling_pid_last_error_c) = 0.0f;
@@ -417,8 +535,6 @@ interval:
           const float out_before_integral_update = (kp * error_c) + (ki * integral) + (kd * derivative);
           if (error_c <= 0.0f) {
             integral = 0.0f;
-          } else if (error_c < near_safe_floor_limit_c) {
-            integral = fmaxf(0.0f, integral - dt_s);
           } else if (out_before_integral_update < (float) demand_max) {
             integral += error_c * dt_s;
           }
@@ -431,26 +547,17 @@ interval:
           if (demand < 0) demand = 0;
           if (demand > demand_max) demand = demand_max;
 
-          float safe_gap_c = NAN;
-          // Add a small explicit approach zone near the dew-point-safe floor.
-          if (id(cooling_effective_min_supply_temp).has_state() && !isnan(id(cooling_effective_min_supply_temp).state)) {
-            safe_gap_c = id(oq_system_supply_temp).state - id(cooling_effective_min_supply_temp).state;
-            if (safe_gap_c <= stop_safe_floor_limit_c) {
-              demand = 0;
-              integral = 0.0f;
-              stop_reason = 7;
-            } else if (safe_gap_c <= near_safe_floor_limit_c) {
-              if (demand > 1) demand = 1;
-              integral = fminf(integral, 1.0f);
-            }
-          }
+          // Safe-floor throttle removed at user request.
+          // The dew-point-based supply floor no longer constrains the PID output.
+          // WARNING: this disables the condensation safety. The system can now
+          // target supply temperatures below the room dew point, which may cause
+          // condensation on cold pipes / floor surfaces in humid conditions.
 
           // When the room still needs a little cooling and supply is already close to target,
           // prefer a gentle level-1 simmer over dropping to zero immediately.
           const bool can_simmer =
               (!room_error_valid || room_error_c > simmer_room_error_min_c) &&
-              error_c > 0.0f && error_c <= simmer_supply_error_max_c &&
-              (isnan(safe_gap_c) || safe_gap_c > (near_safe_floor_limit_c + 0.2f));
+              error_c > 0.0f && error_c <= simmer_supply_error_max_c;
           if (can_simmer) {
             if (demand < 1) demand = 1;
             if (demand > 1) demand = 1;
@@ -460,7 +567,9 @@ interval:
           id(oq_cooling_pid_integral) = integral;
           id(oq_cooling_pid_last_error_c) = error_c;
           id(oq_cooling_demand_raw) = demand;
-          if (demand > 0) stop_reason = 0;
+          // Keep stop_reason 7 (safe_floor_stop) even when demand=1 so the UI
+          // shows the throttled state; only clear it when we're genuinely free-running.
+          if (demand > 0 && stop_reason != 7) stop_reason = 0;
           id(oq_cooling_stop_reason_code) = stop_reason;
 
   - interval: ${oq_heat_loop_tick_s}s
@@ -477,6 +586,11 @@ interval:
             id(oq_cooling_request_owner_hp) = 0;
             id(oq_cooling_owner_hp) = 0;
             id(oq_cooling_request_reason_code) = 0;
+            id(oq_cooling_min_runtime_active) = false;
+            id(oq_cooling_min_runtime_start_ms) = 0;
+            id(oq_cooling_auto_dual_hp_elapsed_accum_min) = 0.0f;
+            id(oq_cooling_auto_dual_hp_enabled) = false;
+            id(oq_cooling_last_f) = 0;
             return;
           }
 
@@ -501,6 +615,73 @@ interval:
           int f_cap = id(oq_power_cap_f);
           f_cap = std::max(0, std::min(demand_max_f, f_cap));
           if (f > f_cap) f = f_cap;
+
+          // Minimum runtime tracking (kept for consistency; minimum-level-1 logic below
+          // ensures we rarely reach the min_runtime path anyway).
+          const uint32_t min_rt_ms = (uint32_t)(id(cooling_min_runtime_s).state * 1000.0f);
+          if (f > 0) {
+            if (!id(oq_cooling_min_runtime_active)) {
+              id(oq_cooling_min_runtime_active) = true;
+              id(oq_cooling_min_runtime_start_ms) = now_ms;
+            }
+          } else if (id(oq_cooling_min_runtime_active) && min_rt_ms > 0) {
+            const uint32_t elapsed_ms = (now_ms >= id(oq_cooling_min_runtime_start_ms))
+                ? (now_ms - id(oq_cooling_min_runtime_start_ms)) : 0;
+            if (elapsed_ms < min_rt_ms) {
+              f = 1;
+            } else {
+              id(oq_cooling_min_runtime_active) = false;
+              id(oq_cooling_min_runtime_start_ms) = 0;
+            }
+          }
+          if (f == 0) {
+            id(oq_cooling_min_runtime_active) = false;
+            id(oq_cooling_min_runtime_start_ms) = 0;
+          }
+
+          // Minimum level 1 in CM5: the compressor never fully stops during active cooling.
+          // Instead of cycling off and on, it idles at level 1 until demand returns.
+          // Only hard conditions (cooling disabled, safety trip, or DHW conflict) allow f=0.
+          // Exception: legionella element-only phase — valve is in CV, HP is free to cool.
+          const bool legionella_element_only_hl =
+              (id(oq_dhw_state_code) == 4) && !id(oq_dhw_block_cv_priority);
+          const bool hard_cooling_stop =
+              !id(cooling_enable_selected).state ||
+              !id(cooling_permitted).state ||
+              (id(oq_dhw_state_code) != 0 && !legionella_element_only_hl);
+          if (!hard_cooling_stop && f < 1) {
+            f = 1;
+            if (!id(oq_cooling_min_runtime_active)) {
+              id(oq_cooling_min_runtime_active) = true;
+              id(oq_cooling_min_runtime_start_ms) = now_ms;
+            }
+          }
+
+          // Slew rate limiter: max ±1 level step per loop tick.
+          // Prevents the compressor from jumping e.g. 1→4 in one shot when the PID
+          // overshoots. The compressor steps through intermediate levels, giving the
+          // supply temperature time to respond before the next step.
+          // Exception: starting from 0 → allow jump to 1 (first start is always immediate).
+          {
+            const int last_f = id(oq_cooling_last_f);
+            if (last_f > 0 && f > 0) {
+              if (f > last_f + 1) f = last_f + 1;
+              if (f < last_f - 1) f = last_f - 1;
+            }
+            id(oq_cooling_last_f) = f;
+          }
+
+          // Auto dual-HP: escalate to dual HP when demand is sustained above threshold for 10 min.
+          const int auto_dual_thresh = (int)lroundf(id(cooling_auto_dual_demand_threshold).state);
+          if (f >= auto_dual_thresh && f > 0) {
+            id(oq_cooling_auto_dual_hp_elapsed_accum_min) += (float)loop_target_ms / 60000.0f;
+            if (id(oq_cooling_auto_dual_hp_elapsed_accum_min) >= 10.0f) {
+              id(oq_cooling_auto_dual_hp_enabled) = true;
+            }
+          } else {
+            id(oq_cooling_auto_dual_hp_elapsed_accum_min) = 0.0f;
+            if (f == 0) id(oq_cooling_auto_dual_hp_enabled) = false;
+          }
 
           #if OQ_TOPOLOGY_DUO
           const bool lead_is_hp1 = (id(hp1_minutes) <= id(${cc_secondary_minutes_id}));
@@ -580,6 +761,10 @@ interval:
           int hp2_assist_level = (int) lroundf(id(cooling_hp2_assist_level).state);
           if (hp2_assist_level < 0) hp2_assist_level = 0;
           if (hp2_assist_level > max_level) hp2_assist_level = max_level;
+          // Auto dual-HP overrides manual assist level when demand is sustained high.
+          if (id(oq_cooling_auto_dual_hp_enabled) && hp2_assist_level == 0) {
+            hp2_assist_level = std::min(f, 3);
+          }
 
           #if OQ_TOPOLOGY_DUO
           const bool demand_active = (f > 0);

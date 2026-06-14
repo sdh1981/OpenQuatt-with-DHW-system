@@ -1,4 +1,4 @@
-﻿# ============================================================================== 
+# ============================================================================== 
 # OpenQuatt - DHW Controller (Quatt Duo + 3-way valve + 3 kW element)
 # ============================================================================== 
 # Assumptions:
@@ -78,6 +78,230 @@ globals:
     type: int64_t
     restore_value: true
     initial_value: '0'
+
+  # Tracks the millis() timestamp when the current legionella run started.
+  # 0 = no run active. Used by ETA and elapsed-time sensors.
+  - id: oq_dhw_legionella_run_started_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+  # Tracks when tank_bottom (v0.40, was tank_top) first reached legionella_target_c during this run.
+  # 0 = target not yet reached. Used to estimate remaining hold time.
+  - id: oq_dhw_legionella_target_reached_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+  # ----- v0.32 DHW smart features -----
+
+  # #1 Tariff-aware shift on effective start_top (°C). Positive = start earlier
+  # (cheap window preheat), negative = defer start (expensive throttle).
+  # Slewed; clamped within user-set bounds.
+  - id: oq_dhw_tariff_shift_c
+    type: float
+    restore_value: false
+    initial_value: '0.0'
+
+  # #1 24h running average tariff (fallback when HA does not provide one).
+  - id: oq_dhw_tariff_running_avg_eur
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+
+  - id: oq_dhw_tariff_avg_last_update_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+  - id: oq_dhw_smart_last_loop_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+  # #2 PV self-consumption shift on start_top (°C). When grid is exporting,
+  # raise the effective start temperature so DHW kicks in earlier and uses
+  # the surplus.
+  - id: oq_dhw_pv_shift_c
+    type: float
+    restore_value: false
+    initial_value: '0.0'
+
+  # #3 Adaptive usage pattern — 24-bucket usage histogram (events / hour-of-day).
+  # Floats so we can decay slowly. One bucket per hour 0..23.
+  - id: oq_dhw_usage_hour_0
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_dhw_usage_hour_1
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_dhw_usage_hour_2
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_dhw_usage_hour_3
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_dhw_usage_hour_4
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_dhw_usage_hour_5
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_dhw_usage_hour_6
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_dhw_usage_hour_7
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_dhw_usage_hour_8
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_dhw_usage_hour_9
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_dhw_usage_hour_10
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_dhw_usage_hour_11
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_dhw_usage_hour_12
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_dhw_usage_hour_13
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_dhw_usage_hour_14
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_dhw_usage_hour_15
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_dhw_usage_hour_16
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_dhw_usage_hour_17
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_dhw_usage_hour_18
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_dhw_usage_hour_19
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_dhw_usage_hour_20
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_dhw_usage_hour_21
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_dhw_usage_hour_22
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_dhw_usage_hour_23
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+
+  # #3 Tap-event detection state
+  - id: oq_dhw_tank_top_prev_c
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: oq_dhw_tank_top_prev_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: oq_dhw_last_tap_event_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+  # #3 Adaptive shift (°C) on start_top derived from upcoming usage pattern.
+  - id: oq_dhw_adaptive_shift_c
+    type: float
+    restore_value: false
+    initial_value: '0.0'
+
+  # #4 Tank standby-loss tracker: UA_tank (W/K) and accumulators.
+  - id: oq_dhw_ua_tank_wpk
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+
+  - id: oq_dhw_ua_tank_sample_count
+    type: int
+    restore_value: true
+    initial_value: '0'
+
+  - id: oq_dhw_idle_temp_start_c
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+
+  - id: oq_dhw_idle_temp_start_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+  # #5 Smart legionella: track if tank ever reached legionella temp via
+  # normal heating in the last 7 days. Updated on each tick.
+  - id: oq_dhw_natural_60c_last_seen_epoch_s
+    type: int64_t
+    restore_value: true
+    initial_value: '0'
+
+  # v0.40 Tariff-aware legionella: tracks when we started waiting for a
+  # cheap tariff window. 0 = not waiting. Used to enforce max-wait safety
+  # so a sustained expensive period can't postpone legionella indefinitely.
+  - id: oq_dhw_legionella_waiting_since_epoch_s
+    type: int64_t
+    restore_value: true
+    initial_value: '0'
+
+  # Mirror of the smart-defer suppression decision for diagnostic text.
+  # 0 = not deferred, 1 = recent natural pasteurization, 2 = waiting cheap tariff
+  - id: oq_dhw_legionella_defer_reason_code
+    type: int
+    restore_value: false
+    initial_value: '0'
+
+  # v0.40: avoid-expensive status code voor reguliere DHW cyclus.
+  # 0 = niet geblokkeerd, 1 = duur uur (inhibit), 2 = duur uur maar emergency-override
+  - id: oq_dhw_avoid_expensive_reason_code
+    type: int
+    restore_value: false
+    initial_value: '0'
+
+  # Coil-in level mapping — hysteresis state tracker.
+  # Holds the last mapped level so direction-aware hysteresis works correctly.
+  - id: oq_dhw_coil_map_level
+    type: int
+    restore_value: false
+    initial_value: '4'
 
 switch:
   - platform: output
@@ -194,6 +418,42 @@ switch:
       sorting_group_id: oq_boiler
 
   - platform: template
+    id: oq_dhw_boost_after_hp
+    name: "DHW boost after HP"
+    icon: mdi:water-boiler
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    turn_on_action: []
+    turn_off_action: []
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_stop_on_bottom_enable
+    name: "DHW stop on tank bottom"
+    icon: mdi:arrow-collapse-down
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action: []
+    turn_off_action: []
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_window_enable
+    name: "DHW window enable"
+    icon: mdi:clock-time-four-outline
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action: []
+    turn_off_action: []
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
     id: oq_dhw_manual_test_mode
     name: "DHW manual test mode"
     icon: mdi:hand-back-right
@@ -229,6 +489,126 @@ switch:
     web_server:
       sorting_group_id: oq_boiler
 
+  # ----- v0.32 DHW smart features switches -----
+
+  - platform: template
+    id: oq_dhw_tariff_shift_enable
+    name: "DHW tariff shift enable"
+    icon: mdi:currency-eur
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action: []
+    turn_off_action: []
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_pv_boost_dynamic_enable
+    name: "DHW PV self-consumption enable"
+    icon: mdi:solar-power-variant
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action: []
+    turn_off_action: []
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_adaptive_usage_enable
+    name: "DHW adaptive usage learning"
+    icon: mdi:school
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action: []
+    turn_off_action: []
+    web_server:
+      sorting_group_id: oq_boiler
+
+  # v0.40: tariff-aware legionella scheduling
+  - platform: template
+    id: oq_dhw_legionella_tariff_aware_enable
+    name: "DHW legionella tariff aware"
+    icon: mdi:cash-clock
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action: []
+    turn_off_action: []
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  # v0.40 temp: tijdens legionella-run klep op DHW-stand houden zodat
+  # OpenQuatt-pomp tankwater door DHW-spiraal circuleert (mixing in tank).
+  # UIT zetten zodra een fysieke circulatiepomp tussen tank-top en tank-
+  # bottom is geinstalleerd. Default ON.
+  - platform: template
+    id: oq_dhw_legionella_coil_circulation_enable
+    name: "DHW legionella coil circulation"
+    icon: mdi:water-sync
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    turn_on_action: []
+    turn_off_action: []
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  # v0.40: vermijd DHW-cyclus tijdens duurste tariefvenster van de dag
+  # (zie input_datetime.house_battery_strategy_dynamic_expensive_start/end).
+  # Bij tank top < oq_dhw_emergency_top_c wordt veiligheidshalve toch
+  # verwarmd, ook in duur uur.
+  - platform: template
+    id: oq_dhw_avoid_expensive_enable
+    name: "DHW avoid expensive tariff"
+    icon: mdi:cash-remove
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action: []
+    turn_off_action: []
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_smart_legionella_enable
+    name: "DHW smart legionella deferral"
+    icon: mdi:bacteria-outline
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action: []
+    turn_off_action: []
+    web_server:
+      sorting_group_id: oq_boiler
+
+  # Single HP mode for DHW. Forces only the lead HP to run during DHW cycles
+  # so the second HP stays off. Avoids the "both HPs at level 1" COP-poor
+  # steady state at low DHW level, and reduces compressor cycling on the
+  # downstream HP (which runs hot at Tsup ~55 °C).
+  - platform: template
+    id: oq_dhw_single_hp_mode
+    name: "DHW single HP mode"
+    icon: mdi:numeric-1-circle-outline
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action: []
+    turn_off_action: []
+    web_server:
+      sorting_group_id: oq_boiler
+
+  # Coil-in level mapping enable switch.
+  # When ON: compressor level is throttled automatically based on coil inlet temp.
+  # When OFF: oq_dhw_hp_level (user setting) is used directly.
+  - platform: template
+    id: oq_dhw_coil_map_enable
+    name: "DHW coil-in level mapping"
+    icon: mdi:thermometer-auto
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action: []
+    turn_off_action: []
+    web_server:
+      sorting_group_id: oq_boiler
+
 button:
   - platform: template
     id: oq_dhw_clear_fault
@@ -240,6 +620,46 @@ button:
     on_press:
       - lambda: |-
           id(oq_dhw_clear_fault_req) = true;
+
+  # ----- v0.32 DHW smart features buttons -----
+
+  # #3 Reset adaptive usage histogram.
+  - platform: template
+    id: oq_dhw_reset_usage_button
+    name: "DHW reset usage learning"
+    icon: mdi:restart
+    web_server:
+      sorting_group_id: oq_boiler
+    on_press:
+      - lambda: |-
+          id(oq_dhw_usage_hour_0) = 0.0f;  id(oq_dhw_usage_hour_1) = 0.0f;
+          id(oq_dhw_usage_hour_2) = 0.0f;  id(oq_dhw_usage_hour_3) = 0.0f;
+          id(oq_dhw_usage_hour_4) = 0.0f;  id(oq_dhw_usage_hour_5) = 0.0f;
+          id(oq_dhw_usage_hour_6) = 0.0f;  id(oq_dhw_usage_hour_7) = 0.0f;
+          id(oq_dhw_usage_hour_8) = 0.0f;  id(oq_dhw_usage_hour_9) = 0.0f;
+          id(oq_dhw_usage_hour_10) = 0.0f; id(oq_dhw_usage_hour_11) = 0.0f;
+          id(oq_dhw_usage_hour_12) = 0.0f; id(oq_dhw_usage_hour_13) = 0.0f;
+          id(oq_dhw_usage_hour_14) = 0.0f; id(oq_dhw_usage_hour_15) = 0.0f;
+          id(oq_dhw_usage_hour_16) = 0.0f; id(oq_dhw_usage_hour_17) = 0.0f;
+          id(oq_dhw_usage_hour_18) = 0.0f; id(oq_dhw_usage_hour_19) = 0.0f;
+          id(oq_dhw_usage_hour_20) = 0.0f; id(oq_dhw_usage_hour_21) = 0.0f;
+          id(oq_dhw_usage_hour_22) = 0.0f; id(oq_dhw_usage_hour_23) = 0.0f;
+          ESP_LOGI("oq_dhw", "Adaptive usage histogram reset.");
+
+  # #4 Reset standby-loss learning.
+  - platform: template
+    id: oq_dhw_reset_ua_tank_button
+    name: "DHW reset standby-loss learning"
+    icon: mdi:restart
+    web_server:
+      sorting_group_id: oq_boiler
+    on_press:
+      - lambda: |-
+          id(oq_dhw_ua_tank_wpk) = 0.0f;
+          id(oq_dhw_ua_tank_sample_count) = 0;
+          id(oq_dhw_idle_temp_start_c) = NAN;
+          id(oq_dhw_idle_temp_start_ms) = 0;
+          ESP_LOGI("oq_dhw", "DHW standby-loss learning reset.");
 
 number:
   - platform: template
@@ -263,12 +683,44 @@ number:
     icon: mdi:bacteria
     unit_of_measurement: "°C"
     min_value: 60
-    max_value: 62
+    max_value: 75
     step: 0.5
     mode: slider
     optimistic: true
     restore_value: true
-    initial_value: 61
+    initial_value: 68
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_hp_stop_bottom_c
+    name: "DHW HP stop tank bottom"
+    icon: mdi:thermometer-low
+    unit_of_measurement: "°C"
+    min_value: 35
+    max_value: 55
+    step: 0.5
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 45
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_legionella_hp_stop_top_c
+    name: "DHW legionella HP handover temp"
+    icon: mdi:bacteria-outline
+    unit_of_measurement: "°C"
+    min_value: 40
+    max_value: 60
+    step: 0.5
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 53
+    entity_category: config
     web_server:
       sorting_group_id: oq_boiler
 
@@ -315,6 +767,369 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 1300
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_start_top_c
+    name: "DHW start top"
+    icon: mdi:thermometer-low
+    unit_of_measurement: "°C"
+    min_value: 38.0
+    max_value: 50.0
+    step: 0.5
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 46.0
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_hp_stop_top_c
+    name: "DHW HP stop top"
+    icon: mdi:thermometer-high
+    unit_of_measurement: "°C"
+    min_value: 42.0
+    max_value: 56.0
+    step: 0.5
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 49.0
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_hp_target_flow_c
+    name: "DHW HP target flow"
+    icon: mdi:thermometer-water
+    unit_of_measurement: "°C"
+    min_value: 48.0
+    max_value: 60.0
+    step: 0.5
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 55.0
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_min_rest_s
+    name: "DHW minimum rest"
+    icon: mdi:timer-pause-outline
+    unit_of_measurement: "s"
+    min_value: 0
+    max_value: 3600
+    step: 60
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 1200
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_solar_tariff_threshold
+    name: "DHW solar tariff threshold"
+    icon: mdi:currency-eur
+    unit_of_measurement: "EUR/kWh"
+    min_value: -0.10
+    max_value: 0.20
+    step: 0.01
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0.02
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_window_start_h
+    name: "DHW window start hour"
+    icon: mdi:clock-start
+    unit_of_measurement: "h"
+    min_value: 0
+    max_value: 23
+    step: 1
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_window_end_h
+    name: "DHW window end hour"
+    icon: mdi:clock-end
+    unit_of_measurement: "h"
+    min_value: 0
+    max_value: 23
+    step: 1
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 7
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  # ----- v0.32 DHW smart features tuning -----
+
+  # #1 Tariff shift bounds — same idea as PH but smaller magnitudes since
+  # the DHW process is slower and more discrete.
+  - platform: template
+    id: oq_dhw_tariff_preheat_max_c
+    name: "DHW tariff preheat max"
+    icon: mdi:thermometer-chevron-up
+    unit_of_measurement: "°C"
+    min_value: 0
+    max_value: 5.0
+    step: 0.5
+    optimistic: true
+    restore_value: true
+    initial_value: 3.0
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_tariff_defer_max_c
+    name: "DHW tariff defer max"
+    icon: mdi:thermometer-chevron-down
+    unit_of_measurement: "°C"
+    min_value: 0
+    max_value: 4.0
+    step: 0.5
+    optimistic: true
+    restore_value: true
+    initial_value: 2.0
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_tariff_cheap_ratio
+    name: "DHW tariff cheap ratio"
+    icon: mdi:percent
+    min_value: 0.30
+    max_value: 0.95
+    step: 0.05
+    optimistic: true
+    restore_value: true
+    initial_value: 0.7
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_tariff_expensive_ratio
+    name: "DHW tariff expensive ratio"
+    icon: mdi:percent
+    min_value: 1.05
+    max_value: 2.50
+    step: 0.05
+    optimistic: true
+    restore_value: true
+    initial_value: 1.3
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  # #2 PV self-consumption tuning
+  - platform: template
+    id: oq_dhw_pv_export_threshold_w
+    name: "DHW PV export threshold"
+    icon: mdi:solar-power
+    unit_of_measurement: "W"
+    min_value: 200
+    max_value: 5000
+    step: 50
+    optimistic: true
+    restore_value: true
+    initial_value: 1500
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_pv_max_shift_c
+    name: "DHW PV max start shift"
+    icon: mdi:thermometer-plus
+    unit_of_measurement: "°C"
+    min_value: 0
+    max_value: 6.0
+    step: 0.5
+    optimistic: true
+    restore_value: true
+    initial_value: 3.0
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  # #3 Adaptive usage tuning
+  - platform: template
+    id: oq_dhw_adaptive_lookahead_min
+    name: "DHW adaptive lookahead"
+    icon: mdi:clock-time-eight
+    unit_of_measurement: "min"
+    min_value: 15
+    max_value: 90
+    step: 5
+    optimistic: true
+    restore_value: true
+    initial_value: 45
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_adaptive_max_shift_c
+    name: "DHW adaptive max preheat"
+    icon: mdi:school
+    unit_of_measurement: "°C"
+    min_value: 0
+    max_value: 4.0
+    step: 0.5
+    optimistic: true
+    restore_value: true
+    initial_value: 2.0
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  # #5 Smart legionella deferral max days (default 7 → 14 with deferral).
+  - platform: template
+    id: oq_dhw_legionella_defer_days
+    name: "DHW legionella max defer"
+    icon: mdi:calendar-clock
+    unit_of_measurement: "d"
+    min_value: 0
+    max_value: 14
+    step: 1
+    optimistic: true
+    restore_value: true
+    initial_value: 7
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  # v0.40: tariff-aware legionella — ratio current_price / 24h_avg threshold
+  # Lager getal = strikter (alleen erg goedkope uren tellen als "cheap")
+  - platform: template
+    id: oq_dhw_legionella_cheap_ratio
+    name: "DHW legionella cheap tariff ratio"
+    icon: mdi:percent
+    min_value: 0.3
+    max_value: 1.0
+    step: 0.05
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 0.7
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  # v0.40: tariff-aware legionella — max wait time before forcing the run
+  # Veiligheidsklep zodat hygiëne nooit oneindig wordt uitgesteld
+  - platform: template
+    id: oq_dhw_legionella_max_wait_h
+    name: "DHW legionella max wait for cheap"
+    icon: mdi:timer-sand
+    unit_of_measurement: "h"
+    min_value: 1
+    max_value: 48
+    step: 1
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 24
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  # v0.40: emergency tank-top temperatuur voor avoid-expensive feature.
+  # Onder deze temperatuur wordt sowieso verwarmd, ook tijdens duur uur.
+  # Voorkomt koude douche bij combinatie van duur uur + lege tank.
+  - platform: template
+    id: oq_dhw_emergency_top_c
+    name: "DHW emergency top temperature"
+    icon: mdi:thermometer-alert
+    unit_of_measurement: "°C"
+    min_value: 25
+    max_value: 45
+    step: 1
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 35
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  # v0.40: proactieve advance-window — als legionella binnen N uur GEPLAND
+  # staat AND we zitten nu in de goedkoopste tariefvensters, dan triggeren
+  # we de run NU in plaats van te wachten tot de geplande tijd.
+  # Met advance_window_h = 24 wordt de run binnen dezelfde dag voorgetrokken
+  # naar de cheap hour. Met 0 = uit.
+  - platform: template
+    id: oq_dhw_legionella_advance_window_h
+    name: "DHW legionella advance window"
+    icon: mdi:calendar-arrow-left
+    unit_of_measurement: "h"
+    min_value: 0
+    max_value: 48
+    step: 1
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 24
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  # When DHW single-HP mode is active, optionally bump the single HP's level
+  # by this many steps to compensate for the lost capacity of the second HP.
+  # 0 = no bump (lead HP runs at oq_dhw_hp_level), 2 = lead HP runs at level+2.
+  # Stays clamped to [1, 10] in the request control.
+  - platform: template
+    id: oq_dhw_single_hp_level_bump
+    name: "DHW single HP level bump"
+    icon: mdi:plus-circle-outline
+    min_value: 0
+    max_value: 3
+    step: 1
+    optimistic: true
+    restore_value: true
+    initial_value: 1
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  # Tank water volume in litres — used for thermal capacity in #4 standby-loss
+  # tracker and #6 time-to-ready estimator. Default 220 L (Inventum Maxtank).
+  # Change this if you have a different tank.
+  - platform: template
+    id: oq_dhw_tank_volume_l
+    name: "DHW tank volume"
+    icon: mdi:storage-tank
+    unit_of_measurement: "L"
+    min_value: 50
+    max_value: 500
+    step: 10
+    optimistic: true
+    restore_value: true
+    initial_value: 220
     entity_category: config
     web_server:
       sorting_group_id: oq_boiler
@@ -379,6 +1194,75 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 30
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  # ----- Coil-in level mapping thresholds -----
+  # T1: coil_in at which level drops 4→3
+  - platform: template
+    id: oq_dhw_coil_map_t1_c
+    name: "DHW coil map T1 (4→3)"
+    icon: mdi:thermometer-chevron-up
+    unit_of_measurement: "°C"
+    min_value: 30.0
+    max_value: 52.0
+    step: 0.5
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 40.0
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  # T2: coil_in at which level drops 3→2
+  - platform: template
+    id: oq_dhw_coil_map_t2_c
+    name: "DHW coil map T2 (3→2)"
+    icon: mdi:thermometer-chevron-up
+    unit_of_measurement: "°C"
+    min_value: 33.0
+    max_value: 53.0
+    step: 0.5
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 44.0
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  # T3: coil_in at which level drops 2→1 (never below 1)
+  - platform: template
+    id: oq_dhw_coil_map_t3_c
+    name: "DHW coil map T3 (2→1)"
+    icon: mdi:thermometer-chevron-up
+    unit_of_measurement: "°C"
+    min_value: 36.0
+    max_value: 54.5
+    step: 0.5
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 48.0
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  # Hysteresis band applied symmetrically around each threshold
+  - platform: template
+    id: oq_dhw_coil_map_hyst_c
+    name: "DHW coil map hysteresis"
+    icon: mdi:swap-vertical
+    unit_of_measurement: "°C"
+    min_value: 0.0
+    max_value: 3.0
+    step: 0.5
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 0.5
     entity_category: config
     web_server:
       sorting_group_id: oq_boiler
@@ -455,6 +1339,12 @@ sensor:
       }
       return NAN;
 
+  # ---------------------------------------------------------------
+  # DHW temperature inputs — priority chain (first valid wins):
+  #   1. CWT-TM-8PT Modbus PT1000 sensors (v0.40, primary source)
+  #   2. HA-provided sensor (cloud/manual)
+  #   3. Local override slider (oq_dhw_src_*)
+  # ---------------------------------------------------------------
   - platform: template
     id: dhw_tank_top_input
     name: "DHW tank top"
@@ -467,8 +1357,8 @@ sensor:
     web_server:
       sorting_group_id: oq_boiler
     lambda: |-
-      if (id(dhw_mb_tank_top_c).has_state() && !isnan(id(dhw_mb_tank_top_c).state)) {
-        return id(dhw_mb_tank_top_c).state;
+      if (id(cwt_pt_ch1_c).has_state() && !isnan(id(cwt_pt_ch1_c).state)) {
+        return id(cwt_pt_ch1_c).state;
       }
       if (id(dhw_tank_top_ha).has_state() && !isnan(id(dhw_tank_top_ha).state)) {
         return id(dhw_tank_top_ha).state;
@@ -487,8 +1377,8 @@ sensor:
     web_server:
       sorting_group_id: oq_boiler
     lambda: |-
-      if (id(dhw_mb_tank_bottom_c).has_state() && !isnan(id(dhw_mb_tank_bottom_c).state)) {
-        return id(dhw_mb_tank_bottom_c).state;
+      if (id(cwt_pt_ch2_c).has_state() && !isnan(id(cwt_pt_ch2_c).state)) {
+        return id(cwt_pt_ch2_c).state;
       }
       if (id(dhw_tank_bottom_ha).has_state() && !isnan(id(dhw_tank_bottom_ha).state)) {
         return id(dhw_tank_bottom_ha).state;
@@ -507,8 +1397,8 @@ sensor:
     web_server:
       sorting_group_id: oq_boiler
     lambda: |-
-      if (id(dhw_pt1000_coil_in_cal_c).has_state() && !isnan(id(dhw_pt1000_coil_in_cal_c).state)) {
-        return id(dhw_pt1000_coil_in_cal_c).state;
+      if (id(cwt_pt_ch3_c).has_state() && !isnan(id(cwt_pt_ch3_c).state)) {
+        return id(cwt_pt_ch3_c).state;
       }
       if (id(dhw_coil_in_ha).has_state() && !isnan(id(dhw_coil_in_ha).state)) {
         return id(dhw_coil_in_ha).state;
@@ -527,8 +1417,8 @@ sensor:
     web_server:
       sorting_group_id: oq_boiler
     lambda: |-
-      if (id(dhw_pt1000_coil_out_cal_c).has_state() && !isnan(id(dhw_pt1000_coil_out_cal_c).state)) {
-        return id(dhw_pt1000_coil_out_cal_c).state;
+      if (id(cwt_pt_ch4_c).has_state() && !isnan(id(cwt_pt_ch4_c).state)) {
+        return id(cwt_pt_ch4_c).state;
       }
       if (id(dhw_coil_out_ha).has_state() && !isnan(id(dhw_coil_out_ha).state)) {
         return id(dhw_coil_out_ha).state;
@@ -587,6 +1477,311 @@ sensor:
     lambda: |-
       return id(boiler_relay).state ? 3000.0f : 0.0f;
 
+  # ----- v0.32 DHW smart-feature diagnostics -----
+
+  # #1 Effective tariff shift on start_top (°C).
+  - platform: template
+    id: oq_dhw_tariff_shift_sensor
+    name: "DHW tariff start shift"
+    icon: mdi:currency-eur
+    unit_of_measurement: "°C"
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 30s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      return id(oq_dhw_tariff_shift_c);
+
+  # #2 Effective PV shift on start_top (°C).
+  - platform: template
+    id: oq_dhw_pv_shift_sensor
+    name: "DHW PV start shift"
+    icon: mdi:solar-power-variant
+    unit_of_measurement: "°C"
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 30s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      return id(oq_dhw_pv_shift_c);
+
+  # #3 Effective adaptive shift on start_top (°C).
+  - platform: template
+    id: oq_dhw_adaptive_shift_sensor
+    name: "DHW adaptive start shift"
+    icon: mdi:school
+    unit_of_measurement: "°C"
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 30s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      return id(oq_dhw_adaptive_shift_c);
+
+  # #3 Per-hour usage histogram (publishes the upcoming hour's intensity).
+  - platform: template
+    id: oq_dhw_usage_upcoming_sensor
+    name: "DHW upcoming hour usage"
+    icon: mdi:chart-histogram
+    unit_of_measurement: "events"
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 60s
+    entity_category: diagnostic
+    disabled_by_default: true
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      auto now = id(oq_time).now();
+      if (!now.is_valid()) return NAN;
+      const int next_h = (now.hour + 1) % 24;
+      switch (next_h) {
+        case 0:  return id(oq_dhw_usage_hour_0);
+        case 1:  return id(oq_dhw_usage_hour_1);
+        case 2:  return id(oq_dhw_usage_hour_2);
+        case 3:  return id(oq_dhw_usage_hour_3);
+        case 4:  return id(oq_dhw_usage_hour_4);
+        case 5:  return id(oq_dhw_usage_hour_5);
+        case 6:  return id(oq_dhw_usage_hour_6);
+        case 7:  return id(oq_dhw_usage_hour_7);
+        case 8:  return id(oq_dhw_usage_hour_8);
+        case 9:  return id(oq_dhw_usage_hour_9);
+        case 10: return id(oq_dhw_usage_hour_10);
+        case 11: return id(oq_dhw_usage_hour_11);
+        case 12: return id(oq_dhw_usage_hour_12);
+        case 13: return id(oq_dhw_usage_hour_13);
+        case 14: return id(oq_dhw_usage_hour_14);
+        case 15: return id(oq_dhw_usage_hour_15);
+        case 16: return id(oq_dhw_usage_hour_16);
+        case 17: return id(oq_dhw_usage_hour_17);
+        case 18: return id(oq_dhw_usage_hour_18);
+        case 19: return id(oq_dhw_usage_hour_19);
+        case 20: return id(oq_dhw_usage_hour_20);
+        case 21: return id(oq_dhw_usage_hour_21);
+        case 22: return id(oq_dhw_usage_hour_22);
+        case 23: return id(oq_dhw_usage_hour_23);
+      }
+      return NAN;
+
+  # #4 Tank standby loss (W/K).
+  - platform: template
+    id: oq_dhw_ua_tank_sensor
+    name: "DHW tank standby loss"
+    icon: mdi:thermometer-off
+    unit_of_measurement: "W/K"
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 60s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      return id(oq_dhw_ua_tank_wpk);
+
+  - platform: template
+    id: oq_dhw_ua_tank_samples_sensor
+    name: "DHW UA samples"
+    icon: mdi:counter
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    disabled_by_default: true
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      return (float) id(oq_dhw_ua_tank_sample_count);
+
+  # #6 Estimated time-to-ready (minutes).
+  - platform: template
+    id: oq_dhw_time_to_ready_sensor
+    name: "DHW estimated time to ready"
+    icon: mdi:timer-sand
+    unit_of_measurement: "min"
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 30s
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      // Only compute while DHW is heating (hp_request active or boost on).
+      const bool active = id(oq_dhw_hp_request_active) || id(boiler_relay).state;
+      if (!active) return NAN;
+      const float top = id(dhw_tank_top_input).state;
+      const float target = id(oq_dhw_hp_stop_top_c).state;
+      if (isnan(top) || isnan(target)) return NAN;
+      const float gap = target - top;
+      if (gap <= 0.05f) return 0.0f;
+      // Thermal capacity: water = 1.16 Wh/(L·K). User-configurable volume.
+      const float volume_l = id(oq_dhw_tank_volume_l).state;
+      const float tank_wh_per_k = (volume_l > 0.0f ? volume_l : 220.0f) * 1.16f;
+
+      // Net heating power: estimate from the HP perf_map at the actual DHW
+      // level + supply target, plus 3 kW element when boost is on, minus
+      // standby loss (UA × ΔT_ambient).
+      float p_in = 0.0f;
+      if (id(oq_dhw_hp_request_active)) {
+        const int dhw_level = id(oq_dhw_hp_level_request);
+        const float Tamb = id(outside_temp_selected).state;
+        const float Tsup = id(oq_dhw_hp_target_flow_c).state;
+        float p_per_hp = NAN;
+        if (!isnan(Tamb) && !isnan(Tsup) && dhw_level > 0) {
+          p_per_hp = oq_perf::interp_power_th_w(dhw_level, Tamb, Tsup);
+        }
+        if (!isnan(p_per_hp) && p_per_hp > 0.0f) {
+          p_in += p_per_hp;
+          #if OQ_TOPOLOGY_DUO
+          // Duo: both HPs are requested at the same DHW level.
+          p_in += p_per_hp;
+          #endif
+        } else {
+          // Conservative fallback when perf_map cannot interpolate (e.g. NaN cell).
+          p_in += 3000.0f;
+        }
+      }
+      if (id(boiler_relay).state) p_in += 3000.0f;
+      const float ua = id(oq_dhw_ua_tank_wpk);
+      const float Tamb_room = 20.0f;
+      if (ua > 0.0f) p_in -= ua * fmaxf(0.0f, top - Tamb_room);
+      if (p_in <= 50.0f) return NAN;
+      const float hours = (gap * tank_wh_per_k) / p_in;
+      return hours * 60.0f;
+
+  # Legionella ETA (minutes remaining until the current run completes).
+  # Returns NAN when no legionella run is active.
+  # Computes the remaining time across three phases:
+  #   Phase 1: HP + element heating up to legionella_hp_stop_top_c
+  #   Phase 2: element-only heating up to legionella_target_c
+  #   Phase 3: 15-min hold at legionella_target_c
+  - platform: template
+    id: oq_dhw_legionella_eta_sensor
+    name: "DHW legionella ETA"
+    icon: mdi:timer-sand
+    unit_of_measurement: "min"
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 30s
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      // Only show ETA while a legionella run is active (state == LEGIONELLA == 4).
+      if (id(oq_dhw_state_code) != 4) return NAN;
+
+      const float top = id(dhw_tank_top_input).state;
+      if (isnan(top)) return NAN;
+
+      const float legionella_target = id(oq_dhw_legionella_target_c).state;
+      const float hp_stop = id(oq_dhw_legionella_hp_stop_top_c).state;
+      const float volume_l = id(oq_dhw_tank_volume_l).state;
+      const float tank_wh_per_k = (volume_l > 0.0f ? volume_l : 220.0f) * 1.16f;
+      const float element_w = 3000.0f;
+
+      // Standby loss estimate (small but real, ~50–100 W at 65°C).
+      const float ua = id(oq_dhw_ua_tank_wpk);
+      const float Tamb_room = 20.0f;
+      auto net_power_w = [&](float power_in_w, float current_top)->float {
+        float p = power_in_w;
+        if (ua > 0.0f) p -= ua * fmaxf(0.0f, current_top - Tamb_room);
+        return p;
+      };
+
+      float total_min = 0.0f;
+
+      // Phase 3: 15-minute hold at target (always required).
+      const uint32_t hold_required_ms = 15UL * 60UL * 1000UL;
+      if (id(oq_dhw_legionella_target_reached_ms) > 0) {
+        const uint32_t now_ms = (uint32_t) millis();
+        const uint32_t elapsed_hold = (now_ms >= id(oq_dhw_legionella_target_reached_ms))
+            ? (now_ms - id(oq_dhw_legionella_target_reached_ms)) : 0;
+        const uint32_t hold_remaining_ms = (elapsed_hold < hold_required_ms)
+            ? (hold_required_ms - elapsed_hold) : 0;
+        total_min += (float) hold_remaining_ms / 60000.0f;
+      } else {
+        // Target not yet reached: full 15-min hold still ahead.
+        total_min += 15.0f;
+      }
+
+      // Phase 2: element-only heating to legionella_target.
+      const float phase2_from = std::max(top, hp_stop);
+      if (phase2_from < legionella_target) {
+        const float gap2 = legionella_target - phase2_from;
+        const float wh_needed = gap2 * tank_wh_per_k;
+        const float p_net = net_power_w(element_w, phase2_from);
+        if (p_net > 50.0f) {
+          total_min += (wh_needed / p_net) * 60.0f;
+        } else {
+          return NAN;  // element cannot overcome losses → indeterminate
+        }
+      }
+
+      // Phase 1: HP + element heating to hp_stop (only if we're still in HP phase).
+      // hp_phase_done_ in the controller maps to block_cv_priority=true while HP active.
+      const bool hp_phase_active = id(oq_dhw_block_cv_priority) && (top < hp_stop);
+      if (hp_phase_active) {
+        const float gap1 = hp_stop - top;
+        const float wh_needed = gap1 * tank_wh_per_k;
+
+        float p_hp = 0.0f;
+        const int dhw_level = id(oq_dhw_hp_level_request);
+        const float Tamb = id(outside_temp_selected).state;
+        const float Tsup = id(oq_dhw_hp_target_flow_c).state;
+        if (!isnan(Tamb) && !isnan(Tsup) && dhw_level > 0) {
+          p_hp = oq_perf::interp_power_th_w(dhw_level, Tamb, Tsup);
+          #if OQ_TOPOLOGY_DUO
+          if (!isnan(p_hp) && p_hp > 0.0f) p_hp *= 2.0f;
+          #endif
+        }
+        if (isnan(p_hp) || p_hp <= 0.0f) p_hp = 3000.0f;  // conservative fallback
+
+        const float p_net = net_power_w(p_hp + element_w, top);
+        if (p_net > 50.0f) {
+          total_min += (wh_needed / p_net) * 60.0f;
+        }
+      }
+
+      return total_min;
+
+  # Legionella elapsed time (minutes since the current run started).
+  - platform: template
+    id: oq_dhw_legionella_elapsed_sensor
+    name: "DHW legionella elapsed"
+    icon: mdi:timer-play-outline
+    unit_of_measurement: "min"
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 30s
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      if (id(oq_dhw_state_code) != 4) return NAN;
+      const uint32_t started = id(oq_dhw_legionella_run_started_ms);
+      if (started == 0) return NAN;
+      const uint32_t now_ms = (uint32_t) millis();
+      const uint32_t elapsed = (now_ms >= started) ? (now_ms - started) : 0;
+      return (float) elapsed / 60000.0f;
+
+  # Coil-in mapped compressor level (diagnostic).
+  # Shows the active level after coil-in mapping; equals oq_dhw_hp_level when mapping is off.
+  - platform: template
+    id: oq_dhw_coil_map_level_sensor
+    name: "DHW coil mapped level"
+    icon: mdi:stairs
+    unit_of_measurement: "lvl"
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 5s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      return (float) id(oq_dhw_coil_map_level);
+
 binary_sensor:
   - platform: gpio
     id: dhw_valve_aux_raw_gpio
@@ -635,6 +1830,17 @@ binary_sensor:
     web_server:
       sorting_group_id: oq_boiler
 
+  # v0.40: optionele HA binary_sensor "is dit een goedkoop tariefuur?"
+  # Wordt alleen gebruikt als de datetime-window sensoren NIET beschikbaar
+  # zijn — die hebben hogere prioriteit (zie text_sensor secties).
+  - platform: homeassistant
+    id: dhw_legionella_cheap_window_ha
+    name: "HA DHW legionella cheap window"
+    entity_id: ${ha_dhw_legionella_cheap_window_entity_id}
+    internal: true
+    web_server:
+      sorting_group_id: oq_boiler
+
   - platform: homeassistant
     id: dhw_hp_fault_ha
     name: "HA DHW HP fault"
@@ -674,9 +1880,13 @@ binary_sensor:
       // Expose raw contact state in HA: ON means DHW position.
       return raw_dhw_pos;
 
+  # Note: named "DHW Element Active" because in this build the boiler_relay
+  # drives the 3 kW DHW tank element (CV boiler removed). The id stays
+  # `boiler_active` for backward compatibility with existing HA dashboards
+  # and automations that already reference it.
   - platform: template
     id: boiler_active
-    name: "Boiler active"
+    name: "DHW Element Active"
     icon: mdi:fire
     device_class: heat
     entity_category: diagnostic
@@ -706,6 +1916,33 @@ binary_sensor:
       return id(oq_dhw_block_cv_priority);
 
 text_sensor:
+  # v0.40: HA datetime entiteiten voor goedkoopste tariefvenster van de dag
+  # Format: "YYYY-MM-DD HH:MM:SS" (has_date+has_time) of "HH:MM:SS" (alleen tijd)
+  - platform: homeassistant
+    id: dhw_legionella_cheap_start_ha
+    name: "HA DHW legionella cheap start"
+    entity_id: ${ha_dhw_legionella_cheap_start_entity_id}
+    internal: true
+
+  - platform: homeassistant
+    id: dhw_legionella_cheap_end_ha
+    name: "HA DHW legionella cheap end"
+    entity_id: ${ha_dhw_legionella_cheap_end_entity_id}
+    internal: true
+
+  # v0.40: duurste tariefvenster — DHW reguliere cyclus vermijdt deze uren
+  - platform: homeassistant
+    id: dhw_expensive_start_ha
+    name: "HA DHW expensive start"
+    entity_id: ${ha_dhw_expensive_start_entity_id}
+    internal: true
+
+  - platform: homeassistant
+    id: dhw_expensive_end_ha
+    name: "HA DHW expensive end"
+    entity_id: ${ha_dhw_expensive_end_entity_id}
+    internal: true
+
   - platform: template
     id: oq_dhw_state_text
     name: "DHW state"
@@ -749,6 +1986,49 @@ text_sensor:
     lambda: |-
       return std::string("Onbekend");
 
+  # v0.40: reguliere DHW avoid-expensive status (diagnose)
+  - platform: template
+    id: oq_dhw_avoid_expensive_status_text
+    name: "DHW avoid expensive status"
+    icon: mdi:cash-clock
+    update_interval: 10s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      if (!id(oq_dhw_avoid_expensive_enable).state) return std::string("Uitgeschakeld");
+      switch (id(oq_dhw_avoid_expensive_reason_code)) {
+        case 1:
+          return std::string("Duur uur - DHW uitgesteld");
+        case 2:
+          return std::string("Duur uur - emergency override (tank te koud)");
+        default:
+          return std::string("Geen blokkade actief");
+      }
+
+  # v0.40: legionella deferral status (smart + tariff-aware)
+  - platform: template
+    id: oq_dhw_legionella_defer_status_text
+    name: "DHW legionella deferral status"
+    icon: mdi:information-outline
+    update_interval: 10s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      switch (id(oq_dhw_legionella_defer_reason_code)) {
+        case 1:
+          return std::string("Uitgesteld - recent natuurlijke pasteurisatie");
+        case 2:
+          return std::string("Wachten op goedkoop tarief");
+        case 3:
+          return std::string("Max-wait bereikt - run wordt geforceerd");
+        case 4:
+          return std::string("Proactief gestart - cheap window + bijna due");
+        default:
+          return std::string("Niet uitgesteld");
+      }
+
 interval:
   - interval: ${oq_dhw_loop_s}s
     startup_delay: 4600ms
@@ -781,18 +2061,115 @@ interval:
             if (strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M", &tmbuf) == 0) return std::string("Onbekend");
             return std::string(buf);
           };
+          // Parse "HH:MM[:SS]" or "YYYY-MM-DD HH:MM[:SS]" -> minutes since midnight.
+          // Returns -1 on parse error. Shared by all three time-window checks below.
+          auto parse_hm = [](const std::string& s) -> int {
+            int hh = 0, mm = 0;
+            if (s.length() >= 5 && s[2] == ':') {
+              hh = atoi(s.substr(0, 2).c_str());
+              mm = atoi(s.substr(3, 2).c_str());
+            } else if (s.length() >= 16 && s[10] == ' ' && s[13] == ':') {
+              hh = atoi(s.substr(11, 2).c_str());
+              mm = atoi(s.substr(14, 2).c_str());
+            } else {
+              return -1;
+            }
+            if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return -1;
+            return hh * 60 + mm;
+          };
 
           if (id(oq_dhw_clear_fault_req)) {
             controller.clear_fault_latch();
             id(oq_dhw_clear_fault_req) = false;
+            // publish immediately: tick() will see fault_=NONE→NONE (changed=false)
+            id(oq_dhw_fault_text).publish_state("NONE");
+            id(oq_dhw_state_text).publish_state("IDLE_CV");
+          }
+
+          // Seed legionella last-done from persistent wall-clock epoch on first valid tick.
+          // legionella_seeded = true signals the controller that scheduling may begin.
+          // We always wait for NTP so the age calculation is reliable.
+          //
+          // Three cases must be handled correctly:
+          //   1. Past due (age >= interval): seed with 1 → fires on next IDLE_CV tick
+          //   2. Normal (age < interval AND age_ms < now_ms_seed): seed accurately
+          //   3. Edge (age < interval BUT age_ms > now_ms_seed, i.e. recent reboot):
+          //      seed conservatively with now_ms_seed → next run fires after one full
+          //      interval of uptime (slightly later than ideal, but never spuriously).
+          //
+          // The previous version clipped age_ms to now_ms_seed and then seeded with 0,
+          // which is rejected by seed_legionella_last_done_ms() → controller thinks
+          // "never done" → fires 30 min after every reboot. That bug is now fixed.
+          static bool legionella_seeded = false;
+          if (!legionella_seeded) {
+            auto now_t = id(oq_time).now();
+            if (now_t.is_valid()) {
+              const int64_t last_done_epoch = id(oq_dhw_legionella_last_done_epoch_s);
+              if (last_done_epoch > 0) {
+                const int64_t now_epoch = (int64_t) now_t.timestamp;
+                const int64_t age_s = now_epoch - last_done_epoch;
+                if (age_s >= 0) {
+                  const uint32_t now_ms_seed = (uint32_t) millis();
+                  // cfg is not yet built at this point — use the default interval
+                  // (7 days in seconds) directly. Must stay in sync with the
+                  // Config::legionella_interval_ms = 7 * 24 * 60 * 60 * 1000
+                  // declaration in oq_dhw_controller_logic.h.
+                  const int64_t interval_s = 7LL * 24LL * 60LL * 60LL;
+                  if (age_s >= interval_s) {
+                    // Case 1: past due — fire immediately.
+                    controller.seed_legionella_last_done_ms(1);
+                  } else {
+                    const int64_t age_ms_real = age_s * 1000LL;
+                    if (age_ms_real < (int64_t) now_ms_seed) {
+                      // Case 2: normal — age fits in current uptime.
+                      const uint32_t seed = now_ms_seed - (uint32_t) age_ms_real;
+                      controller.seed_legionella_last_done_ms(seed > 0 ? seed : 1);
+                    } else {
+                      // Case 3: edge — age exceeds uptime (typical after reboot).
+                      // Treat as "just done now"; next run fires ~1 interval from now,
+                      // which is later than the true expiry but safely avoids spurious
+                      // immediate triggers. Diagnostic next-run text remains accurate
+                      // because it's computed from the persistent epoch.
+                      controller.seed_legionella_last_done_ms(
+                          now_ms_seed > 0 ? now_ms_seed : 1);
+                    }
+                  }
+                }
+              }
+              // last_done_epoch == 0 means never done; controller schedules after
+              // the 30-min boot-settle defined in should_start_legionella_.
+              legionella_seeded = true;
+            }
+            // If NTP not yet valid: stay unseeded — controller blocks scheduling.
           }
 
           oq_dhw::Config cfg;
-          cfg.start_top_c = 46.0f;
-          cfg.hp_stop_top_c = 49.0f;
+          cfg.start_top_c = id(oq_dhw_start_top_c).state;
+          cfg.hp_stop_top_c = id(oq_dhw_hp_stop_top_c).state;
           cfg.boost_target_c = id(oq_dhw_boost_target_c).state;
           cfg.legionella_target_c = id(oq_dhw_legionella_target_c).state;
-          cfg.hp_target_flow_c = 55.0f;
+          cfg.legionella_hp_stop_top_c = id(oq_dhw_legionella_hp_stop_top_c).state;
+          // Hard-coded per user requirement: DHW HP always stops on tank-bottom = 52°C.
+          // 52°C keeps the entire tank in the legionella-inhibition zone (50–55°C)
+          // while maintaining a healthy ΔT vs the HP supply (60°C target) for good COP.
+          // The slider/switch entities are kept for backward compatibility but their
+          // values are ignored — the firmware enforces these constants every tick.
+          // Hygiene safety is provided by the weekly legionella run (68°C / 15 min hold).
+          cfg.stop_on_bottom_enable = true;
+          cfg.hp_stop_bottom_c = 52.0f;
+          // v0.40 temp: legionella klep op DHW houden voor coil-circulation
+          cfg.legionella_use_coil_circulation =
+              id(oq_dhw_legionella_coil_circulation_enable).state;
+          // Hardcoded: HP mag tot 180 min draaien per DHW-cyclus. Default
+          // 75 min uit de Config struct was te krap voor een 220L tank van
+          // koud (19°C) naar tank-bottom 52°C — die opwarming kost ~100 min
+          // bij gemiddeld 4-5 kW HP-output. 180 min geeft ruime marge voor
+          // koudere starttemperaturen of lagere buitentemp (lagere COP).
+          // Hygiëne wordt apart geborgd door de wekelijkse legionella-run.
+          cfg.hp_max_runtime_ms = 180UL * 60UL * 1000UL;
+          cfg.hp_target_flow_c = id(oq_dhw_hp_target_flow_c).state;
+          cfg.enable_boost_after_hp = id(oq_dhw_boost_after_hp).state;
+          cfg.min_cycle_rest_ms = (uint32_t)(id(oq_dhw_min_rest_s).state * 1000.0f);
           const float flow_min_cfg = id(oq_dhw_flow_min_lph).state;
           const float flow_max_cfg = id(oq_dhw_flow_max_lph).state;
           cfg.flow_min_lph = fminf(flow_min_cfg, flow_max_cfg);
@@ -818,17 +2195,530 @@ interval:
           const bool lockout_ha = id(dhw_lockout_ha).has_state() ? id(dhw_lockout_ha).state : id(oq_dhw_src_lockout).state;
           in.lockout_active = id(oq_dhw_lockout).state || lockout_ha;
 
+          // Time window: block new cycle starts outside the configured hour range.
+          // Only applies when window is enabled; does not interrupt a running cycle.
+          bool window_inhibit = false;
+          if (id(oq_dhw_window_enable).state) {
+            auto now_t = id(oq_time).now();
+            if (now_t.is_valid()) {
+              const int h = now_t.hour;
+              const int s_h = (int) id(oq_dhw_window_start_h).state;
+              const int e_h = (int) id(oq_dhw_window_end_h).state;
+              if (s_h <= e_h) {
+                window_inhibit = (h < s_h || h >= e_h);
+              } else {
+                // Overnight window e.g. 22:00-06:00: active when h>=22 OR h<6.
+                window_inhibit = (h < s_h && h >= e_h);
+              }
+            } else {
+              window_inhibit = true;
+            }
+          }
+
+          // ============================================================
+          // v0.40: avoid-expensive feature voor reguliere DHW cyclus
+          // ------------------------------------------------------------
+          // Als we in het duurste tariefvenster van vandaag zitten EN
+          // de tank is niet te koud → stel cyclus uit (start_inhibit).
+          // Werkt alleen op cyclus-START. Lopende cycli worden NIET
+          // onderbroken (anders zou je halverwege koud blijven).
+          //
+          // Diagnose code: oq_dhw_avoid_expensive_reason_code
+          //   0 = geen blokkade
+          //   1 = duur uur, cyclus uitgesteld
+          //   2 = duur uur maar tank koud → emergency override, mag starten
+          // ============================================================
+          id(oq_dhw_avoid_expensive_reason_code) = 0;
+          bool expensive_inhibit = false;
+          if (id(oq_dhw_avoid_expensive_enable).state) {
+            auto now_t_exp = id(oq_time).now();
+            if (now_t_exp.is_valid() &&
+                id(dhw_expensive_start_ha).has_state() &&
+                id(dhw_expensive_end_ha).has_state()) {
+              const int s = parse_hm(id(dhw_expensive_start_ha).state);
+              const int e = parse_hm(id(dhw_expensive_end_ha).state);
+              if (s >= 0 && e >= 0) {
+                const int n = now_t_exp.hour * 60 + now_t_exp.minute;
+                bool in_expensive;
+                if (s <= e) in_expensive = (n >= s && n < e);
+                else        in_expensive = (n >= s || n < e);
+
+                if (in_expensive) {
+                  // Emergency-check: is tank top te koud om te wachten?
+                  const float emerg_c = id(oq_dhw_emergency_top_c).state;
+                  const bool emergency_cold =
+                      !isnan(in.tank_top_c) && in.tank_top_c < emerg_c;
+                  if (emergency_cold) {
+                    // Te koud — laat verwarmen toe ondanks duur uur
+                    id(oq_dhw_avoid_expensive_reason_code) = 2;
+                  } else {
+                    // Duur uur + tank OK → cyclus uitstellen
+                    expensive_inhibit = true;
+                    id(oq_dhw_avoid_expensive_reason_code) = 1;
+                  }
+                }
+              }
+            }
+          }
+
+          in.start_inhibit = window_inhibit || expensive_inhibit;
+
           const bool solar_boost_ha =
               id(dhw_solar_boost_ha).has_state() ? id(dhw_solar_boost_ha).state : id(oq_dhw_src_solar_boost).state;
-          const bool solar_boost_auto_negative_tariff =
+          const bool solar_boost_auto_tariff =
               id(oq_dhw_solar_boost_auto).state &&
               id(dhw_tariff_ha).has_state() &&
               !isnan(id(dhw_tariff_ha).state) &&
-              (id(dhw_tariff_ha).state < 0.0f);
-          in.solar_boost_request = solar_boost_ha || solar_boost_auto_negative_tariff;
+              (id(dhw_tariff_ha).state <= id(oq_dhw_solar_tariff_threshold).state);
+          in.solar_boost_request = solar_boost_ha || solar_boost_auto_tariff;
           in.legionella_force_request = id(dhw_legionella_force_ha).has_state() ? id(dhw_legionella_force_ha).state : id(oq_dhw_src_legionella_force).state;
+          in.legionella_seeded = legionella_seeded;
+
+          // ============================================================
+          // v0.40 Smart Legionella Deferral + Tariff-aware Scheduling
+          // ------------------------------------------------------------
+          // Drie mechanismen die de legionella-start beïnvloeden:
+          //
+          //   #0 Proactive advance (PULL FORWARD): als legionella binnen
+          //      advance_window_h gepland staat EN we zitten nu in een
+          //      goedkoop tariefvenster → trigger run NU i.p.v. te wachten.
+          //   #1 Smart deferral: tank heeft recent (binnen N dagen) op
+          //      natuurlijke wijze al 68°C gehaald → geen run nodig.
+          //   #2 Tariff-aware:  als een force-request binnenkomt en het
+          //      huidig uur is NIET goedkoop → wacht tot wel goedkoop.
+          //      Veiligheidsklep: max X uur wachten, dan toch forceren.
+          //
+          // Diagnostiek: oq_dhw_legionella_defer_reason_code:
+          //   0 = niet uitgesteld
+          //   1 = recent natuurlijke pasteurisatie (smart deferral)
+          //   2 = wacht op goedkoop tarief
+          //   3 = wacht op goedkoop, maar max-wait nadert
+          //   4 = proactief naar voren gehaald (cheap window + bijna due)
+          // ============================================================
+          id(oq_dhw_legionella_defer_reason_code) = 0;
+
+          // ============================================================
+          // #0 Proactive advance — trekt geplande run naar voren naar
+          //    de eerste cheap window binnen het advance-venster
+          // ============================================================
+          auto check_cheap_window_now = [&](const ESPTime& now_t) -> int {
+            // Returns 0 = unknown (geen valide bron), 1 = cheap, 2 = not cheap
+            // a) datetime-window
+            if (id(dhw_legionella_cheap_start_ha).has_state() &&
+                id(dhw_legionella_cheap_end_ha).has_state()) {
+              const int s = parse_hm(id(dhw_legionella_cheap_start_ha).state);
+              const int e = parse_hm(id(dhw_legionella_cheap_end_ha).state);
+              if (s >= 0 && e >= 0) {
+                const int n = now_t.hour * 60 + now_t.minute;
+                bool cheap;
+                if (s <= e) cheap = (n >= s && n < e);
+                else        cheap = (n >= s || n < e);
+                return cheap ? 1 : 2;
+              }
+            }
+            // b) binary_sensor
+            if (id(dhw_legionella_cheap_window_ha).has_state()) {
+              return id(dhw_legionella_cheap_window_ha).state ? 1 : 2;
+            }
+            // c) ratio fallback
+            if (id(dhw_tariff_ha).has_state() &&
+                !isnan(id(dhw_tariff_ha).state) &&
+                id(oq_dhw_tariff_running_avg_eur) > 0.0f) {
+              const float ratio = id(dhw_tariff_ha).state /
+                                  id(oq_dhw_tariff_running_avg_eur);
+              const float threshold = id(oq_dhw_legionella_cheap_ratio).state;
+              return (ratio < threshold) ? 1 : 2;
+            }
+            return 0;
+          };
+
+          if (id(oq_dhw_legionella_tariff_aware_enable).state &&
+              !in.legionella_force_request) {
+            auto now_t_adv = id(oq_time).now();
+            if (now_t_adv.is_valid()) {
+              const int64_t now_epoch_adv = (int64_t) now_t_adv.timestamp;
+              const int64_t last_done = id(oq_dhw_legionella_last_done_epoch_s);
+              const int64_t anchor = id(oq_dhw_legionella_anchor_epoch_s);
+              const int64_t interval_s = (int64_t)(cfg.legionella_interval_ms / 1000UL);
+              const int64_t advance_s = (int64_t)(
+                  id(oq_dhw_legionella_advance_window_h).state * 3600.0f);
+
+              if (advance_s > 0 && interval_s > 0) {
+                // Compute when next run is scheduled
+                const int64_t base = (last_done > 0) ? last_done : anchor;
+                if (base > 0) {
+                  const int64_t scheduled_epoch = base + interval_s;
+                  const int64_t time_to_scheduled = scheduled_epoch - now_epoch_adv;
+                  // Within advance window of scheduled time?
+                  if (time_to_scheduled > 0 && time_to_scheduled <= advance_s) {
+                    // Currently in cheap window?
+                    if (check_cheap_window_now(now_t_adv) == 1) {
+                      // Verifieer smart deferral niet zou suppressen
+                      bool would_be_deferred = false;
+                      if (id(oq_dhw_smart_legionella_enable).state) {
+                        const int64_t last_seen =
+                            id(oq_dhw_natural_60c_last_seen_epoch_s);
+                        const float defer_days =
+                            id(oq_dhw_legionella_defer_days).state;
+                        if (last_seen > 0 && defer_days > 0.0f) {
+                          const int64_t defer_seconds =
+                              (int64_t)(defer_days * 86400.0f);
+                          if ((now_epoch_adv - last_seen) < defer_seconds) {
+                            would_be_deferred = true;
+                          }
+                        }
+                      }
+                      if (!would_be_deferred) {
+                        // PULL FORWARD: trigger run nu
+                        in.legionella_force_request = true;
+                        id(oq_dhw_legionella_defer_reason_code) = 4;
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          if (in.legionella_force_request) {
+            auto now_t_leg = id(oq_time).now();
+            const bool now_valid_leg = now_t_leg.is_valid();
+            const int64_t now_epoch_leg = now_valid_leg ? (int64_t) now_t_leg.timestamp : 0;
+
+            // #1 Smart deferral check
+            if (id(oq_dhw_smart_legionella_enable).state && now_valid_leg) {
+              const int64_t last_seen = id(oq_dhw_natural_60c_last_seen_epoch_s);
+              const float defer_days = id(oq_dhw_legionella_defer_days).state;
+              if (last_seen > 0 && defer_days > 0.0f) {
+                const int64_t defer_seconds = (int64_t)(defer_days * 86400.0f);
+                if ((now_epoch_leg - last_seen) < defer_seconds) {
+                  in.legionella_force_request = false;
+                  id(oq_dhw_legionella_defer_reason_code) = 1;
+                }
+              }
+            }
+
+            // #2 Tariff-aware check (skipped if already deferred by #1)
+            if (in.legionella_force_request &&
+                id(oq_dhw_legionella_tariff_aware_enable).state &&
+                now_valid_leg) {
+              // Bepaal of we momenteel in een "goedkoop" tarief-window zitten.
+              // Drie bronnen, in volgorde van voorkeur:
+              //   a) HA datetime-window (start + end input_datetime) ← BEST
+              //   b) HA binary_sensor "cheap now"
+              //   c) Fallback: ratio (current_price / 24h_avg) < threshold
+              bool cheap_window = false;
+              bool cheap_source_valid = false;
+
+              // Bron a: datetime-window
+              if (id(dhw_legionella_cheap_start_ha).has_state() &&
+                  id(dhw_legionella_cheap_end_ha).has_state()) {
+                const int start_min = parse_hm(
+                    id(dhw_legionella_cheap_start_ha).state);
+                const int end_min = parse_hm(
+                    id(dhw_legionella_cheap_end_ha).state);
+                if (start_min >= 0 && end_min >= 0) {
+                  const int now_min = now_t_leg.hour * 60 + now_t_leg.minute;
+                  if (start_min <= end_min) {
+                    // Normaal venster binnen één dag
+                    cheap_window = (now_min >= start_min && now_min < end_min);
+                  } else {
+                    // Venster overlapt middernacht (bv. 23:00 → 04:00)
+                    cheap_window = (now_min >= start_min || now_min < end_min);
+                  }
+                  cheap_source_valid = true;
+                }
+              }
+
+              // Bron b: HA binary_sensor (alleen als datetime niet werkte)
+              if (!cheap_source_valid &&
+                  id(dhw_legionella_cheap_window_ha).has_state()) {
+                cheap_window = id(dhw_legionella_cheap_window_ha).state;
+                cheap_source_valid = true;
+              }
+
+              // Bron c: fallback ratio
+              if (!cheap_source_valid &&
+                  id(dhw_tariff_ha).has_state() &&
+                  !isnan(id(dhw_tariff_ha).state) &&
+                  id(oq_dhw_tariff_running_avg_eur) > 0.0f) {
+                const float ratio = id(dhw_tariff_ha).state /
+                                    id(oq_dhw_tariff_running_avg_eur);
+                const float threshold = id(oq_dhw_legionella_cheap_ratio).state;
+                cheap_window = (ratio < threshold);
+                cheap_source_valid = true;
+              }
+
+              if (cheap_source_valid && !cheap_window) {
+                // Niet goedkoop nu — start of vervolg wachttijd
+                if (id(oq_dhw_legionella_waiting_since_epoch_s) == 0) {
+                  id(oq_dhw_legionella_waiting_since_epoch_s) = now_epoch_leg;
+                }
+                const int64_t wait_s = now_epoch_leg -
+                                       id(oq_dhw_legionella_waiting_since_epoch_s);
+                const int64_t max_wait_s = (int64_t)(
+                    id(oq_dhw_legionella_max_wait_h).state * 3600.0f);
+                if (wait_s < max_wait_s) {
+                  // Nog binnen max-wait → blijf wachten
+                  in.legionella_force_request = false;
+                  id(oq_dhw_legionella_defer_reason_code) = 2;
+                } else {
+                  // Max-wait bereikt → forceer start, veiligheid wint
+                  id(oq_dhw_legionella_defer_reason_code) = 3;
+                  id(oq_dhw_legionella_waiting_since_epoch_s) = 0;
+                }
+              } else if (cheap_window) {
+                // Goedkoop nu → reset waiting, run mag starten
+                id(oq_dhw_legionella_waiting_since_epoch_s) = 0;
+              }
+              // Geen valide bron → geen tariff-restrictie, run start direct
+            }
+          } else {
+            // Geen force request → reset wachttijd
+            id(oq_dhw_legionella_waiting_since_epoch_s) = 0;
+          }
+
+          // ===========================================================
+          // v0.32 DHW smart features — modify cfg.start_top_c and other
+          // inputs based on tariff, PV, and adaptive usage learning.
+          // ===========================================================
+          const uint32_t smart_now_ms = (uint32_t) millis();
+          const uint32_t smart_prev_ms = id(oq_dhw_smart_last_loop_ms);
+          float smart_dt_s = (smart_prev_ms > 0 && smart_now_ms > smart_prev_ms)
+              ? (float)(smart_now_ms - smart_prev_ms) / 1000.0f : 30.0f;
+          if (smart_dt_s > 600.0f) smart_dt_s = 600.0f;
+          id(oq_dhw_smart_last_loop_ms) = smart_now_ms;
+
+          auto clampf_dhw = [](float v, float lo, float hi)->float {
+            if (v < lo) return lo;
+            if (v > hi) return hi;
+            return v;
+          };
+
+          // ----- #1 Tariff-aware shift on start_top_c -----
+          float tariff_shift_target_c = 0.0f;
+          if (id(oq_dhw_tariff_shift_enable).state &&
+              id(electricity_tariff_now_ha).has_state() &&
+              !isnan(id(electricity_tariff_now_ha).state)) {
+            const float tariff_now = id(electricity_tariff_now_ha).state;
+            float tariff_avg = id(electricity_tariff_avg24_ha).has_state()
+                ? id(electricity_tariff_avg24_ha).state : NAN;
+            if (isnan(tariff_avg) || tariff_avg <= 0.0f || tariff_avg > 5.0f) {
+              tariff_avg = id(oq_dhw_tariff_running_avg_eur);
+            }
+            // Maintain own running 24h average as fallback.
+            const uint32_t tariff_dt_ms = (id(oq_dhw_tariff_avg_last_update_ms) > 0 &&
+                                           smart_now_ms > id(oq_dhw_tariff_avg_last_update_ms))
+                ? (smart_now_ms - id(oq_dhw_tariff_avg_last_update_ms)) : 0UL;
+            if (tariff_dt_ms > 30000UL) {
+              const float tau24h_s = 86400.0f;
+              const float dt_run = (float) tariff_dt_ms / 1000.0f;
+              const float a = 1.0f - expf(-dt_run / tau24h_s);
+              float run_avg = id(oq_dhw_tariff_running_avg_eur);
+              if (run_avg <= 0.0f || isnan(run_avg) || run_avg > 5.0f) run_avg = tariff_now;
+              else run_avg += a * (tariff_now - run_avg);
+              id(oq_dhw_tariff_running_avg_eur) = run_avg;
+              id(oq_dhw_tariff_avg_last_update_ms) = smart_now_ms;
+              if (isnan(tariff_avg) || tariff_avg <= 0.0f) tariff_avg = run_avg;
+            }
+            if (!isnan(tariff_avg) && tariff_avg > 0.0f) {
+              const float ratio = tariff_now / tariff_avg;
+              const float cheap = clampf_dhw(id(oq_dhw_tariff_cheap_ratio).state, 0.30f, 0.95f);
+              const float expensive = clampf_dhw(id(oq_dhw_tariff_expensive_ratio).state, 1.05f, 2.50f);
+              const float max_pre = clampf_dhw(id(oq_dhw_tariff_preheat_max_c).state, 0.0f, 5.0f);
+              const float max_def = clampf_dhw(id(oq_dhw_tariff_defer_max_c).state, 0.0f, 4.0f);
+              if (ratio <= cheap) {
+                const float frac = clampf_dhw((cheap - ratio) / fmaxf(0.05f, cheap), 0.0f, 1.0f);
+                tariff_shift_target_c = max_pre * frac;
+              } else if (ratio >= expensive) {
+                const float frac = clampf_dhw((ratio - expensive) / fmaxf(0.10f, expensive), 0.0f, 1.0f);
+                tariff_shift_target_c = -max_def * frac;
+              }
+            }
+          }
+          // Slew at 0.2 K/min — DHW reacts slower than heating; tariff jumps
+          // shouldn't whip the start drempel hard.
+          {
+            const float slew_per_s = 0.2f / 60.0f;
+            float shift = id(oq_dhw_tariff_shift_c);
+            if (isnan(shift)) shift = 0.0f;
+            const float step = slew_per_s * smart_dt_s;
+            if (tariff_shift_target_c > shift)
+              shift = fminf(tariff_shift_target_c, shift + step);
+            else if (tariff_shift_target_c < shift)
+              shift = fmaxf(tariff_shift_target_c, shift - step);
+            id(oq_dhw_tariff_shift_c) = shift;
+          }
+
+          // ----- #2 PV self-consumption shift on start_top_c -----
+          float pv_shift_target_c = 0.0f;
+          if (id(oq_dhw_pv_boost_dynamic_enable).state &&
+              id(grid_net_power_ha).has_state() &&
+              !isnan(id(grid_net_power_ha).state)) {
+            const float grid_net = id(grid_net_power_ha).state;
+            const float export_w = (grid_net < 0.0f) ? -grid_net : 0.0f;
+            const float threshold_w = clampf_dhw(id(oq_dhw_pv_export_threshold_w).state, 200.0f, 5000.0f);
+            const float max_shift = clampf_dhw(id(oq_dhw_pv_max_shift_c).state, 0.0f, 6.0f);
+            if (export_w > threshold_w) {
+              // Linear: at threshold → 0; at threshold + 3kW → max_shift.
+              const float frac = clampf_dhw((export_w - threshold_w) / 3000.0f, 0.0f, 1.0f);
+              pv_shift_target_c = max_shift * frac;
+            }
+          }
+          {
+            const float slew_per_s = 0.5f / 60.0f;
+            float shift = id(oq_dhw_pv_shift_c);
+            if (isnan(shift)) shift = 0.0f;
+            const float step = slew_per_s * smart_dt_s;
+            if (pv_shift_target_c > shift)
+              shift = fminf(pv_shift_target_c, shift + step);
+            else if (pv_shift_target_c < shift)
+              shift = fmaxf(pv_shift_target_c, shift - step);
+            id(oq_dhw_pv_shift_c) = shift;
+          }
+
+          // ----- #3 Adaptive usage pattern shift -----
+          float adaptive_shift_target_c = 0.0f;
+          if (id(oq_dhw_adaptive_usage_enable).state) {
+            auto now_clk = id(oq_time).now();
+            if (now_clk.is_valid()) {
+              const int lookahead_min = (int) clampf_dhw(id(oq_dhw_adaptive_lookahead_min).state, 15.0f, 90.0f);
+              const int total_min = now_clk.hour * 60 + now_clk.minute + lookahead_min;
+              const int look_h = (total_min / 60) % 24;
+              float upcoming = 0.0f;
+              switch (look_h) {
+                case 0:  upcoming = id(oq_dhw_usage_hour_0); break;
+                case 1:  upcoming = id(oq_dhw_usage_hour_1); break;
+                case 2:  upcoming = id(oq_dhw_usage_hour_2); break;
+                case 3:  upcoming = id(oq_dhw_usage_hour_3); break;
+                case 4:  upcoming = id(oq_dhw_usage_hour_4); break;
+                case 5:  upcoming = id(oq_dhw_usage_hour_5); break;
+                case 6:  upcoming = id(oq_dhw_usage_hour_6); break;
+                case 7:  upcoming = id(oq_dhw_usage_hour_7); break;
+                case 8:  upcoming = id(oq_dhw_usage_hour_8); break;
+                case 9:  upcoming = id(oq_dhw_usage_hour_9); break;
+                case 10: upcoming = id(oq_dhw_usage_hour_10); break;
+                case 11: upcoming = id(oq_dhw_usage_hour_11); break;
+                case 12: upcoming = id(oq_dhw_usage_hour_12); break;
+                case 13: upcoming = id(oq_dhw_usage_hour_13); break;
+                case 14: upcoming = id(oq_dhw_usage_hour_14); break;
+                case 15: upcoming = id(oq_dhw_usage_hour_15); break;
+                case 16: upcoming = id(oq_dhw_usage_hour_16); break;
+                case 17: upcoming = id(oq_dhw_usage_hour_17); break;
+                case 18: upcoming = id(oq_dhw_usage_hour_18); break;
+                case 19: upcoming = id(oq_dhw_usage_hour_19); break;
+                case 20: upcoming = id(oq_dhw_usage_hour_20); break;
+                case 21: upcoming = id(oq_dhw_usage_hour_21); break;
+                case 22: upcoming = id(oq_dhw_usage_hour_22); break;
+                case 23: upcoming = id(oq_dhw_usage_hour_23); break;
+              }
+              // Map upcoming intensity (typically 0..3+ events) to shift fraction.
+              // 1 event → 50% of max, 2 → 80%, 3+ → 100%.
+              const float max_adaptive = clampf_dhw(id(oq_dhw_adaptive_max_shift_c).state, 0.0f, 4.0f);
+              float frac = upcoming / 3.0f;
+              if (frac > 1.0f) frac = 1.0f;
+              if (frac < 0.0f) frac = 0.0f;
+              adaptive_shift_target_c = max_adaptive * frac;
+            }
+          }
+          // Adaptive: instant apply (no slew), reset to 0 when disabled.
+          id(oq_dhw_adaptive_shift_c) = adaptive_shift_target_c;
+
+          // ----- Apply combined shifts to cfg.start_top_c -----
+          // Effective start_top = configured + tariff_shift + pv_shift + adaptive_shift,
+          // clamped within the same range as the user-configurable number entity.
+          {
+            const float total_shift = id(oq_dhw_tariff_shift_c) +
+                                       id(oq_dhw_pv_shift_c) +
+                                       id(oq_dhw_adaptive_shift_c);
+            float effective_start = cfg.start_top_c + total_shift;
+            // Hard bounds so we never exceed safe-tank ranges.
+            // Allow up to hp_stop_top_c - 1.0K (avoid impossible-to-satisfy start).
+            const float upper_bound = fmaxf(cfg.start_top_c, cfg.hp_stop_top_c - 1.0f);
+            effective_start = clampf_dhw(effective_start, 30.0f, upper_bound);
+            cfg.start_top_c = effective_start;
+          }
+
+          // ----- #2 PV-driven solar boost: also force solar boost element when
+          // grid is exporting hard enough to cover the element load. -----
+          if (id(oq_dhw_pv_boost_dynamic_enable).state &&
+              id(grid_net_power_ha).has_state() &&
+              !isnan(id(grid_net_power_ha).state)) {
+            const float grid_net = id(grid_net_power_ha).state;
+            const float export_w = (grid_net < 0.0f) ? -grid_net : 0.0f;
+            // Element ≈ 3 kW; only force boost when export safely covers it.
+            if (export_w > 2700.0f) {
+              in.solar_boost_request = true;
+            }
+          }
+
+          // ----- #5 Smart legionella deferral -----
+          // v0.40: We tracken op tank_bottom_c (i.p.v. tank_top_c) zodat de
+          // detectie van "natuurlijke pasteurisatie" alleen triggert als de
+          // HELE tank op pasteurisatie-temp is geweest (bottom = moeilijkste
+          // punt). Tank top haalt vaak 68°C zonder dat bottom mee gaat —
+          // dat is geen volledige pasteurisatie.
+          // Fallback: als tank_bottom_c niet beschikbaar, val terug op top.
+          {
+            float deferral_temp = NAN;
+            if (!isnan(in.tank_bottom_c)) {
+              deferral_temp = in.tank_bottom_c;
+            } else if (!isnan(in.tank_top_c)) {
+              deferral_temp = in.tank_top_c;
+            }
+            if (id(oq_dhw_smart_legionella_enable).state &&
+                !isnan(deferral_temp) &&
+                deferral_temp >= cfg.legionella_target_c) {
+              auto now_legi = id(oq_time).now();
+              if (now_legi.is_valid()) {
+                id(oq_dhw_natural_60c_last_seen_epoch_s) = (int64_t) now_legi.timestamp;
+              }
+            }
+          }
+
+          // ============================================================
+          // CM6 - Element Only DHW Heating override (BEFORE controller.tick)
+          //
+          // Minimum-impact mode: only the 3 kW DHW-tank element is driven
+          // from oq_cm6_element_on (thermostatic loop in supervisor).
+          // EVERYTHING ELSE blijft ongemoeid:
+          //   - 3-wegklep wordt NIET aangestuurd (blijft in laatste stand)
+          //   - HP-request / target_flow / block_cv_priority worden NIET gewijzigd
+          //   - DHW controller wordt NIET getickt (state machine pauzeert)
+          //
+          // HP compressors gaan automatisch naar Standby omdat cm_allows_hp
+          // in heat_control/thermal_request_control geen CM6 toelaat — daar
+          // hoeven we hier dus niets voor te doen.
+          // ============================================================
+          if (id(oq_control_mode_code) == 6) {
+            if (id(oq_cm6_element_on)) {
+              if (!id(boiler_relay).state) id(boiler_relay).turn_on();
+            } else {
+              if (id(boiler_relay).state) id(boiler_relay).turn_off();
+            }
+            return;
+          }
 
           const auto out = controller.tick(in, cfg);
+
+          // ============================================================
+          // CM97 - Air Purge override: valve follows the purge state machine
+          // (oq_purge_target_valve_dhw), DHW element stays OFF (no compressor,
+          // no element), DHW controller outputs are ignored.
+          // ============================================================
+          if (id(oq_control_mode_code) == 97) {
+            const bool want_valve_dhw = id(oq_purge_target_valve_dhw);
+            if (want_valve_dhw) {
+              if (!id(dhw_valve_relay).state) id(dhw_valve_relay).turn_on();
+            } else {
+              if (id(dhw_valve_relay).state) id(dhw_valve_relay).turn_off();
+            }
+            if (id(boiler_relay).state) id(boiler_relay).turn_off();
+            id(oq_dhw_hp_request_active) = false;
+            id(oq_dhw_target_flow_temp) = NAN;
+            id(oq_dhw_block_cv_priority) = false;
+            return;
+          }
 
           const bool manual_test = id(oq_dhw_manual_test_mode).state;
           if (manual_test) {
@@ -855,7 +2745,12 @@ interval:
             }
 
             const bool valve_boiler_confirmed = !in.valve_feedback_valid || !in.valve_feedback_cv;
-            const bool element_drive = out.element_on && valve_boiler_confirmed;
+            // During legionella element-only phase the valve is deliberately in CV position
+            // (heating circuit is released while the element finishes the tank to target).
+            // out.element_on=true && out.block_cv_priority=false uniquely identifies this
+            // phase: element can run without requiring valve_boiler_confirmed.
+            const bool legionella_element_only_drive = out.element_on && !out.block_cv_priority;
+            const bool element_drive = out.element_on && (valve_boiler_confirmed || legionella_element_only_drive);
 
             if (element_drive) {
               if (!id(boiler_relay).state) id(boiler_relay).turn_on();
@@ -867,7 +2762,48 @@ interval:
             id(oq_dhw_target_flow_temp) = out.target_flow_temp_c;
             id(oq_dhw_block_cv_priority) = out.block_cv_priority;
           }
-          id(oq_dhw_hp_level_request) = (int) roundf(id(oq_dhw_hp_level).state);
+          // ===========================================================
+          // Coil-in based compressor level mapping with hysteresis.
+          // Enabled via oq_dhw_coil_map_enable switch.
+          // Min level = 1 (never off during DHW to prevent pendeling).
+          // Max level = user-set oq_dhw_hp_level (default 4).
+          // ===========================================================
+          {
+            const int base_level = (int) roundf(id(oq_dhw_hp_level).state);
+            int mapped = base_level;
+            if (id(oq_dhw_coil_map_enable).state && out.hp_dhw_request) {
+              const float coil_in = id(dhw_coil_in_input).state;
+              if (!isnan(coil_in)) {
+                const float t1 = id(oq_dhw_coil_map_t1_c).state;  // 4→3
+                const float t2 = id(oq_dhw_coil_map_t2_c).state;  // 3→2
+                const float t3 = id(oq_dhw_coil_map_t3_c).state;  // 2→1
+                const float h  = id(oq_dhw_coil_map_hyst_c).state;
+                const int   cur = id(oq_dhw_coil_map_level);
+                if (cur >= 4) {
+                  mapped = (coil_in >= t1 + h) ? 3 : 4;
+                } else if (cur == 3) {
+                  if      (coil_in <  t1 - h) mapped = 4;
+                  else if (coil_in >= t2 + h) mapped = 2;
+                  else                        mapped = 3;
+                } else if (cur == 2) {
+                  if      (coil_in <  t2 - h) mapped = 3;
+                  else if (coil_in >= t3 + h) mapped = 1;
+                  else                        mapped = 2;
+                } else {
+                  // cur == 1
+                  mapped = (coil_in < t3 - h) ? 2 : 1;
+                }
+                // Cap at user-set maximum; floor at 1 (never off)
+                mapped = std::max(1, std::min(mapped, base_level));
+              }
+            } else {
+              // Mapping disabled or HP not active: reset state to base level
+              mapped = base_level;
+            }
+            id(oq_dhw_coil_map_level)   = mapped;
+            id(oq_dhw_hp_level_request) = mapped;
+          }
+
           id(oq_dhw_state_code) = (int) out.state;
           id(oq_dhw_fault_code) = (int) out.fault;
 
@@ -882,6 +2818,167 @@ interval:
               ESP_LOGE("oq_dhw", "fault -> %s", oq_dhw::fault_name(out.fault));
             } else {
               ESP_LOGI("oq_dhw", "fault cleared");
+            }
+          }
+
+          // ===========================================================
+          // v0.32 DHW post-tick observers
+          //   #3 Tap-event detection → adaptive usage histogram
+          //   #4 Tank standby-loss measurement during IDLE_CV
+          // ===========================================================
+          {
+            const float top = id(dhw_tank_top_input).state;
+            const uint32_t observe_now_ms = (uint32_t) millis();
+
+            // ----- #3 Tap-event detection -----
+            // Detect a sharp drop of the upper sensor while DHW is idle.
+            // 5-min rolling snapshot, drop threshold 2 K → tap event.
+            if (!isnan(top)) {
+              const uint32_t snap_age_ms = (observe_now_ms >= id(oq_dhw_tank_top_prev_ms))
+                  ? (observe_now_ms - id(oq_dhw_tank_top_prev_ms)) : 0;
+              const bool snap_exists = !isnan(id(oq_dhw_tank_top_prev_c));
+              if (!snap_exists || snap_age_ms >= 300000UL) {
+                id(oq_dhw_tank_top_prev_c) = top;
+                id(oq_dhw_tank_top_prev_ms) = observe_now_ms;
+              }
+              if (id(oq_dhw_adaptive_usage_enable).state && snap_exists &&
+                  out.state == oq_dhw::State::IDLE_CV) {
+                const float drop = id(oq_dhw_tank_top_prev_c) - top;
+                const uint32_t since_last_tap_ms = (id(oq_dhw_last_tap_event_ms) > 0 &&
+                                                    observe_now_ms > id(oq_dhw_last_tap_event_ms))
+                    ? (observe_now_ms - id(oq_dhw_last_tap_event_ms)) : UINT32_MAX;
+                // Tap event: 2K drop, debounced 10 min between events.
+                if (drop >= 2.0f && since_last_tap_ms > 600000UL) {
+                  auto now_clk = id(oq_time).now();
+                  if (now_clk.is_valid()) {
+                    const int h = now_clk.hour;
+                    // Slow weekly decay: 0.985 per day → after a week, half-life-ish.
+                    // Apply decay before increment so each event nudges the bucket.
+                    auto bump = [](float &slot)->void {
+                      slot = slot + 1.0f;
+                      if (slot > 10.0f) slot = 10.0f;
+                    };
+                    switch (h) {
+                      case 0:  bump(id(oq_dhw_usage_hour_0)); break;
+                      case 1:  bump(id(oq_dhw_usage_hour_1)); break;
+                      case 2:  bump(id(oq_dhw_usage_hour_2)); break;
+                      case 3:  bump(id(oq_dhw_usage_hour_3)); break;
+                      case 4:  bump(id(oq_dhw_usage_hour_4)); break;
+                      case 5:  bump(id(oq_dhw_usage_hour_5)); break;
+                      case 6:  bump(id(oq_dhw_usage_hour_6)); break;
+                      case 7:  bump(id(oq_dhw_usage_hour_7)); break;
+                      case 8:  bump(id(oq_dhw_usage_hour_8)); break;
+                      case 9:  bump(id(oq_dhw_usage_hour_9)); break;
+                      case 10: bump(id(oq_dhw_usage_hour_10)); break;
+                      case 11: bump(id(oq_dhw_usage_hour_11)); break;
+                      case 12: bump(id(oq_dhw_usage_hour_12)); break;
+                      case 13: bump(id(oq_dhw_usage_hour_13)); break;
+                      case 14: bump(id(oq_dhw_usage_hour_14)); break;
+                      case 15: bump(id(oq_dhw_usage_hour_15)); break;
+                      case 16: bump(id(oq_dhw_usage_hour_16)); break;
+                      case 17: bump(id(oq_dhw_usage_hour_17)); break;
+                      case 18: bump(id(oq_dhw_usage_hour_18)); break;
+                      case 19: bump(id(oq_dhw_usage_hour_19)); break;
+                      case 20: bump(id(oq_dhw_usage_hour_20)); break;
+                      case 21: bump(id(oq_dhw_usage_hour_21)); break;
+                      case 22: bump(id(oq_dhw_usage_hour_22)); break;
+                      case 23: bump(id(oq_dhw_usage_hour_23)); break;
+                    }
+                    id(oq_dhw_last_tap_event_ms) = observe_now_ms;
+                    ESP_LOGI("oq_dhw", "Tap event detected at hour %d (drop %.2fK).", h, drop);
+                  }
+                }
+              }
+            }
+
+            // Slow daily decay applied roughly once per hour.
+            // Approach: decay any time we see a state change to IDLE_CV that
+            // crosses an hour boundary. To keep it simple, decay once every
+            // ~3600 seconds based on observe_now_ms heuristic.
+            {
+              static uint32_t last_decay_ms = 0;
+              if (last_decay_ms == 0) last_decay_ms = observe_now_ms;
+              if (observe_now_ms - last_decay_ms >= 3600000UL) {
+                const float decay = 0.985f;  // ≈ 1/2 over ~46 days
+                id(oq_dhw_usage_hour_0)  *= decay; id(oq_dhw_usage_hour_1)  *= decay;
+                id(oq_dhw_usage_hour_2)  *= decay; id(oq_dhw_usage_hour_3)  *= decay;
+                id(oq_dhw_usage_hour_4)  *= decay; id(oq_dhw_usage_hour_5)  *= decay;
+                id(oq_dhw_usage_hour_6)  *= decay; id(oq_dhw_usage_hour_7)  *= decay;
+                id(oq_dhw_usage_hour_8)  *= decay; id(oq_dhw_usage_hour_9)  *= decay;
+                id(oq_dhw_usage_hour_10) *= decay; id(oq_dhw_usage_hour_11) *= decay;
+                id(oq_dhw_usage_hour_12) *= decay; id(oq_dhw_usage_hour_13) *= decay;
+                id(oq_dhw_usage_hour_14) *= decay; id(oq_dhw_usage_hour_15) *= decay;
+                id(oq_dhw_usage_hour_16) *= decay; id(oq_dhw_usage_hour_17) *= decay;
+                id(oq_dhw_usage_hour_18) *= decay; id(oq_dhw_usage_hour_19) *= decay;
+                id(oq_dhw_usage_hour_20) *= decay; id(oq_dhw_usage_hour_21) *= decay;
+                id(oq_dhw_usage_hour_22) *= decay; id(oq_dhw_usage_hour_23) *= decay;
+                last_decay_ms = observe_now_ms;
+              }
+            }
+
+            // ----- #4 Tank standby-loss tracking -----
+            // Measures dT/dt during IDLE_CV (no heating, no recent tap event)
+            // and converts to UA_tank using assumed thermal capacity.
+            // Only runs when there's no tap event in the last hour.
+            if (out.state == oq_dhw::State::IDLE_CV && !isnan(top)) {
+              const uint32_t since_last_tap_ms = (id(oq_dhw_last_tap_event_ms) == 0)
+                  ? UINT32_MAX
+                  : (observe_now_ms > id(oq_dhw_last_tap_event_ms)
+                        ? (observe_now_ms - id(oq_dhw_last_tap_event_ms)) : 0);
+              const bool tap_quiet = since_last_tap_ms > 3600000UL;  // > 1h
+              if (tap_quiet) {
+                if (isnan(id(oq_dhw_idle_temp_start_c))) {
+                  id(oq_dhw_idle_temp_start_c) = top;
+                  id(oq_dhw_idle_temp_start_ms) = observe_now_ms;
+                } else {
+                  const uint32_t window_ms = observe_now_ms - id(oq_dhw_idle_temp_start_ms);
+                  // Sample every 30 minutes of pure standby.
+                  if (window_ms >= 1800000UL) {
+                    const float dT = id(oq_dhw_idle_temp_start_c) - top;
+                    if (dT > 0.05f && dT < 5.0f) {
+                      const float dt_h = (float) window_ms / 3600000.0f;
+                      const float Tamb_room = 20.0f;
+                      const float dT_ambient = id(oq_dhw_idle_temp_start_c) - Tamb_room;
+                      if (dT_ambient > 5.0f) {
+                        // Tank thermal capacity: water = 1.16 Wh/(L·K). User-configurable volume.
+                        const float volume_l = id(oq_dhw_tank_volume_l).state;
+                        const float tank_wh_per_k = (volume_l > 0.0f ? volume_l : 220.0f) * 1.16f;
+                        const float energy_lost_wh = dT * tank_wh_per_k;
+                        // Average loss rate (W) = energy / hours
+                        const float p_loss_w = energy_lost_wh / dt_h;
+                        const float ua_sample = p_loss_w / dT_ambient;
+                        // Sanity: typical 0.5..5 W/K for residential boilers.
+                        if (ua_sample > 0.2f && ua_sample < 15.0f) {
+                          float ua_ema = id(oq_dhw_ua_tank_wpk);
+                          const int n = id(oq_dhw_ua_tank_sample_count);
+                          if (n < 4 || ua_ema <= 0.0f) {
+                            ua_ema = (ua_ema <= 0.0f) ? ua_sample
+                                  : (ua_ema + (ua_sample - ua_ema) / (float)(n + 1));
+                          } else {
+                            // Slow EMA, τ ≈ 7 days.
+                            const float tau_s = 7.0f * 86400.0f;
+                            const float a = 1.0f - expf(-(float) window_ms / 1000.0f / tau_s);
+                            ua_ema += a * (ua_sample - ua_ema);
+                          }
+                          id(oq_dhw_ua_tank_wpk) = ua_ema;
+                          id(oq_dhw_ua_tank_sample_count) = n + 1;
+                        }
+                      }
+                    }
+                    // Restart window for next sample.
+                    id(oq_dhw_idle_temp_start_c) = top;
+                    id(oq_dhw_idle_temp_start_ms) = observe_now_ms;
+                  }
+                }
+              } else {
+                // Tap event invalidates the standby window.
+                id(oq_dhw_idle_temp_start_c) = NAN;
+                id(oq_dhw_idle_temp_start_ms) = 0;
+              }
+            } else {
+              // Active heating phase invalidates the standby window.
+              id(oq_dhw_idle_temp_start_c) = NAN;
+              id(oq_dhw_idle_temp_start_ms) = 0;
             }
           }
 
@@ -905,7 +3002,45 @@ interval:
                 (out.fault == oq_dhw::Fault::NONE);
             if (legionella_completed) {
               id(oq_dhw_legionella_last_done_epoch_s) = now_epoch_s;
+              // Auto-reset the force switch so a completed run does not retrigger
+              // an immediate next run. Without this the switch stays on indefinitely
+              // and the controller would loop legionella runs back-to-back.
+              if (id(oq_dhw_src_legionella_force).state) {
+                id(oq_dhw_src_legionella_force).turn_off();
+              }
             }
+
+            // Track legionella run start/end for ETA and elapsed-time sensors.
+            const bool legionella_starting =
+                (prev_state_code != (int) oq_dhw::State::LEGIONELLA) &&
+                (cur_state_code == (int) oq_dhw::State::LEGIONELLA);
+            const bool legionella_ending =
+                (prev_state_code == (int) oq_dhw::State::LEGIONELLA) &&
+                (cur_state_code != (int) oq_dhw::State::LEGIONELLA);
+            if (legionella_starting) {
+              id(oq_dhw_legionella_run_started_ms) = (uint32_t) millis();
+              id(oq_dhw_legionella_target_reached_ms) = 0;
+            }
+            if (legionella_ending) {
+              id(oq_dhw_legionella_run_started_ms) = 0;
+              id(oq_dhw_legionella_target_reached_ms) = 0;
+            }
+            // While running: capture the moment de gemonitorde temp het target
+            // raakt. v0.40: bottom met fallback naar top (consistent met
+            // handle_legionella_ in de .h controller).
+            if (cur_state_code == (int) oq_dhw::State::LEGIONELLA &&
+                id(oq_dhw_legionella_target_reached_ms) == 0) {
+              float leg_temp_now = NAN;
+              if (!isnan(in.tank_bottom_c)) {
+                leg_temp_now = in.tank_bottom_c;
+              } else if (!isnan(in.tank_top_c)) {
+                leg_temp_now = in.tank_top_c;
+              }
+              if (!isnan(leg_temp_now) && leg_temp_now >= cfg.legionella_target_c) {
+                id(oq_dhw_legionella_target_reached_ms) = (uint32_t) millis();
+              }
+            }
+
             prev_state_code = cur_state_code;
 
             std::string last_run = "Nog niet uitgevoerd";

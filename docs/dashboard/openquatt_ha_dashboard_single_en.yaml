@@ -124,7 +124,7 @@ views:
             vertical: false
             features_position: bottom
           - type: tile
-            entity: binary_sensor.openquatt_boiler_active
+            entity: binary_sensor.openquatt_dhw_element_active
             name: Boiler active
             vertical: false
             features_position: bottom
@@ -1211,12 +1211,18 @@ views:
                 name: Cooling safety margin
               - entity: sensor.openquatt_cooling_minimum_safe_supply_temp
                 name: Cooling minimum safe supply temp
-              - entity: sensor.openquatt_cooling_effective_min_supply_temp
+              - entity: sensor.openquatt_cooling_effective_minimum_supply_temp
                 name: Cooling effective minimum supply temp
-              - entity: sensor.openquatt_cooling_fallback_min_supply_temp
+              - entity: sensor.openquatt_cooling_fallback_minimum_supply_temp
                 name: Cooling fallback minimum supply temp
-              - entity: sensor.openquatt_cooling_fallback_night_min_outdoor_temp
+              - entity: sensor.openquatt_cooling_fallback_night_minimum_outdoor_temp
                 name: Cooling fallback night minimum outdoor temp
+              - entity: sensor.openquatt_cooling_dew_point_trend
+                name: Dew point trend (°C/h)
+              - entity: sensor.openquatt_cooling_dynamic_safety_margin
+                name: Dynamic safety margin
+              - entity: binary_sensor.openquatt_cooling_night_free_cooling_active
+                name: Night free cooling active
       - type: grid
         cards:
           - type: heading
@@ -1241,6 +1247,14 @@ views:
               - entity: number.openquatt_cooling_safety_margin
                 name: Cooling safety margin
                 icon: mdi:delta
+              - entity: number.openquatt_cooling_minimum_runtime
+                name: Cooling minimum runtime (s)
+              - entity: number.openquatt_cooling_night_free_cooling_threshold
+                name: Night free cooling threshold (°C)
+              - entity: sensor.openquatt_cooling_stop_reason
+                name: Cooling stop reason
+              - entity: sensor.openquatt_cooling_stop_reason_code
+                name: Cooling stop reason code
     cards: []
     header:
       card:

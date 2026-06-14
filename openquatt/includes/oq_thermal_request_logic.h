@@ -68,7 +68,8 @@ inline int request_owner_from_topology_code(int topology_code) {
 }
 
 inline int sanitize_request_mode_code(int mode_code) {
-  return (mode_code >= 0 && mode_code <= 2) ? mode_code : 0;
+  // 0 = Standby, 1 = Cooling, 2 = Heating, 3 = Hot water (DHW via mode 3).
+  return (mode_code >= 0 && mode_code <= 3) ? mode_code : 0;
 }
 
 inline int sanitize_request_strategy_code(int strategy_code) {
@@ -162,15 +163,17 @@ inline bool target_option_matches_mode(bool has_state,
                                        const std::string &option,
                                        int mode_code) {
   if (!has_state) return false;
+  if (mode_code == 0) return option == "Standby";
   if (mode_code == 1) return option == "Cooling";
   if (mode_code == 2) return option == "Heating";
-  if (mode_code == 0) return option == "Standby";
+  if (mode_code == 3) return option == "Hot water";
   return false;
 }
 
 inline const char *request_mode_option(int request_mode_code) {
   return (request_mode_code == 1) ? "Cooling"
        : (request_mode_code == 2) ? "Heating"
+       : (request_mode_code == 3) ? "Hot water"
                                   : "Standby";
 }
 

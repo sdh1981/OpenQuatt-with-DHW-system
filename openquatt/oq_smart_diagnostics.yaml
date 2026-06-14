@@ -1,0 +1,877 @@
+# ==============================================================================
+# OpenQuatt - Smart Diagnostics (v0.32)
+# ==============================================================================
+#
+# Goal:
+#   Long-term observation and reporting features that piggy-back on existing
+#   sensor and runtime data:
+#
+#     #6 SCOP rolling tracking — 24h / 7d / 30d / 365d windows of seasonal COP
+#     #7 Compressor-health monitoring — cycle counter, defrost frequency,
+#                                       COP-deviation detection
+#     #8 Heat-up rate sensor — predicted time-to-setpoint
+#
+# Ownership:
+#   - Reads from: oq_total_power_input, oq_total_heat_power, oq_total_cooling_power,
+#                 hp1_last_applied_level, hp2_last_applied_level,
+#                 hp1_4_way_valve, hp2_4_way_valve, room_temp_selected,
+#                 room_setpoint_selected, oq_phouse_hp_th_estimate_w
+#   - Publishes new diagnostic sensors and binary sensors. Does not write any
+#     control values.
+#
+# All counters use restore_value: true so they survive reboots.
+# ==============================================================================
+
+globals:
+  # ===== #6 SCOP rolling accumulators =====
+  # Per-window energy accumulators. Reset only on user button press.
+  - id: oq_scop_energy_in_24h_wh
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_scop_energy_out_24h_wh
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_scop_window_24h_start_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+  - id: oq_scop_energy_in_7d_wh
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_scop_energy_out_7d_wh
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_scop_window_7d_start_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+  - id: oq_scop_energy_in_30d_wh
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_scop_energy_out_30d_wh
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_scop_window_30d_start_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+  - id: oq_scop_energy_in_total_wh
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_scop_energy_out_total_wh
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_scop_total_start_epoch_s
+    type: int64_t
+    restore_value: true
+    initial_value: '0'
+
+  - id: oq_smart_last_loop_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+  # ===== DHW-only energy accumulators =====
+  - id: oq_dhw_energy_in_24h_wh
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_dhw_energy_out_24h_wh
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_dhw_window_24h_start_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+  - id: oq_dhw_energy_in_total_wh
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_dhw_energy_out_total_wh
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+
+  - id: oq_dhw_cycles_24h
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: oq_dhw_cycles_total
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: oq_dhw_prev_active
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+  # ===== #7 Compressor health counters =====
+  - id: oq_health_short_cycles_24h
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: oq_health_defrosts_24h
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: oq_health_cycle_window_start_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+  # Total counters (lifetime).
+  - id: oq_health_short_cycles_total
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: oq_health_defrosts_total
+    type: int
+    restore_value: true
+    initial_value: '0'
+
+  # Edge-detection state
+  - id: oq_health_hp1_prev_level
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: oq_health_hp2_prev_level
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: oq_health_hp1_run_start_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: oq_health_hp2_run_start_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: oq_health_hp1_prev_valve_def
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: oq_health_hp2_prev_valve_def
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+  # COP-deviation tracker: rolling EMA of (measured COP - perf_map COP).
+  - id: oq_health_cop_deviation_ema
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+
+  # ===== #8 Heat-up rate state =====
+  # Sample of (Tr, t) for slope estimate.
+  - id: oq_heatup_room_temp_prev_c
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: oq_heatup_room_temp_prev_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  # EMA of dTr/dt (K/h).
+  - id: oq_heatup_rate_kph
+    type: float
+    restore_value: false
+    initial_value: '0.0'
+
+button:
+  # ===== #6 Reset SCOP windows =====
+  - platform: template
+    id: oq_scop_reset_button
+    name: "SCOP reset rolling windows"
+    icon: mdi:restart
+    web_server:
+      sorting_group_id: oq_performance
+    on_press:
+      - lambda: |-
+          id(oq_scop_energy_in_24h_wh) = 0.0f;
+          id(oq_scop_energy_out_24h_wh) = 0.0f;
+          id(oq_scop_energy_in_7d_wh) = 0.0f;
+          id(oq_scop_energy_out_7d_wh) = 0.0f;
+          id(oq_scop_energy_in_30d_wh) = 0.0f;
+          id(oq_scop_energy_out_30d_wh) = 0.0f;
+          id(oq_scop_window_24h_start_ms) = 0;
+          id(oq_scop_window_7d_start_ms) = 0;
+          id(oq_scop_window_30d_start_ms) = 0;
+          ESP_LOGI("quatt", "SCOP rolling windows reset.");
+
+  - platform: template
+    id: oq_scop_reset_total_button
+    name: "SCOP reset lifetime"
+    icon: mdi:restart-alert
+    web_server:
+      sorting_group_id: oq_performance
+    on_press:
+      - lambda: |-
+          id(oq_scop_energy_in_total_wh) = 0.0f;
+          id(oq_scop_energy_out_total_wh) = 0.0f;
+          id(oq_scop_total_start_epoch_s) = 0;
+          ESP_LOGI("quatt", "SCOP lifetime accumulators reset.");
+
+  # ===== #7 Reset health counters =====
+  - platform: template
+    id: oq_health_reset_button
+    name: "Health counters reset"
+    icon: mdi:restart
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+    on_press:
+      - lambda: |-
+          id(oq_health_short_cycles_24h) = 0;
+          id(oq_health_defrosts_24h) = 0;
+          id(oq_health_short_cycles_total) = 0;
+          id(oq_health_defrosts_total) = 0;
+          id(oq_health_cop_deviation_ema) = 0.0f;
+          ESP_LOGI("quatt", "Health counters reset.");
+
+  - platform: template
+    id: oq_dhw_energy_reset_24h_button
+    name: "DHW energy reset 24h"
+    icon: mdi:restart
+    web_server:
+      sorting_group_id: oq_performance
+    on_press:
+      - lambda: |-
+          id(oq_dhw_energy_in_24h_wh) = 0.0f;
+          id(oq_dhw_energy_out_24h_wh) = 0.0f;
+          id(oq_dhw_cycles_24h) = 0;
+          id(oq_dhw_window_24h_start_ms) = 0;
+          ESP_LOGI("quatt", "DHW 24h energy reset.");
+
+  - platform: template
+    id: oq_dhw_energy_reset_total_button
+    name: "DHW energy reset lifetime"
+    icon: mdi:restart-alert
+    web_server:
+      sorting_group_id: oq_performance
+    on_press:
+      - lambda: |-
+          id(oq_dhw_energy_in_total_wh) = 0.0f;
+          id(oq_dhw_energy_out_total_wh) = 0.0f;
+          id(oq_dhw_cycles_total) = 0;
+          ESP_LOGI("quatt", "DHW lifetime energy reset.");
+
+sensor:
+  # ===== #6 SCOP rolling sensors =====
+  - platform: template
+    id: oq_scop_24h_sensor
+    name: "SCOP 24h"
+    icon: mdi:chart-bell-curve-cumulative
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 60s
+    web_server:
+      sorting_group_id: oq_performance
+    lambda: |-
+      const float in_wh = id(oq_scop_energy_in_24h_wh);
+      const float out_wh = id(oq_scop_energy_out_24h_wh);
+      if (in_wh < 50.0f) return NAN;
+      return out_wh / in_wh;
+
+  - platform: template
+    id: oq_scop_7d_sensor
+    name: "SCOP 7d"
+    icon: mdi:chart-bell-curve-cumulative
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 60s
+    web_server:
+      sorting_group_id: oq_performance
+    lambda: |-
+      const float in_wh = id(oq_scop_energy_in_7d_wh);
+      const float out_wh = id(oq_scop_energy_out_7d_wh);
+      if (in_wh < 100.0f) return NAN;
+      return out_wh / in_wh;
+
+  - platform: template
+    id: oq_scop_30d_sensor
+    name: "SCOP 30d"
+    icon: mdi:chart-bell-curve-cumulative
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 300s
+    web_server:
+      sorting_group_id: oq_performance
+    lambda: |-
+      const float in_wh = id(oq_scop_energy_in_30d_wh);
+      const float out_wh = id(oq_scop_energy_out_30d_wh);
+      if (in_wh < 500.0f) return NAN;
+      return out_wh / in_wh;
+
+  - platform: template
+    id: oq_scop_lifetime_sensor
+    name: "SCOP lifetime"
+    icon: mdi:chart-bell-curve-cumulative
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 300s
+    web_server:
+      sorting_group_id: oq_performance
+    lambda: |-
+      const float in_wh = id(oq_scop_energy_in_total_wh);
+      const float out_wh = id(oq_scop_energy_out_total_wh);
+      if (in_wh < 1000.0f) return NAN;
+      return out_wh / in_wh;
+
+  - platform: template
+    id: oq_scop_energy_in_24h_sensor
+    name: "Energy in 24h"
+    icon: mdi:flash
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 60s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_performance
+    lambda: |-
+      return id(oq_scop_energy_in_24h_wh) / 1000.0f;
+
+  - platform: template
+    id: oq_scop_energy_out_24h_sensor
+    name: "Heat out 24h"
+    icon: mdi:radiator
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 60s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_performance
+    lambda: |-
+      return id(oq_scop_energy_out_24h_wh) / 1000.0f;
+
+  # ===== DHW energy sensors =====
+
+  # Live electrical power being consumed for DHW right now (HP + element).
+  - platform: template
+    id: oq_dhw_active_power_input_w_sensor
+    name: "DHW active power input"
+    icon: mdi:flash
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 5s
+    web_server:
+      sorting_group_id: oq_performance
+    lambda: |-
+      float p = 0.0f;
+      if (id(oq_dhw_hp_request_active) &&
+          id(oq_total_power_input).has_state() &&
+          !isnan(id(oq_total_power_input).state)) {
+        p += id(oq_total_power_input).state;
+      }
+      if (id(boiler_relay).state) p += 3000.0f;
+      return p;
+
+  # Live thermal power being delivered to DHW right now (HP heat + element).
+  - platform: template
+    id: oq_dhw_active_heat_power_w_sensor
+    name: "DHW active heat power"
+    icon: mdi:radiator
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 5s
+    web_server:
+      sorting_group_id: oq_performance
+    lambda: |-
+      float p = 0.0f;
+      if (id(oq_dhw_hp_request_active) &&
+          id(oq_total_heat_power).has_state() &&
+          !isnan(id(oq_total_heat_power).state)) {
+        p += id(oq_total_heat_power).state;
+      }
+      if (id(boiler_relay).state) p += 3000.0f;  // resistive element ≈ 100% efficient
+      return p;
+
+  - platform: template
+    id: oq_dhw_energy_in_24h_sensor
+    name: "DHW energy input 24h"
+    icon: mdi:flash
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: measurement
+    accuracy_decimals: 3
+    update_interval: 60s
+    web_server:
+      sorting_group_id: oq_performance
+    lambda: |-
+      return id(oq_dhw_energy_in_24h_wh) / 1000.0f;
+
+  - platform: template
+    id: oq_dhw_energy_out_24h_sensor
+    name: "DHW heat output 24h"
+    icon: mdi:radiator
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: measurement
+    accuracy_decimals: 3
+    update_interval: 60s
+    web_server:
+      sorting_group_id: oq_performance
+    lambda: |-
+      return id(oq_dhw_energy_out_24h_wh) / 1000.0f;
+
+  - platform: template
+    id: oq_dhw_energy_in_total_sensor
+    name: "DHW energy input lifetime"
+    icon: mdi:flash
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 3
+    update_interval: 60s
+    web_server:
+      sorting_group_id: oq_performance
+    lambda: |-
+      return id(oq_dhw_energy_in_total_wh) / 1000.0f;
+
+  - platform: template
+    id: oq_dhw_energy_out_total_sensor
+    name: "DHW heat output lifetime"
+    icon: mdi:radiator
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 3
+    update_interval: 60s
+    web_server:
+      sorting_group_id: oq_performance
+    lambda: |-
+      return id(oq_dhw_energy_out_total_wh) / 1000.0f;
+
+  - platform: template
+    id: oq_dhw_scop_24h_sensor
+    name: "DHW COP 24h"
+    icon: mdi:chart-bell-curve-cumulative
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 60s
+    web_server:
+      sorting_group_id: oq_performance
+    lambda: |-
+      const float in_wh = id(oq_dhw_energy_in_24h_wh);
+      const float out_wh = id(oq_dhw_energy_out_24h_wh);
+      if (in_wh < 50.0f) return NAN;
+      return out_wh / in_wh;
+
+  - platform: template
+    id: oq_dhw_scop_lifetime_sensor
+    name: "DHW COP lifetime"
+    icon: mdi:chart-bell-curve-cumulative
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 300s
+    web_server:
+      sorting_group_id: oq_performance
+    lambda: |-
+      const float in_wh = id(oq_dhw_energy_in_total_wh);
+      const float out_wh = id(oq_dhw_energy_out_total_wh);
+      if (in_wh < 500.0f) return NAN;
+      return out_wh / in_wh;
+
+  - platform: template
+    id: oq_dhw_cycles_24h_sensor
+    name: "DHW cycles 24h"
+    icon: mdi:repeat
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_performance
+    lambda: |-
+      return (float) id(oq_dhw_cycles_24h);
+
+  - platform: template
+    id: oq_dhw_cycles_total_sensor
+    name: "DHW cycles lifetime"
+    icon: mdi:repeat
+    state_class: total_increasing
+    accuracy_decimals: 0
+    update_interval: 300s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_performance
+    lambda: |-
+      return (float) id(oq_dhw_cycles_total);
+
+  - platform: template
+    id: oq_dhw_energy_per_cycle_sensor
+    name: "DHW gemiddelde kWh per cyclus"
+    icon: mdi:flash
+    unit_of_measurement: "kWh"
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 300s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_performance
+    lambda: |-
+      const int cycles = id(oq_dhw_cycles_total);
+      if (cycles < 1) return NAN;
+      return (id(oq_dhw_energy_in_total_wh) / 1000.0f) / (float) cycles;
+
+  # ===== #7 Health sensors =====
+  - platform: template
+    id: oq_health_short_cycles_24h_sensor
+    name: "Health short cycles 24h"
+    icon: mdi:restart
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+    lambda: |-
+      return (float) id(oq_health_short_cycles_24h);
+
+  - platform: template
+    id: oq_health_defrosts_24h_sensor
+    name: "Health defrost cycles 24h"
+    icon: mdi:snowflake-melt
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+    lambda: |-
+      return (float) id(oq_health_defrosts_24h);
+
+  - platform: template
+    id: oq_health_cop_deviation_sensor
+    name: "Health COP deviation"
+    icon: mdi:chart-line
+    unit_of_measurement: "x"
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 60s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+    lambda: |-
+      return id(oq_health_cop_deviation_ema);
+
+  # ===== #8 Heat-up rate sensors =====
+  - platform: template
+    id: oq_heatup_rate_sensor
+    name: "Room heat-up rate"
+    icon: mdi:trending-up
+    unit_of_measurement: "K/h"
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 60s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_overview
+    lambda: |-
+      return id(oq_heatup_rate_kph);
+
+  - platform: template
+    id: oq_time_to_setpoint_sensor
+    name: "Estimated time to setpoint"
+    icon: mdi:timer-sand
+    unit_of_measurement: "min"
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 60s
+    web_server:
+      sorting_group_id: oq_overview
+    lambda: |-
+      const float rate = id(oq_heatup_rate_kph);
+      const float Tr = id(room_temp_selected).state;
+      const float Trsp = id(room_setpoint_selected).state;
+      if (isnan(Tr) || isnan(Trsp)) return NAN;
+      const float gap = Trsp - Tr;
+      if (gap <= 0.05f) return 0.0f;
+      if (rate <= 0.05f) return NAN;  // not warming meaningfully
+      const float hours = gap / rate;
+      return hours * 60.0f;  // minutes
+
+binary_sensor:
+  # ===== #7 Anomaly flags =====
+  - platform: template
+    id: oq_health_short_cycle_warning_sensor
+    name: "Health short-cycle warning"
+    icon: mdi:alert-circle-outline
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+    lambda: |-
+      return id(oq_health_short_cycles_24h) >= 8;
+
+  - platform: template
+    id: oq_health_high_defrost_warning_sensor
+    name: "Health high defrost warning"
+    icon: mdi:snowflake-alert
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+    lambda: |-
+      return id(oq_health_defrosts_24h) >= 24;
+
+  - platform: template
+    id: oq_health_cop_anomaly_sensor
+    name: "Health COP anomaly"
+    icon: mdi:alert-decagram-outline
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+    lambda: |-
+      // Asymmetric thresholds:
+      //   - Negative deviation < -0.4 (HP under-performs by ≥40% of perf_map COP)
+      //     is a real concern: dirty filter, refrigerant issue, sensor drift.
+      //   - Positive deviation up to +1.0 is normal — perf_map clamps Tsup at
+      //     its lowest breakpoint (35°C) so any heating below 35°C produces
+      //     conservative reference COP and inflates measured-vs-predicted.
+      //   - Above +1.0 may suggest a meter calibration issue worth checking.
+      const float dev = id(oq_health_cop_deviation_ema);
+      return (dev < -0.40f) || (dev > 1.00f);
+
+interval:
+  - interval: 30s
+    startup_delay: 10000ms
+    then:
+      - lambda: |-
+          const uint32_t now_ms = (uint32_t) millis();
+          const uint32_t prev_ms = id(oq_smart_last_loop_ms);
+          float dt_s = 30.0f;
+          if (prev_ms > 0 && now_ms > prev_ms) {
+            dt_s = (float)(now_ms - prev_ms) / 1000.0f;
+            if (dt_s < 1.0f) dt_s = 1.0f;
+            if (dt_s > 600.0f) dt_s = 600.0f;
+          }
+          id(oq_smart_last_loop_ms) = now_ms;
+
+          auto valid_now = [&](esphome::sensor::Sensor *s)->bool {
+            return s->has_state() && !std::isnan(s->state);
+          };
+
+          // ===== #6 SCOP rolling integration =====
+          // Energy accumulation: integrate instantaneous power readings.
+          const float p_in_w = valid_now(id(oq_total_power_input)) ? id(oq_total_power_input).state : 0.0f;
+          const float p_out_w = valid_now(id(oq_total_heat_power)) ? id(oq_total_heat_power).state : 0.0f;
+          // Wh increment per dt seconds
+          const float wh_inc_in = (p_in_w * dt_s) / 3600.0f;
+          const float wh_inc_out = (p_out_w * dt_s) / 3600.0f;
+          // Only count when there is any thermal output (otherwise standby
+          // power inflates the input side and depresses SCOP unfairly).
+          if (p_out_w > 50.0f && p_in_w > 30.0f) {
+            id(oq_scop_energy_in_24h_wh) += wh_inc_in;
+            id(oq_scop_energy_out_24h_wh) += wh_inc_out;
+            id(oq_scop_energy_in_7d_wh) += wh_inc_in;
+            id(oq_scop_energy_out_7d_wh) += wh_inc_out;
+            id(oq_scop_energy_in_30d_wh) += wh_inc_in;
+            id(oq_scop_energy_out_30d_wh) += wh_inc_out;
+            id(oq_scop_energy_in_total_wh) += wh_inc_in;
+            id(oq_scop_energy_out_total_wh) += wh_inc_out;
+          }
+
+          // ===== DHW energy accumulation =====
+          // Integrate only the DHW-active portion of power. Includes both HP
+          // (when oq_dhw_hp_request_active) and resistive element (boiler_relay).
+          float dhw_p_in_w = 0.0f;
+          float dhw_p_out_w = 0.0f;
+          if (id(oq_dhw_hp_request_active) &&
+              valid_now(id(oq_total_power_input))) {
+            dhw_p_in_w += id(oq_total_power_input).state;
+          }
+          if (id(oq_dhw_hp_request_active) &&
+              valid_now(id(oq_total_heat_power))) {
+            dhw_p_out_w += id(oq_total_heat_power).state;
+          }
+          if (id(boiler_relay).state) {
+            dhw_p_in_w += 3000.0f;
+            dhw_p_out_w += 3000.0f;  // resistive ≈ 100% efficient
+          }
+          if (dhw_p_in_w > 50.0f) {
+            const float dhw_in_inc = (dhw_p_in_w * dt_s) / 3600.0f;
+            const float dhw_out_inc = (dhw_p_out_w * dt_s) / 3600.0f;
+            id(oq_dhw_energy_in_24h_wh) += dhw_in_inc;
+            id(oq_dhw_energy_out_24h_wh) += dhw_out_inc;
+            id(oq_dhw_energy_in_total_wh) += dhw_in_inc;
+            id(oq_dhw_energy_out_total_wh) += dhw_out_inc;
+          }
+
+          // Cycle counting: rising-edge of DHW-active.
+          const bool dhw_active_now = id(oq_dhw_hp_request_active) || id(boiler_relay).state;
+          if (dhw_active_now && !id(oq_dhw_prev_active)) {
+            id(oq_dhw_cycles_24h) += 1;
+            id(oq_dhw_cycles_total) += 1;
+          }
+          id(oq_dhw_prev_active) = dhw_active_now;
+
+          // DHW 24h window reset (same window as SCOP).
+          if (id(oq_dhw_window_24h_start_ms) == 0) id(oq_dhw_window_24h_start_ms) = now_ms;
+          if (now_ms - id(oq_dhw_window_24h_start_ms) >= 86400000UL) {
+            id(oq_dhw_energy_in_24h_wh) = 0.0f;
+            id(oq_dhw_energy_out_24h_wh) = 0.0f;
+            id(oq_dhw_cycles_24h) = 0;
+            id(oq_dhw_window_24h_start_ms) = now_ms;
+          }
+
+          // Window resets — naïve: when wall clock crosses (start + window).
+          // We use millis() rollover-safe arithmetic because windows are
+          // shorter than a uint32_t millis range (49 days).
+          const uint32_t window_24h_ms = 86400000UL;
+          const uint32_t window_7d_ms = 604800000UL;
+          const uint32_t window_30d_ms = 0xFFFFFFFFUL;  // > 49d, handled via wall clock
+          if (id(oq_scop_window_24h_start_ms) == 0) id(oq_scop_window_24h_start_ms) = now_ms;
+          if (id(oq_scop_window_7d_start_ms) == 0) id(oq_scop_window_7d_start_ms) = now_ms;
+          if (id(oq_scop_window_30d_start_ms) == 0) id(oq_scop_window_30d_start_ms) = now_ms;
+          if (now_ms - id(oq_scop_window_24h_start_ms) >= window_24h_ms) {
+            id(oq_scop_energy_in_24h_wh) = 0.0f;
+            id(oq_scop_energy_out_24h_wh) = 0.0f;
+            id(oq_scop_window_24h_start_ms) = now_ms;
+          }
+          if (now_ms - id(oq_scop_window_7d_start_ms) >= window_7d_ms) {
+            id(oq_scop_energy_in_7d_wh) = 0.0f;
+            id(oq_scop_energy_out_7d_wh) = 0.0f;
+            id(oq_scop_window_7d_start_ms) = now_ms;
+          }
+          // 30-day window uses wall-clock if available; else fallback to no-reset.
+          (void) window_30d_ms;
+
+          // Lifetime start epoch
+          if (id(oq_scop_total_start_epoch_s) == 0) {
+            auto now_t = id(oq_time).now();
+            if (now_t.is_valid()) {
+              id(oq_scop_total_start_epoch_s) = (int64_t) now_t.timestamp;
+            }
+          }
+
+          // ===== #7 Health monitoring =====
+          // 1) Short-cycle counter: a "cycle" is run-then-stop where total
+          //    runtime was < min_runtime threshold (e.g. 5 min).
+          const int hp1_lvl = id(hp1_last_applied_level);
+          const int hp1_prev = id(oq_health_hp1_prev_level);
+          if (hp1_prev == 0 && hp1_lvl > 0) {
+            id(oq_health_hp1_run_start_ms) = now_ms;
+          } else if (hp1_prev > 0 && hp1_lvl == 0 && id(oq_health_hp1_run_start_ms) > 0) {
+            const uint32_t run_s = (now_ms - id(oq_health_hp1_run_start_ms)) / 1000UL;
+            const uint32_t short_threshold_s = 300UL;  // < 5 min = short cycle
+            if (run_s > 0 && run_s < short_threshold_s) {
+              id(oq_health_short_cycles_24h) += 1;
+              id(oq_health_short_cycles_total) += 1;
+            }
+          }
+          id(oq_health_hp1_prev_level) = hp1_lvl;
+
+          #if OQ_TOPOLOGY_DUO
+          const int hp2_lvl = id(${smart_secondary_last_applied_level_id});
+          const int hp2_prev = id(oq_health_hp2_prev_level);
+          if (hp2_prev == 0 && hp2_lvl > 0) {
+            id(oq_health_hp2_run_start_ms) = now_ms;
+          } else if (hp2_prev > 0 && hp2_lvl == 0 && id(oq_health_hp2_run_start_ms) > 0) {
+            const uint32_t run2_s = (now_ms - id(oq_health_hp2_run_start_ms)) / 1000UL;
+            if (run2_s > 0 && run2_s < 300UL) {
+              id(oq_health_short_cycles_24h) += 1;
+              id(oq_health_short_cycles_total) += 1;
+            }
+          }
+          id(oq_health_hp2_prev_level) = hp2_lvl;
+          #endif
+
+          // 2) Defrost counter: count rising edges of 4-way valve.
+          const bool hp1_def = id(hp1_4_way_valve).state;
+          if (hp1_def && !id(oq_health_hp1_prev_valve_def)) {
+            id(oq_health_defrosts_24h) += 1;
+            id(oq_health_defrosts_total) += 1;
+          }
+          id(oq_health_hp1_prev_valve_def) = hp1_def;
+          #if OQ_TOPOLOGY_DUO
+          const bool hp2_def = id(${smart_secondary_4_way_valve_id}).state;
+          if (hp2_def && !id(oq_health_hp2_prev_valve_def)) {
+            id(oq_health_defrosts_24h) += 1;
+            id(oq_health_defrosts_total) += 1;
+          }
+          id(oq_health_hp2_prev_valve_def) = hp2_def;
+          #endif
+
+          // 3) 24h reset of cycle/defrost counters.
+          if (id(oq_health_cycle_window_start_ms) == 0) id(oq_health_cycle_window_start_ms) = now_ms;
+          if (now_ms - id(oq_health_cycle_window_start_ms) >= window_24h_ms) {
+            id(oq_health_short_cycles_24h) = 0;
+            id(oq_health_defrosts_24h) = 0;
+            id(oq_health_cycle_window_start_ms) = now_ms;
+          }
+
+          // 4) COP deviation EMA: compare measured COP vs perf_map COP.
+          //    Only sample when both are valid and HP is heating.
+          if (p_out_w > 500.0f && p_in_w > 200.0f) {
+            const float cop_meas = p_out_w / p_in_w;
+            const float Tsup_now = id(oq_system_supply_temp).state;
+            const float Tamb_now = id(outside_temp_selected).state;
+            // Only sample when Tsup is within the perf_map valid range
+            // (35..55 °C). Below 35 the perf_map clamps and would systematically
+            // make measured > predicted (positive bias); above 55 we extrapolate.
+            // Also skip when only one HP is running but the other recently
+            // changed level — perf_map prediction lags reality there.
+            const bool tsup_ok = !isnan(Tsup_now) && Tsup_now >= 35.0f && Tsup_now <= 55.0f;
+            const bool tamb_ok = !isnan(Tamb_now);
+            float cop_ref = NAN;
+            if (hp1_lvl > 0 && tsup_ok && tamb_ok) {
+              cop_ref = oq_perf::interp_cop(hp1_lvl, Tamb_now, Tsup_now);
+            }
+            if (!isnan(cop_ref) && cop_ref > 0.5f) {
+              const float deviation = cop_meas - cop_ref;
+              const float tau_s = 6.0f * 3600.0f;  // 6h EMA
+              const float a = 1.0f - expf(-dt_s / tau_s);
+              float ema = id(oq_health_cop_deviation_ema);
+              if (isnan(ema)) ema = 0.0f;
+              ema += a * (deviation - ema);
+              id(oq_health_cop_deviation_ema) = ema;
+            }
+          }
+
+          // ===== #8 Heat-up rate (room) =====
+          // Sample dTr/dt over rolling 60s window with EMA τ = 10 min.
+          const float tr_now = id(room_temp_selected).state;
+          const uint32_t prev_tr_ms = id(oq_heatup_room_temp_prev_ms);
+          if (!isnan(tr_now)) {
+            if (prev_tr_ms == 0 || isnan(id(oq_heatup_room_temp_prev_c))) {
+              id(oq_heatup_room_temp_prev_c) = tr_now;
+              id(oq_heatup_room_temp_prev_ms) = now_ms;
+            } else {
+              const uint32_t age_ms = now_ms - prev_tr_ms;
+              if (age_ms >= 60000UL) {  // ≥ 1 min sample
+                const float dT = tr_now - id(oq_heatup_room_temp_prev_c);
+                const float dt_h = (float) age_ms / 3600000.0f;
+                if (dt_h > 0.0f) {
+                  const float rate_sample = dT / dt_h;  // K/h
+                  // Reject extreme values
+                  if (rate_sample > -10.0f && rate_sample < 10.0f) {
+                    const float tau_s = 600.0f;  // 10 min EMA
+                    const float a = 1.0f - expf(-(float) age_ms / 1000.0f / tau_s);
+                    float r = id(oq_heatup_rate_kph);
+                    r += a * (rate_sample - r);
+                    id(oq_heatup_rate_kph) = r;
+                  }
+                }
+                id(oq_heatup_room_temp_prev_c) = tr_now;
+                id(oq_heatup_room_temp_prev_ms) = now_ms;
+              }
+            }
+          }

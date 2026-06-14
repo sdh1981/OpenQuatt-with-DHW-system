@@ -34,6 +34,8 @@ interval:
           const uint32_t now_ms = (uint32_t) millis();
           const int min_level = 0;
           const int max_level = 10;
+          const bool oq_controls_enabled =
+              !id(oq_control_owner).has_state() || id(oq_control_owner).current_option() == "OpenQuatt";
 
           uint32_t dt_ms = (uint32_t) ${oq_heat_loop_tick_s} * 1000UL;
           dt_ms = oq_request::capped_loop_dt_ms(
@@ -134,7 +136,9 @@ interval:
           };
 
           const int request_mode_code = id(oq_request_mode_code);
-          const bool request_thermal_active = (request_mode_code == 1 || request_mode_code == 2);
+          // mode 1 = Cooling, 2 = Heating, 3 = Hot water — alle drie sturen
+          // actief een werkstand naar de HP.
+          const bool request_thermal_active = (request_mode_code == 1 || request_mode_code == 2 || request_mode_code == 3);
           const char* request_thermal_mode_opt = oq_request::request_mode_option(request_mode_code);
 
           auto hp_hold_mode_opt = [&](bool is_hp1)->const char* {
@@ -168,6 +172,7 @@ interval:
 
           auto apply_active_mode_hold = [&](bool is_hp1, int retained_level)->bool {
             if (retained_level <= 0) return false;
+            if (!oq_controls_enabled) return (hp_selected_level(is_hp1) > 0);
 
             // Keep the HP in the active thermal mode and preserve a non-zero level.
             // Used when defrost retain/hold must override a zero request.
@@ -200,6 +205,7 @@ interval:
           };
 
           auto set_mode = [&](bool is_hp1, bool active) {
+            if (!oq_controls_enabled) return;
             const char* opt = (active && request_thermal_active) ? request_thermal_mode_opt : oq_request::request_mode_option(0);
             if (is_hp1) {
               if (id(hp1_set_working_mode).current_option() != opt) {
@@ -240,6 +246,10 @@ interval:
           const char* lvl_opts[11] = {"0","1","2","3","4","5","6","7","8","9","10"};
 
           auto apply_level = [&](bool is_hp1, int req_level)->int {
+            if (!oq_controls_enabled) {
+              const int cur = hp_selected_level(is_hp1);
+              return (cur >= 0) ? cur : 0;
+            }
             req_level = std::max(min_level, std::min(max_level, req_level));
             const int prev_applied = is_hp1 ? id(hp1_last_applied_level) : id(${ta_secondary_last_applied_level_id});
             const int retained_level = defrost_stop_hold_level(is_hp1);
@@ -273,6 +283,21 @@ interval:
             int cap = silent_active ? (int) roundf(id(oq_silent_max_level).state)
                                     : (int) roundf(id(oq_day_max_level).state);
             cap = std::max(min_level, std::min(max_level, cap));
+
+            // v0.32 pressure-protection: per-HP cap from the pressure module.
+            // Tighter of silent/day and pressure cap wins. 10 = no cap, 0 = stop.
+            const int pressure_cap = is_hp1
+                ? id(oq_pressure_max_level_hp1)
+                : id(oq_pressure_max_level_hp2);
+            if (pressure_cap < cap) cap = pressure_cap;
+
+            // v0.32 supply-temperature-protection: per-HP cap from supply temp module.
+            // Same min() logic: any tighter cap wins.
+            const int supply_temp_cap = is_hp1
+                ? id(oq_supply_temp_max_level_hp1)
+                : id(oq_supply_temp_max_level_hp2);
+            if (supply_temp_cap < cap) cap = supply_temp_cap;
+
             if (applied > cap) applied = cap;
             applied = pick_allowed_capped(applied, is_hp1, cap);
 
@@ -344,9 +369,10 @@ interval:
             // This avoids overcounting during command/mode transition, standby, or fault situations.
             if (new_lvl > 0 && dt_ms > 0) {
               const float working_mode_raw = is_hp1 ? id(hp1_working_mode).state : id(${ta_secondary_working_mode_id}).state;
+              const int wm_int = (int) roundf(working_mode_raw);
               const bool thermal_now =
                   !isnan(working_mode_raw) &&
-                  ((((int) roundf(working_mode_raw)) == 1) || (((int) roundf(working_mode_raw)) == 2));
+                  (wm_int == 1 || wm_int == 2 || wm_int == 3);  // Cooling/Heating/Hot water
               if (thermal_now) {
                 uint32_t &runtime_accum_ms = is_hp1 ? id(hp1_runtime_accum_ms) : id(hp2_runtime_accum_ms);
                 int &runtime_minutes = is_hp1 ? id(hp1_minutes) : id(${ta_secondary_minutes_id});

@@ -1,0 +1,840 @@
+# ==============================================================================
+# OpenQuatt – Temperatuursensor kalibratie (waterzijdig HP1/HP2)
+# ==============================================================================
+#
+# Doel:
+#   Bepaal en sla kalibratie-offsets op voor de 4 waterzijdige HP-temperatuur-
+#   sensoren: HP1 water in/uit en HP2 water in/uit.
+#
+# Werkwijze:
+#   1. Voorbereiding  — CM Override → Force CM1 (pomp loopt, geen compressor).
+#   2. Meting         — firmware meet N seconden, middelt de 4 ruwe waarden,
+#                        controleert spreiding en stoppe zodra stabiel genoeg.
+#   3. Offsets toepassen — berekend als (referentie − gemiddelde).
+#                        Referentie = gemiddelde van alle 4 gemiddelden.
+#                        Opgeslagen als restore_value globals; na reboot
+#                        actief via lambda-filter in oq_HP_io.yaml.
+#
+# Vereisten:
+#   - oq_HP_io.yaml moet een lambda-filter toevoegen aan water_in_temp en
+#     water_out_temp voor HP1 én HP2 die oq_cal_<hp_id>_in/out_offset optelt.
+#   - Dit pakket moet VOOR oq_HP_io.yaml worden geladen (zie oq_packages_common.yaml).
+#
+# Kanttekeningen:
+#   - "Supply verschil" = |water_supply_temp_selected − referentie|.
+#     Dit is enkel diagnostisch: supply-sensor is niet onderhevig aan offset-correctie.
+#   - Tijdens meting worden de rauwe sensorwaarden bijgehouden als
+#     (calibrated_state − active_offset), zodat bestaande downstream-logica
+#     ongestoord doorloopt.
+#   - Minimale meetduur: oq_cal_min_samples × 1 s.
+#   - Maximale meetduur: oq_cal_max_duration_s.
+#   - Vroegtijdig stoppen zodra laatste 5 samples spread < oq_cal_spread_threshold_c.
+#
+# Entiteitsnamen (stabiel houden voor de web-app):
+#   button:  sensor_cal_start, sensor_cal_stop, sensor_cal_apply, sensor_cal_reset
+#   sensor:  sensor_cal_state_code, sensor_cal_remaining_s,
+#            sensor_cal_hp1_in_raw, sensor_cal_hp1_out_raw,
+#            sensor_cal_hp2_in_raw, sensor_cal_hp2_out_raw,
+#            sensor_cal_spread, sensor_cal_supply_diff,
+#            sensor_cal_reference,
+#            sensor_cal_prop_hp1_in, sensor_cal_prop_hp1_out,
+#            sensor_cal_prop_hp2_in, sensor_cal_prop_hp2_out,
+#            hp1_water_in_cal_offset, hp1_water_out_cal_offset,
+#            hp2_water_in_cal_offset, hp2_water_out_cal_offset
+#   text_sensor: sensor_cal_state_text, sensor_cal_status_detail
+#   number:  sensor_cal_max_duration, sensor_cal_spread_threshold
+#
+# ==============================================================================
+
+# ----------------------------
+# GLOBALS — actieve offsets (persistent)
+# ----------------------------
+globals:
+  - id: oq_cal_hp1_in_offset
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+
+  - id: oq_cal_hp1_out_offset
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+
+  - id: oq_cal_hp2_in_offset
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+
+  - id: oq_cal_hp2_out_offset
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+
+  # ----------------------------
+  # State machine (niet persistent)
+  # 0 = Idle, 1 = Measuring, 2 = Result ready
+  - id: oq_cal_state
+    type: int
+    restore_value: false
+    initial_value: '0'
+
+  - id: oq_cal_started_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+  # ----------------------------
+  # Accumulatoren voor lopende gemiddelden
+  - id: oq_cal_sum_hp1_in
+    type: float
+    restore_value: false
+    initial_value: '0.0'
+
+  - id: oq_cal_sum_hp1_out
+    type: float
+    restore_value: false
+    initial_value: '0.0'
+
+  - id: oq_cal_sum_hp2_in
+    type: float
+    restore_value: false
+    initial_value: '0.0'
+
+  - id: oq_cal_sum_hp2_out
+    type: float
+    restore_value: false
+    initial_value: '0.0'
+
+  - id: oq_cal_sample_count
+    type: int
+    restore_value: false
+    initial_value: '0'
+
+  # Rolling window voor spreiding (5 samples, circulaire buffer)
+  - id: oq_cal_win_hp1_in
+    type: std::array<float,5>
+    restore_value: false
+    initial_value: '{NAN,NAN,NAN,NAN,NAN}'
+
+  - id: oq_cal_win_hp1_out
+    type: std::array<float,5>
+    restore_value: false
+    initial_value: '{NAN,NAN,NAN,NAN,NAN}'
+
+  - id: oq_cal_win_hp2_in
+    type: std::array<float,5>
+    restore_value: false
+    initial_value: '{NAN,NAN,NAN,NAN,NAN}'
+
+  - id: oq_cal_win_hp2_out
+    type: std::array<float,5>
+    restore_value: false
+    initial_value: '{NAN,NAN,NAN,NAN,NAN}'
+
+  - id: oq_cal_win_idx
+    type: int
+    restore_value: false
+    initial_value: '0'
+
+  # ----------------------------
+  # Voorgestelde offsets (berekend bij meetafronding)
+  - id: oq_cal_prop_hp1_in_f
+    type: float
+    restore_value: false
+    initial_value: '0.0'
+
+  - id: oq_cal_prop_hp1_out_f
+    type: float
+    restore_value: false
+    initial_value: '0.0'
+
+  - id: oq_cal_prop_hp2_in_f
+    type: float
+    restore_value: false
+    initial_value: '0.0'
+
+  - id: oq_cal_prop_hp2_out_f
+    type: float
+    restore_value: false
+    initial_value: '0.0'
+
+  - id: oq_cal_result_reference
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+
+  - id: oq_cal_result_spread
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+
+  - id: oq_cal_result_supply_diff
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+
+  # Live waarden tijdens meting (ruw, zonder offset)
+  - id: oq_cal_live_hp1_in
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+
+  - id: oq_cal_live_hp1_out
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+
+  - id: oq_cal_live_hp2_in
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+
+  - id: oq_cal_live_hp2_out
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+
+  - id: oq_cal_live_spread
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+
+# ----------------------------
+# TUNING
+# ----------------------------
+number:
+  - platform: template
+    id: sensor_cal_max_duration
+    name: "Sensor Cal Max Duration"
+    icon: mdi:timer-outline
+    unit_of_measurement: "s"
+    min_value: 60
+    max_value: 600
+    step: 10
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 300
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_service_cal
+
+  - platform: template
+    id: sensor_cal_spread_threshold
+    name: "Sensor Cal Spread Threshold"
+    icon: mdi:arrow-collapse-vertical
+    unit_of_measurement: "°C"
+    min_value: 0.10
+    max_value: 1.00
+    step: 0.05
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 0.25
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_service_cal
+
+# ----------------------------
+# BUTTONS
+# ----------------------------
+button:
+  - platform: template
+    id: sensor_cal_start
+    name: "Sensor Cal Start"
+    icon: mdi:play-circle-outline
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_service_cal
+    on_press:
+      - lambda: |-
+          // Zet CM override op Force CM1 (pomp aan, geen compressor)
+          if (id(oq_cm_override).has_state() &&
+              id(oq_cm_override).current_option() != "Force CM1") {
+            auto c = id(oq_cm_override).make_call();
+            c.set_option("Force CM1");
+            c.perform();
+          }
+          // Reset accumulatoren
+          id(oq_cal_sum_hp1_in)  = 0.0f;
+          id(oq_cal_sum_hp1_out) = 0.0f;
+          id(oq_cal_sum_hp2_in)  = 0.0f;
+          id(oq_cal_sum_hp2_out) = 0.0f;
+          id(oq_cal_sample_count) = 0;
+          id(oq_cal_win_idx) = 0;
+          for (int i = 0; i < 5; i++) {
+            id(oq_cal_win_hp1_in)[i]  = NAN;
+            id(oq_cal_win_hp1_out)[i] = NAN;
+            id(oq_cal_win_hp2_in)[i]  = NAN;
+            id(oq_cal_win_hp2_out)[i] = NAN;
+          }
+          id(oq_cal_result_reference)  = NAN;
+          id(oq_cal_result_spread)     = NAN;
+          id(oq_cal_result_supply_diff) = NAN;
+          id(oq_cal_started_ms) = (uint32_t) millis();
+          id(oq_cal_state) = 1;
+
+  - platform: template
+    id: sensor_cal_stop
+    name: "Sensor Cal Stop"
+    icon: mdi:stop-circle-outline
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_service_cal
+    on_press:
+      - lambda: |-
+          // Herstel CM Override naar Auto
+          if (id(oq_cm_override).has_state() &&
+              id(oq_cm_override).current_option() == "Force CM1") {
+            auto c = id(oq_cm_override).make_call();
+            c.set_option("Auto");
+            c.perform();
+          }
+          id(oq_cal_state) = 0;
+
+  - platform: template
+    id: sensor_cal_apply
+    name: "Sensor Cal Apply"
+    icon: mdi:check-circle-outline
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_service_cal
+    on_press:
+      - lambda: |-
+          // Pas voorgestelde offsets toe — alleen als resultaat beschikbaar
+          if (id(oq_cal_state) != 2) return;
+          id(oq_cal_hp1_in_offset)  = id(oq_cal_prop_hp1_in_f);
+          id(oq_cal_hp1_out_offset) = id(oq_cal_prop_hp1_out_f);
+          id(oq_cal_hp2_in_offset)  = id(oq_cal_prop_hp2_in_f);
+          id(oq_cal_hp2_out_offset) = id(oq_cal_prop_hp2_out_f);
+          id(hp1_water_in_cal_offset).publish_state(id(oq_cal_hp1_in_offset));
+          id(hp1_water_out_cal_offset).publish_state(id(oq_cal_hp1_out_offset));
+          id(hp2_water_in_cal_offset).publish_state(id(oq_cal_hp2_in_offset));
+          id(hp2_water_out_cal_offset).publish_state(id(oq_cal_hp2_out_offset));
+          // Herstel CM Override naar Auto
+          if (id(oq_cm_override).has_state() &&
+              id(oq_cm_override).current_option() == "Force CM1") {
+            auto c = id(oq_cm_override).make_call();
+            c.set_option("Auto");
+            c.perform();
+          }
+          id(oq_cal_state) = 0;
+
+  - platform: template
+    id: sensor_cal_reset
+    name: "Sensor Cal Reset Offsets"
+    icon: mdi:restore
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_service_cal
+    on_press:
+      - lambda: |-
+          // Wis alle actieve kalibratie-offsets
+          id(oq_cal_hp1_in_offset)  = 0.0f;
+          id(oq_cal_hp1_out_offset) = 0.0f;
+          id(oq_cal_hp2_in_offset)  = 0.0f;
+          id(oq_cal_hp2_out_offset) = 0.0f;
+          id(hp1_water_in_cal_offset).publish_state(0.0f);
+          id(hp1_water_out_cal_offset).publish_state(0.0f);
+          id(hp2_water_in_cal_offset).publish_state(0.0f);
+          id(hp2_water_out_cal_offset).publish_state(0.0f);
+          id(oq_cal_state) = 0;
+
+# ----------------------------
+# TEXT SENSORS
+# ----------------------------
+text_sensor:
+  - platform: template
+    id: sensor_cal_state_text
+    name: "Sensor Cal State"
+    icon: mdi:information-outline
+    update_interval: never
+    web_server:
+      sorting_group_id: oq_service_cal
+
+  - platform: template
+    id: sensor_cal_status_detail
+    name: "Sensor Cal Status Detail"
+    icon: mdi:text-box-outline
+    update_interval: never
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_service_cal
+
+# ----------------------------
+# SENSORS — state + voortgang
+# ----------------------------
+sensor:
+  - platform: template
+    id: sensor_cal_state_code
+    name: "Sensor Cal State Code"
+    icon: mdi:state-machine
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: never
+    internal: true
+
+  - platform: template
+    id: sensor_cal_remaining_s
+    name: "Sensor Cal Remaining"
+    icon: mdi:timer-sand
+    unit_of_measurement: "s"
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: never
+    web_server:
+      sorting_group_id: oq_service_cal
+
+  - platform: template
+    id: sensor_cal_sample_count
+    name: "Sensor Cal Samples"
+    icon: mdi:counter
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: never
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_service_cal
+
+  # ----------------------------
+  # Live rauwe waarden (gecalibreerde sensorwaarde − actieve offset)
+  - platform: template
+    id: sensor_cal_hp1_in_raw
+    name: "Sensor Cal HP1 Water In Raw"
+    icon: mdi:thermometer-water
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: never
+    web_server:
+      sorting_group_id: oq_service_cal
+
+  - platform: template
+    id: sensor_cal_hp1_out_raw
+    name: "Sensor Cal HP1 Water Out Raw"
+    icon: mdi:thermometer-water
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: never
+    web_server:
+      sorting_group_id: oq_service_cal
+
+  - platform: template
+    id: sensor_cal_hp2_in_raw
+    name: "Sensor Cal HP2 Water In Raw"
+    icon: mdi:thermometer-water
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: never
+    web_server:
+      sorting_group_id: oq_service_cal
+
+  - platform: template
+    id: sensor_cal_hp2_out_raw
+    name: "Sensor Cal HP2 Water Out Raw"
+    icon: mdi:thermometer-water
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: never
+    web_server:
+      sorting_group_id: oq_service_cal
+
+  - platform: template
+    id: sensor_cal_spread
+    name: "Sensor Cal Spread"
+    icon: mdi:arrow-expand-vertical
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: never
+    web_server:
+      sorting_group_id: oq_service_cal
+
+  - platform: template
+    id: sensor_cal_supply_diff
+    name: "Sensor Cal Supply Diff"
+    icon: mdi:delta
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: never
+    web_server:
+      sorting_group_id: oq_service_cal
+
+  # ----------------------------
+  # Resultaat (beschikbaar in state 2)
+  - platform: template
+    id: sensor_cal_reference
+    name: "Sensor Cal Reference"
+    icon: mdi:thermometer-check
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: never
+    web_server:
+      sorting_group_id: oq_service_cal
+
+  - platform: template
+    id: sensor_cal_prop_hp1_in
+    name: "Sensor Cal Proposed HP1 In"
+    icon: mdi:thermometer-plus
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: never
+    web_server:
+      sorting_group_id: oq_service_cal
+
+  - platform: template
+    id: sensor_cal_prop_hp1_out
+    name: "Sensor Cal Proposed HP1 Out"
+    icon: mdi:thermometer-plus
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: never
+    web_server:
+      sorting_group_id: oq_service_cal
+
+  - platform: template
+    id: sensor_cal_prop_hp2_in
+    name: "Sensor Cal Proposed HP2 In"
+    icon: mdi:thermometer-plus
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: never
+    web_server:
+      sorting_group_id: oq_service_cal
+
+  - platform: template
+    id: sensor_cal_prop_hp2_out
+    name: "Sensor Cal Proposed HP2 Out"
+    icon: mdi:thermometer-plus
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: never
+    web_server:
+      sorting_group_id: oq_service_cal
+
+  # ----------------------------
+  # Actieve offsets (leesbaar voor web-app resultaat-tabel)
+  - platform: template
+    id: hp1_water_in_cal_offset
+    name: "HP1 Water In Cal Offset"
+    icon: mdi:tune-vertical
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 30s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_service_cal
+    lambda: return id(oq_cal_hp1_in_offset);
+
+  - platform: template
+    id: hp1_water_out_cal_offset
+    name: "HP1 Water Out Cal Offset"
+    icon: mdi:tune-vertical
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 30s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_service_cal
+    lambda: return id(oq_cal_hp1_out_offset);
+
+  - platform: template
+    id: hp2_water_in_cal_offset
+    name: "HP2 Water In Cal Offset"
+    icon: mdi:tune-vertical
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 30s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_service_cal
+    lambda: return id(oq_cal_hp2_in_offset);
+
+  - platform: template
+    id: hp2_water_out_cal_offset
+    name: "HP2 Water Out Cal Offset"
+    icon: mdi:tune-vertical
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 30s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_service_cal
+    lambda: return id(oq_cal_hp2_out_offset);
+
+# ----------------------------
+# MAIN LOOP — kalibratie state machine (elke seconde)
+# ----------------------------
+interval:
+  - interval: 1s
+    then:
+      - lambda: |-
+          // ============================================================
+          // Sensor calibratie state machine
+          // ============================================================
+          // State 0 = Idle  : niets te doen, publiceer idle-status
+          // State 1 = Meting: pomp loopt (Force CM1), geen compressor
+          //                   meet rauwe waarden, controleer spreiding
+          // State 2 = Klaar : toon gemiddelden en voorgestelde offsets
+          // ============================================================
+
+          const int state = id(oq_cal_state);
+          id(sensor_cal_state_code).publish_state((float) state);
+
+          // Hulpfuncties
+          auto pub_text_if_changed = [](auto *ts, const std::string &val) {
+            if (!ts->has_state() || ts->state != val) ts->publish_state(val);
+          };
+          auto pub_sensor_if_changed = [](auto *s, float val) {
+            if (!s->has_state() || fabsf(s->state - val) > 0.0001f) s->publish_state(val);
+          };
+          auto pub_sensor_nan = [](auto *s) {
+            if (!s->has_state() || !isnan(s->state)) s->publish_state(NAN);
+          };
+
+          // ─────────────────────────────────────────────
+          // STATE 0: IDLE
+          // ─────────────────────────────────────────────
+          if (state == 0) {
+            pub_text_if_changed(id(sensor_cal_state_text), "Idle");
+            pub_text_if_changed(id(sensor_cal_status_detail),
+              "Druk op 'Kalibratie starten' om te beginnen.");
+            if (!id(sensor_cal_remaining_s).has_state() || !isnan(id(sensor_cal_remaining_s).state))
+              id(sensor_cal_remaining_s).publish_state(NAN);
+            if (!id(sensor_cal_sample_count).has_state() || !isnan(id(sensor_cal_sample_count).state))
+              id(sensor_cal_sample_count).publish_state(NAN);
+            return;
+          }
+
+          // ─────────────────────────────────────────────
+          // STATE 1: METING
+          // ─────────────────────────────────────────────
+          if (state == 1) {
+            const uint32_t now_ms = (uint32_t) millis();
+            const uint32_t elapsed_ms = (uint32_t)(now_ms - id(oq_cal_started_ms));
+            const float max_s = id(sensor_cal_max_duration).state;
+            const float threshold_c = id(sensor_cal_spread_threshold).state;
+            const float remaining_s = fmaxf(0.0f, max_s - elapsed_ms / 1000.0f);
+
+            // Lees rauwe waarden (gecalibreerde sensorwaarde − actieve offset)
+            // Zodat we altijd de ongeoffset waarden middelen, ook als er al
+            // eerder offsets zijn toegepast.
+            float r1i = NAN, r1o = NAN, r2i = NAN, r2o = NAN;
+            if (id(hp1_water_in_temp).has_state()  && !isnan(id(hp1_water_in_temp).state))
+              r1i = id(hp1_water_in_temp).state  - id(oq_cal_hp1_in_offset);
+            if (id(hp1_water_out_temp).has_state() && !isnan(id(hp1_water_out_temp).state))
+              r1o = id(hp1_water_out_temp).state - id(oq_cal_hp1_out_offset);
+            if (id(hp2_water_in_temp).has_state()  && !isnan(id(hp2_water_in_temp).state))
+              r2i = id(hp2_water_in_temp).state  - id(oq_cal_hp2_in_offset);
+            if (id(hp2_water_out_temp).has_state() && !isnan(id(hp2_water_out_temp).state))
+              r2o = id(hp2_water_out_temp).state - id(oq_cal_hp2_out_offset);
+
+            // Bewaar live waarden
+            id(oq_cal_live_hp1_in)  = r1i;
+            id(oq_cal_live_hp1_out) = r1o;
+            id(oq_cal_live_hp2_in)  = r2i;
+            id(oq_cal_live_hp2_out) = r2o;
+
+            // Publiceer live rauwe sensoren
+            if (!isnan(r1i)) pub_sensor_if_changed(id(sensor_cal_hp1_in_raw), r1i);
+            if (!isnan(r1o)) pub_sensor_if_changed(id(sensor_cal_hp1_out_raw), r1o);
+            if (!isnan(r2i)) pub_sensor_if_changed(id(sensor_cal_hp2_in_raw), r2i);
+            if (!isnan(r2o)) pub_sensor_if_changed(id(sensor_cal_hp2_out_raw), r2o);
+
+            // Spreiding van huidige sample (max − min van 4 sensoren)
+            float live_spread = NAN;
+            {
+              float lo = NAN, hi = NAN;
+              auto upd = [&](float v) {
+                if (isnan(v)) return;
+                if (isnan(lo) || v < lo) lo = v;
+                if (isnan(hi) || v > hi) hi = v;
+              };
+              upd(r1i); upd(r1o); upd(r2i); upd(r2o);
+              if (!isnan(lo) && !isnan(hi)) live_spread = hi - lo;
+            }
+            id(oq_cal_live_spread) = live_spread;
+            if (!isnan(live_spread)) pub_sensor_if_changed(id(sensor_cal_spread), live_spread);
+
+            // Supply verschil (diagnostisch)
+            if (id(water_supply_temp_selected).has_state() &&
+                !isnan(id(water_supply_temp_selected).state)) {
+              const float supply = id(water_supply_temp_selected).state;
+              // Bereken instant gemiddelde van de 4 rauwe waarden als referentie
+              float sum = 0.0f; int n = 0;
+              auto add = [&](float v) { if (!isnan(v)) { sum += v; n++; } };
+              add(r1i); add(r1o); add(r2i); add(r2o);
+              if (n > 0) {
+                const float ref_inst = sum / (float)n;
+                pub_sensor_if_changed(id(sensor_cal_supply_diff),
+                                      fabsf(supply - ref_inst));
+              }
+            }
+
+            // Voeg toe aan rolling window (voor vroeg stoppen)
+            const bool all_valid = !isnan(r1i) && !isnan(r1o) && !isnan(r2i) && !isnan(r2o);
+            if (all_valid) {
+              const int wi = id(oq_cal_win_idx) % 5;
+              id(oq_cal_win_hp1_in)[wi]  = r1i;
+              id(oq_cal_win_hp1_out)[wi] = r1o;
+              id(oq_cal_win_hp2_in)[wi]  = r2i;
+              id(oq_cal_win_hp2_out)[wi] = r2o;
+              id(oq_cal_win_idx)++;
+
+              // Accumuleer voor totaal gemiddelde
+              id(oq_cal_sum_hp1_in)  += r1i;
+              id(oq_cal_sum_hp1_out) += r1o;
+              id(oq_cal_sum_hp2_in)  += r2i;
+              id(oq_cal_sum_hp2_out) += r2o;
+              id(oq_cal_sample_count)++;
+            }
+
+            pub_sensor_if_changed(id(sensor_cal_remaining_s), remaining_s);
+            pub_sensor_if_changed(id(sensor_cal_sample_count),
+                                  (float)id(oq_cal_sample_count));
+
+            // Controleer vroeg stoppen (min 5 samples én volledig window gevuld)
+            bool window_filled = (id(oq_cal_win_idx) >= 5);
+            bool early_stop = false;
+            if (window_filled && !isnan(live_spread) && live_spread < threshold_c) {
+              early_stop = true;
+            }
+
+            // Tijdslimiet bereikt of vroeg gestopt?
+            const bool time_up = (elapsed_ms >= (uint32_t)(max_s * 1000.0f));
+
+            if (!time_up && !early_stop) {
+              // Meting loopt nog
+              const char *spread_msg = (!isnan(live_spread) && live_spread < threshold_c)
+                                       ? "Binnen spreiding-grenzen"
+                                       : "Nog niet binnen grenzen";
+              char buf[64];
+              snprintf(buf, sizeof(buf), "Meting bezig — max. %.0f s resterend", remaining_s);
+              pub_text_if_changed(id(sensor_cal_state_text), "Meting bezig");
+              pub_text_if_changed(id(sensor_cal_status_detail), spread_msg);
+              return;
+            }
+
+            // ─── Meting afronden ─────────────────────────────────────────
+            const int n = id(oq_cal_sample_count);
+            if (n < 3) {
+              // Te weinig geldige samples
+              pub_text_if_changed(id(sensor_cal_state_text), "Fout");
+              pub_text_if_changed(id(sensor_cal_status_detail),
+                "Te weinig geldige samples. Controleer sensoren en probeer opnieuw.");
+              id(oq_cal_state) = 0;
+              // Herstel CM Override
+              if (id(oq_cm_override).has_state() &&
+                  id(oq_cm_override).current_option() == "Force CM1") {
+                auto c = id(oq_cm_override).make_call();
+                c.set_option("Auto");
+                c.perform();
+              }
+              return;
+            }
+
+            const float fn = (float) n;
+            const float avg1i = id(oq_cal_sum_hp1_in)  / fn;
+            const float avg1o = id(oq_cal_sum_hp1_out) / fn;
+            const float avg2i = id(oq_cal_sum_hp2_in)  / fn;
+            const float avg2o = id(oq_cal_sum_hp2_out) / fn;
+
+            // Referentie = gemiddelde van alle 4 gemiddelden
+            const float ref = (avg1i + avg1o + avg2i + avg2o) / 4.0f;
+
+            // Spreiding van gemiddelden (niet van live samples)
+            float avg_min = avg1i, avg_max = avg1i;
+            auto upd_mm = [&](float v) {
+              if (v < avg_min) avg_min = v;
+              if (v > avg_max) avg_max = v;
+            };
+            upd_mm(avg1o); upd_mm(avg2i); upd_mm(avg2o);
+            const float final_spread = avg_max - avg_min;
+
+            // Voorgestelde offsets
+            const float prop1i = ref - avg1i;
+            const float prop1o = ref - avg1o;
+            const float prop2i = ref - avg2i;
+            const float prop2o = ref - avg2o;
+
+            // Supply diff op basis van gemiddelden
+            float supply_diff = NAN;
+            if (id(water_supply_temp_selected).has_state() &&
+                !isnan(id(water_supply_temp_selected).state)) {
+              supply_diff = fabsf(id(water_supply_temp_selected).state - ref);
+            }
+
+            // Sla resultaten op in globals
+            id(oq_cal_result_reference)  = ref;
+            id(oq_cal_result_spread)     = final_spread;
+            id(oq_cal_result_supply_diff) = supply_diff;
+            id(oq_cal_prop_hp1_in_f)  = prop1i;
+            id(oq_cal_prop_hp1_out_f) = prop1o;
+            id(oq_cal_prop_hp2_in_f)  = prop2i;
+            id(oq_cal_prop_hp2_out_f) = prop2o;
+
+            // Publiceer resultaten
+            pub_sensor_if_changed(id(sensor_cal_reference), ref);
+            pub_sensor_if_changed(id(sensor_cal_spread), final_spread);
+            if (!isnan(supply_diff))
+              pub_sensor_if_changed(id(sensor_cal_supply_diff), supply_diff);
+
+            pub_sensor_if_changed(id(sensor_cal_hp1_in_raw),  avg1i);
+            pub_sensor_if_changed(id(sensor_cal_hp1_out_raw), avg1o);
+            pub_sensor_if_changed(id(sensor_cal_hp2_in_raw),  avg2i);
+            pub_sensor_if_changed(id(sensor_cal_hp2_out_raw), avg2o);
+
+            pub_sensor_if_changed(id(sensor_cal_prop_hp1_in),  prop1i);
+            pub_sensor_if_changed(id(sensor_cal_prop_hp1_out), prop1o);
+            pub_sensor_if_changed(id(sensor_cal_prop_hp2_in),  prop2i);
+            pub_sensor_if_changed(id(sensor_cal_prop_hp2_out), prop2o);
+
+            pub_sensor_if_changed(id(sensor_cal_remaining_s), 0.0f);
+
+            char spread_buf[48];
+            snprintf(spread_buf, sizeof(spread_buf),
+                     "Meting klaar - spreiding %.2f °C", final_spread);
+            pub_text_if_changed(id(sensor_cal_state_text), spread_buf);
+            pub_text_if_changed(id(sensor_cal_status_detail),
+              "Controleer de voorgestelde offsets en pas ze toe.");
+
+            id(oq_cal_state) = 2;
+            return;
+          }
+
+          // ─────────────────────────────────────────────
+          // STATE 2: RESULTAAT BESCHIKBAAR
+          // ─────────────────────────────────────────────
+          if (state == 2) {
+            pub_text_if_changed(id(sensor_cal_status_detail),
+              "Klaar om toe te passen. Controleer de voorgestelde offsets voordat je ze toepast.");
+            // Alles al gepubliceerd bij overgang van 1→2; niets meer te doen.
+          }

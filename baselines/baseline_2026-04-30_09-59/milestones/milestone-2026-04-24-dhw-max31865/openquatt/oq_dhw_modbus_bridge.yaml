@@ -1,0 +1,159 @@
+# ==============================================================================
+# OpenQuatt - DHW Modbus Bridge (external ESP32 Dallas node)
+# ==============================================================================
+# Reads DHW tank bottom/top temperatures from an external Modbus RTU slave.
+#
+# Device mapping (user-provided):
+# - Slave address: 1
+# - Serial: 19200, 8E1
+# - Function code: 03 (holding registers)
+# - Register base candidates:
+#   - 2133/2134 (0-based offset for 42134/42135)
+#   - 42134/42135 (absolute style on some masters/devices)
+# - Conversion: temp_C = (raw - 3000) / 100
+#
+# Runtime behavior:
+# - Polls every 5s by default.
+# - Publishes NaN when offline/invalid so upstream fallback logic can take over.
+# ==============================================================================
+
+uart:
+  - id: uart_rs485_3
+    tx_pin: ${dhw_rs4853_tx_pin}
+    rx_pin: ${dhw_rs4853_rx_pin}
+    baud_rate: 19200
+    data_bits: 8
+    stop_bits: 1
+    parity: EVEN
+    rx_full_threshold: 1
+    rx_timeout: 1
+
+modbus:
+  - uart_id: uart_rs485_3
+    id: mod_bus_3
+    send_wait_time: 150ms
+
+modbus_controller:
+  - id: dhw_mb_bridge
+    address: 1
+    modbus_id: mod_bus_3
+    update_interval: 5s
+    command_throttle: 80ms
+    max_cmd_retries: 1
+    offline_skip_updates: 2
+    setup_priority: -10
+
+sensor:
+  - platform: modbus_controller
+    modbus_controller_id: dhw_mb_bridge
+    id: dhw_mb_tank_bottom_c
+    name: "DHW MB tank bottom"
+    register_type: holding
+    address: 2134
+    value_type: U_WORD
+    unit_of_measurement: "degC"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    filters:
+      - lambda: |-
+          return (x - 3000.0f) / 100.0f;
+
+  - platform: modbus_controller
+    modbus_controller_id: dhw_mb_bridge
+    id: dhw_mb_tank_top_c
+    name: "DHW MB tank top"
+    register_type: holding
+    address: 2133
+    value_type: U_WORD
+    unit_of_measurement: "degC"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    filters:
+      - lambda: |-
+          return (x - 3000.0f) / 100.0f;
+
+  - platform: template
+    id: dhw_mb_top_bottom_delta_c
+    name: "DHW MB delta top-bottom"
+    unit_of_measurement: "degC"
+    icon: mdi:delta
+    accuracy_decimals: 2
+    update_interval: 5s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      if (!id(dhw_mb_tank_top_c).has_state() || !id(dhw_mb_tank_bottom_c).has_state()) {
+        return NAN;
+      }
+      const float top = id(dhw_mb_tank_top_c).state;
+      const float bottom = id(dhw_mb_tank_bottom_c).state;
+      if (isnan(top) || isnan(bottom)) return NAN;
+      return top - bottom;
+
+binary_sensor:
+  - platform: template
+    id: dhw_mb_data_valid
+    name: "DHW MB data valid"
+    icon: mdi:database-check
+    device_class: connectivity
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      if (!id(dhw_mb_tank_top_c).has_state() || !id(dhw_mb_tank_bottom_c).has_state()) {
+        return false;
+      }
+      const float top = id(dhw_mb_tank_top_c).state;
+      const float bottom = id(dhw_mb_tank_bottom_c).state;
+      if (isnan(top) || isnan(bottom)) return false;
+      return true;
+
+  - platform: template
+    id: dhw_mb_plausibility_fault
+    name: "DHW MB plausibility fault"
+    icon: mdi:alert-octagon
+    device_class: problem
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      if (!id(dhw_mb_tank_top_c).has_state() || !id(dhw_mb_tank_bottom_c).has_state()) {
+        return true;
+      }
+      const float top = id(dhw_mb_tank_top_c).state;
+      const float bottom = id(dhw_mb_tank_bottom_c).state;
+      if (isnan(top) || isnan(bottom)) return true;
+      if (top < -20.0f || top > 95.0f || bottom < -20.0f || bottom > 95.0f) return true;
+      if ((top + 1.5f) < bottom) return true;
+      return false;
+
+text_sensor:
+  - platform: template
+    id: dhw_mb_diag_status
+    name: "DHW MB status"
+    icon: mdi:stethoscope
+    update_interval: 5s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      if (!id(dhw_mb_tank_top_c).has_state() || !id(dhw_mb_tank_bottom_c).has_state()) {
+        return std::string("NO_DATA");
+      }
+      const float top = id(dhw_mb_tank_top_c).state;
+      const float bottom = id(dhw_mb_tank_bottom_c).state;
+      if (isnan(top) || isnan(bottom)) return std::string("NAN");
+      if (top < -20.0f || top > 95.0f || bottom < -20.0f || bottom > 95.0f) {
+        return std::string("OUT_OF_RANGE");
+      }
+      if ((top + 1.5f) < bottom) return std::string("TOP_BELOW_BOTTOM");
+      return std::string("OK");

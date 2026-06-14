@@ -1,0 +1,394 @@
+# ==============================================================================
+# OpenQuatt - Supply Temperature Protection (per-HP, v0.32)
+# ==============================================================================
+#
+# Goal:
+#   Per-HP soft cap on the compressor level based on each HP's measured water-
+#   outlet temperature. Complements the system-wide `max_water_temp_limit_c`
+#   limiter (which proportionally rolls back P_target) with a *direct* level
+#   reduction per HP — so when one HP runs hot but the other is still cool,
+#   only the hot one throttles.
+#
+# Tier behaviour (per HP):
+#   - Below soft_c (default 55 °C): no action
+#   - soft_c..hard_c (55..58): cap level at current - reduce_levels (default 1)
+#   - hard_c..max_c (58..62): cap level at 0 (stop)
+#   - Hysteresis: once capped, must drop release_c below soft_c to lift
+#
+# Output:
+#   - oq_supply_temp_max_level_hp1 / hp2 — consumed by thermal_actuator
+#
+# Diagnostics:
+#   - Per-HP current cap value
+#   - Counters (soft / hard) per 24h and lifetime
+#   - Warning binary sensors
+# ==============================================================================
+
+globals:
+  - id: oq_supply_temp_max_level_hp1
+    type: int
+    restore_value: false
+    initial_value: '10'
+  - id: oq_supply_temp_max_level_hp2
+    type: int
+    restore_value: false
+    initial_value: '10'
+
+  # Hysteresis state (sticky cap that needs sufficient temp drop to release).
+  - id: oq_supply_temp_hp1_cap_active
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: oq_supply_temp_hp2_cap_active
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+  # Event counters
+  - id: oq_supply_temp_soft_events_24h
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: oq_supply_temp_hard_events_24h
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: oq_supply_temp_soft_events_total
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: oq_supply_temp_hard_events_total
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: oq_supply_temp_events_window_start_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+  - id: oq_supply_temp_hp1_prev_tier
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: oq_supply_temp_hp2_prev_tier
+    type: int
+    restore_value: false
+    initial_value: '0'
+
+  - id: oq_supply_temp_last_loop_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+switch:
+  - platform: template
+    id: oq_supply_temp_protection_enable
+    name: "Supply temp protection enable"
+    icon: mdi:thermometer-water
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    turn_on_action: []
+    turn_off_action: []
+    web_server:
+      sorting_group_id: oq_supply_temp_protection
+
+number:
+  # Soft cap — below this, no action.
+  - platform: template
+    id: oq_supply_temp_soft_c
+    name: "Supply temp soft cap"
+    icon: mdi:thermometer-chevron-up
+    unit_of_measurement: "°C"
+    min_value: 40.0
+    max_value: 65.0
+    step: 0.5
+    optimistic: true
+    restore_value: true
+    initial_value: 55.0
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_supply_temp_protection
+
+  # Hard cap — above this, force level 0.
+  - platform: template
+    id: oq_supply_temp_hard_c
+    name: "Supply temp hard cap"
+    icon: mdi:thermometer-alert
+    unit_of_measurement: "°C"
+    min_value: 50.0
+    max_value: 70.0
+    step: 0.5
+    optimistic: true
+    restore_value: true
+    initial_value: 58.0
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_supply_temp_protection
+
+  # Release hysteresis: re-allow normal operation once supply <= (soft - release_c).
+  - platform: template
+    id: oq_supply_temp_release_c
+    name: "Supply temp release hysteresis"
+    icon: mdi:waveform
+    unit_of_measurement: "K"
+    min_value: 0.5
+    max_value: 5.0
+    step: 0.5
+    optimistic: true
+    restore_value: true
+    initial_value: 2.0
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_supply_temp_protection
+
+  # Soft-cap level reduction (how many levels below current cap).
+  - platform: template
+    id: oq_supply_temp_reduce_levels
+    name: "Supply temp soft cap reduce levels"
+    icon: mdi:stairs-down
+    min_value: 1
+    max_value: 4
+    step: 1
+    optimistic: true
+    restore_value: true
+    initial_value: 1
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_supply_temp_protection
+
+button:
+  - platform: template
+    id: oq_supply_temp_reset_counters_button
+    name: "Supply temp reset event counters"
+    icon: mdi:restart
+    web_server:
+      sorting_group_id: oq_supply_temp_protection
+    on_press:
+      - lambda: |-
+          id(oq_supply_temp_soft_events_24h) = 0;
+          id(oq_supply_temp_hard_events_24h) = 0;
+          id(oq_supply_temp_soft_events_total) = 0;
+          id(oq_supply_temp_hard_events_total) = 0;
+          ESP_LOGI("oq_supply", "Supply temp event counters reset.");
+
+sensor:
+  - platform: template
+    id: oq_supply_temp_hp1_out_sensor
+    name: "Supply temp HP1 outlet"
+    icon: mdi:thermometer
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 10s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_supply_temp_protection
+    lambda: |-
+      return id(hp1_water_out_temp).has_state() ? id(hp1_water_out_temp).state : NAN;
+
+  - platform: template
+    id: oq_supply_temp_hp2_out_sensor
+    name: "Supply temp HP2 outlet"
+    icon: mdi:thermometer
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 10s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_supply_temp_protection
+    lambda: |-
+      #if OQ_TOPOLOGY_DUO
+      return id(hp2_water_out_temp).has_state() ? id(hp2_water_out_temp).state : NAN;
+      #else
+      return NAN;
+      #endif
+
+  - platform: template
+    id: oq_supply_temp_max_level_hp1_sensor
+    name: "Supply temp HP1 level cap"
+    icon: mdi:stairs
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 10s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_supply_temp_protection
+    lambda: |-
+      return (float) id(oq_supply_temp_max_level_hp1);
+
+  - platform: template
+    id: oq_supply_temp_max_level_hp2_sensor
+    name: "Supply temp HP2 level cap"
+    icon: mdi:stairs
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 10s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_supply_temp_protection
+    lambda: |-
+      #if OQ_TOPOLOGY_DUO
+      return (float) id(oq_supply_temp_max_level_hp2);
+      #else
+      return NAN;
+      #endif
+
+  - platform: template
+    id: oq_supply_temp_soft_events_24h_sensor
+    name: "Supply temp soft events 24h"
+    icon: mdi:thermometer-chevron-up
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_supply_temp_protection
+    lambda: |-
+      return (float) id(oq_supply_temp_soft_events_24h);
+
+  - platform: template
+    id: oq_supply_temp_hard_events_24h_sensor
+    name: "Supply temp hard events 24h"
+    icon: mdi:thermometer-alert
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_supply_temp_protection
+    lambda: |-
+      return (float) id(oq_supply_temp_hard_events_24h);
+
+binary_sensor:
+  - platform: template
+    id: oq_supply_temp_soft_warning_sensor
+    name: "Supply temp soft cap active"
+    icon: mdi:thermometer-chevron-up
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_supply_temp_protection
+    lambda: |-
+      return (id(oq_supply_temp_max_level_hp1) < 10) ||
+             (id(oq_supply_temp_max_level_hp2) < 10);
+
+  - platform: template
+    id: oq_supply_temp_hard_warning_sensor
+    name: "Supply temp hard cap active"
+    icon: mdi:thermometer-alert
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_supply_temp_protection
+    lambda: |-
+      return (id(oq_supply_temp_max_level_hp1) == 0) ||
+             (id(oq_supply_temp_max_level_hp2) == 0);
+
+interval:
+  - interval: 5s
+    startup_delay: 14000ms
+    then:
+      - lambda: |-
+          const uint32_t now_ms = (uint32_t) millis();
+          const uint32_t prev_ms = id(oq_supply_temp_last_loop_ms);
+          float dt_s = 5.0f;
+          if (prev_ms > 0 && now_ms > prev_ms) {
+            dt_s = (float)(now_ms - prev_ms) / 1000.0f;
+            if (dt_s < 1.0f) dt_s = 1.0f;
+            if (dt_s > 60.0f) dt_s = 60.0f;
+          }
+          id(oq_supply_temp_last_loop_ms) = now_ms;
+          (void) dt_s;  // reserved for future EMA usage
+
+          const bool enabled = id(oq_supply_temp_protection_enable).state;
+          const float soft_c = id(oq_supply_temp_soft_c).state;
+          const float hard_c = id(oq_supply_temp_hard_c).state;
+          const float release_c = id(oq_supply_temp_release_c).state;
+          int reduce = (int) roundf(id(oq_supply_temp_reduce_levels).state);
+          if (reduce < 1) reduce = 1;
+          if (reduce > 4) reduce = 4;
+
+          // Classify per-HP temperature into tier. Includes hysteresis: once
+          // a cap is active, the supply must drop below (soft_c - release_c)
+          // before the cap releases. This avoids hunting at the threshold.
+          auto classify = [&](float t_out_c, bool prev_cap_active)->int {
+            if (isnan(t_out_c) || t_out_c <= 0.0f) return 0;
+            // Hard tier: hard_c and above → force stop.
+            if (t_out_c >= hard_c) return 2;
+            // Soft tier: between soft_c and hard_c → reduce level.
+            if (t_out_c >= soft_c) return 1;
+            // Below soft_c. If currently capped, hold until release threshold.
+            if (prev_cap_active && t_out_c > (soft_c - release_c)) return 1;
+            return 0;
+          };
+
+          auto apply_cap = [&](int tier)->int {
+            if (!enabled) return 10;
+            switch (tier) {
+              case 2: return 0;            // hard → stop
+              case 1: {                    // soft → reduce
+                int cap = 10 - reduce;
+                if (cap < 1) cap = 1;
+                return cap;
+              }
+              default: return 10;
+            }
+          };
+
+          // ----- HP1 -----
+          const float hp1_out_c = id(hp1_water_out_temp).has_state()
+              ? id(hp1_water_out_temp).state : NAN;
+          const int tier1 = classify(hp1_out_c, id(oq_supply_temp_hp1_cap_active));
+          id(oq_supply_temp_max_level_hp1) = apply_cap(tier1);
+          id(oq_supply_temp_hp1_cap_active) = (tier1 > 0);
+
+          // Edge-detect events (rising-edge counted only).
+          const int prev_tier1 = id(oq_supply_temp_hp1_prev_tier);
+          if (tier1 > prev_tier1) {
+            if (tier1 == 2) {
+              id(oq_supply_temp_hard_events_24h) += 1;
+              id(oq_supply_temp_hard_events_total) += 1;
+              ESP_LOGW("oq_supply", "HP1 hard cap at %.1f °C — forcing level 0.", hp1_out_c);
+            } else if (tier1 == 1) {
+              id(oq_supply_temp_soft_events_24h) += 1;
+              id(oq_supply_temp_soft_events_total) += 1;
+              ESP_LOGI("oq_supply", "HP1 soft cap at %.1f °C — reducing level.", hp1_out_c);
+            }
+          }
+          id(oq_supply_temp_hp1_prev_tier) = tier1;
+
+          // ----- HP2 -----
+          #if OQ_TOPOLOGY_DUO
+          const float hp2_out_c = id(hp2_water_out_temp).has_state()
+              ? id(hp2_water_out_temp).state : NAN;
+          const int tier2 = classify(hp2_out_c, id(oq_supply_temp_hp2_cap_active));
+          id(oq_supply_temp_max_level_hp2) = apply_cap(tier2);
+          id(oq_supply_temp_hp2_cap_active) = (tier2 > 0);
+
+          const int prev_tier2 = id(oq_supply_temp_hp2_prev_tier);
+          if (tier2 > prev_tier2) {
+            if (tier2 == 2) {
+              id(oq_supply_temp_hard_events_24h) += 1;
+              id(oq_supply_temp_hard_events_total) += 1;
+              ESP_LOGW("oq_supply", "HP2 hard cap at %.1f °C — forcing level 0.", hp2_out_c);
+            } else if (tier2 == 1) {
+              id(oq_supply_temp_soft_events_24h) += 1;
+              id(oq_supply_temp_soft_events_total) += 1;
+              ESP_LOGI("oq_supply", "HP2 soft cap at %.1f °C — reducing level.", hp2_out_c);
+            }
+          }
+          id(oq_supply_temp_hp2_prev_tier) = tier2;
+          #else
+          id(oq_supply_temp_max_level_hp2) = 10;
+          #endif
+
+          // ----- 24h window reset -----
+          if (id(oq_supply_temp_events_window_start_ms) == 0) {
+            id(oq_supply_temp_events_window_start_ms) = now_ms;
+          }
+          if ((uint32_t)(now_ms - id(oq_supply_temp_events_window_start_ms)) >= 86400000UL) {
+            id(oq_supply_temp_soft_events_24h) = 0;
+            id(oq_supply_temp_hard_events_24h) = 0;
+            id(oq_supply_temp_events_window_start_ms) = now_ms;
+          }

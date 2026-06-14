@@ -660,7 +660,7 @@ interval:
           auto publish_debug = [&](int req1, int req2, int app1, int app2)->void {
             static std::string last_debug = "";
             const char *mode_s = is_cooling_mode ? "COOL" : (is_curve_mode ? "CURVE" : "PH");
-            const int phase_code = id(oq_curve_phase_code);
+            const int phase_code = id(oq_strategy_phase_code);
             const char *phase_s = "OFF";
             if (phase_code == 1) phase_s = "HEAT";
             else if (phase_code == 2) phase_s = "COAST";
@@ -673,7 +673,7 @@ interval:
             const float room_sp_c = id(room_setpoint_selected).state;
             const float phouse_w = id(oq_phouse_house_w).state;
             const float preq_w = id(oq_phouse_req_w);
-            const float room_target_c = id(oq_ph_room_target_effective_c);
+            const float room_target_c = room_sp_c + id(oq_phouse_comfort_memory_c);
             const float tout_c = id(outside_temp_selected).state;
             const float wm1 = id(hp1_working_mode).state;
             float wm2 = 0.0f;

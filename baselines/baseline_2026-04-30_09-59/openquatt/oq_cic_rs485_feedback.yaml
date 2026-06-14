@@ -1,0 +1,148 @@
+# ==============================================================================
+# OpenQuatt - CIC RS485 Feedback (Read-only sniffer on RS485 #2)
+# ==============================================================================
+# Maps HP address bytes to OpenQuatt HP identities from oq_HP_io.yaml:
+# - HP1 -> address 0x01
+# - HP2 -> address 0x02
+# ==============================================================================
+
+globals:
+  - id: cic_modbus_frame_counter
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: cic_modbus_hp1_frame_counter
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: cic_modbus_hp2_frame_counter
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+uart:
+  - id: cic_rs485_mirror_uart
+    # RS485 #2 on T-Connect: TX_2=GPIO6, RX_2=GPIO7.
+    # This UART receives mirrored RX frames from Modbus1 and can be monitored on RX.
+    # No Modbus master/controller is defined on this port.
+    tx_pin: ${cic_rs4852_tx_pin}
+    rx_pin: ${cic_rs4852_rx_pin}
+    baud_rate: 19200
+    data_bits: 8
+    parity: EVEN
+    stop_bits: 1
+    rx_full_threshold: 1
+    rx_timeout: 2
+    debug:
+      direction: RX
+      dummy_receiver: true
+      after:
+        timeout: 12ms
+      sequence:
+        - lambda: |-
+            if (bytes.empty()) {
+              return;
+            }
+
+            auto to_hex = [](const std::vector<uint8_t> &data) -> std::string {
+              static const char *hex = "0123456789ABCDEF";
+              std::string out;
+              out.reserve(data.size() * 3U);
+              for (size_t i = 0; i < data.size(); i++) {
+                const uint8_t b = data[i];
+                out.push_back(hex[(b >> 4) & 0x0F]);
+                out.push_back(hex[b & 0x0F]);
+                if (i + 1 < data.size()) out.push_back(' ');
+              }
+              return out;
+            };
+
+            id(cic_modbus_frame_counter)++;
+
+            const uint8_t addr = bytes[0];
+            const uint8_t fn = bytes.size() > 1 ? bytes[1] : 0;
+            const std::string frame_hex = to_hex(bytes);
+
+            char summary[96];
+            snprintf(
+              summary, sizeof(summary),
+              "addr=0x%02X fn=0x%02X len=%u", addr, fn, (unsigned) bytes.size()
+            );
+
+            id(cic_rs485_last_frame_hex).publish_state(frame_hex);
+            id(cic_rs485_last_frame_summary).publish_state(summary);
+            id(cic_modbus_frames_total).publish_state((float) id(cic_modbus_frame_counter));
+
+            if (addr == 0x01) {
+              id(cic_modbus_hp1_frame_counter)++;
+              id(cic_rs485_hp1_last_frame_hex).publish_state(frame_hex);
+              id(cic_modbus_frames_hp1).publish_state((float) id(cic_modbus_hp1_frame_counter));
+            } else if (addr == 0x02) {
+              id(cic_modbus_hp2_frame_counter)++;
+              id(cic_rs485_hp2_last_frame_hex).publish_state(frame_hex);
+              id(cic_modbus_frames_hp2).publish_state((float) id(cic_modbus_hp2_frame_counter));
+            }
+
+sensor:
+  - platform: template
+    id: cic_modbus_frames_total
+    name: "CIC - RS485 Frames (Total)"
+    icon: mdi:counter
+    state_class: total_increasing
+    accuracy_decimals: 0
+    update_interval: never
+    web_server:
+      sorting_group_id: oq_cic
+
+  - platform: template
+    id: cic_modbus_frames_hp1
+    name: "CIC - RS485 Frames HP1 (addr 0x01)"
+    icon: mdi:counter
+    state_class: total_increasing
+    accuracy_decimals: 0
+    update_interval: never
+    web_server:
+      sorting_group_id: oq_cic
+
+  - platform: template
+    id: cic_modbus_frames_hp2
+    name: "CIC - RS485 Frames HP2 (addr 0x02)"
+    icon: mdi:counter
+    state_class: total_increasing
+    accuracy_decimals: 0
+    update_interval: never
+    web_server:
+      sorting_group_id: oq_cic
+
+text_sensor:
+  - platform: template
+    id: cic_rs485_last_frame_summary
+    name: "CIC - RS485 Last Frame Summary"
+    icon: mdi:file-document-outline
+    update_interval: never
+    web_server:
+      sorting_group_id: oq_cic
+
+  - platform: template
+    id: cic_rs485_last_frame_hex
+    name: "CIC - RS485 Last Frame HEX"
+    icon: mdi:code-braces
+    update_interval: never
+    web_server:
+      sorting_group_id: oq_cic
+
+  - platform: template
+    id: cic_rs485_hp1_last_frame_hex
+    name: "CIC - RS485 Last HP1 Frame HEX"
+    icon: mdi:heat-pump-outline
+    update_interval: never
+    web_server:
+      sorting_group_id: oq_cic
+
+  - platform: template
+    id: cic_rs485_hp2_last_frame_hex
+    name: "CIC - RS485 Last HP2 Frame HEX"
+    icon: mdi:heat-pump-outline
+    update_interval: never
+    web_server:
+      sorting_group_id: oq_cic

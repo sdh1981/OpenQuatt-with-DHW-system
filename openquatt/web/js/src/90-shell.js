@@ -21,7 +21,7 @@
       <section class="oq-helper-panel">
         <p class="oq-helper-label">OpenQuatt</p>
         <h2 class="oq-helper-section-title">Interface laden</h2>
-        <p class="oq-helper-section-copy">We bepalen eerst even of Quick Start al is afgerond, zodat je direct op de juiste plek binnenkomt.</p>
+        <p class="oq-helper-section-copy">We laden de belangrijkste statuswaarden, zodat je direct in het overzicht binnenkomt.</p>
       </section>
     `;
   }
@@ -55,7 +55,9 @@
       ? renderEnergyView()
       : state.appView === "settings"
         ? renderSettingsView()
-        : `
+        : state.appView === "service"
+          ? renderServiceView()
+          : `
           <div class="oq-helper-grid oq-helper-grid--quickstart">
             ${renderActiveStep()}
             ${renderQuickStartSidebar()}
@@ -92,6 +94,11 @@
     clearLegacyMotionVariables();
     syncTechTooltipLayers();
     refreshMotionTargets();
+    if (shouldAnimateMotion()) {
+      startMotionLoop();
+    } else {
+      stopMotionLoop();
+    }
     syncNativeVisibility();
     bindHeaderDevControls();
     syncDocumentTheme();

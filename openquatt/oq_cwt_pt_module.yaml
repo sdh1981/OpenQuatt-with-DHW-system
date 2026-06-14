@@ -1,0 +1,198 @@
+# ==============================================================================
+# OpenQuatt - CWT-TM-8PT 8-channel PT1000 module on Modbus RTU bus 3
+# ==============================================================================
+# Hardware: ComWinTop CWT-TM-8PT, 8x PT100/PT1000 inputs, Modbus RTU
+# Default factory config: 9600 8N1, slave ID = 1
+# Power: DC 8-30V (typically wired to LilyGo's 12V or external 24V rail)
+#
+# Register map (from CWT manual):
+#   - UINT16 (scale 0.1°C):  addresses 0x68..0x6F  (104..111 decimal)
+#       Channel 1: 0x68 = 104
+#       Channel 2: 0x69 = 105
+#       Channel 3: 0x6A = 106
+#       Channel 4: 0x6B = 107
+#       Channel 5: 0x6C = 108
+#       Channel 6: 0x6D = 109
+#       Channel 7: 0x6E = 110
+#       Channel 8: 0x6F = 111
+#   - Float32 (IEEE):  addresses 0x30..0x3E (not used here)
+#
+# We use UINT16 with S_WORD (signed) and multiply: 0.1 to support negative
+# temperatures down to -180°C if ever needed (frost protection etc.).
+#
+# Channel assignment in this build:
+#   Channel 1: DHW Tank Top       (replaces external Dallas-bridge reg 2133)
+#   Channel 2: DHW Tank Bottom    (replaces external Dallas-bridge reg 2134)
+#   Channel 3: DHW Coil In        (replaces local MAX31865 chip)
+#   Channel 4: DHW Coil Out       (replaces local MAX31865 chip)
+#   Channel 5: T-Aanvoer (CV supply water temperature, PT1000)
+#   Channel 6: Spare 2 (e.g. buffer bottom)
+#   Channel 7: Spare 3 (e.g. floor supply)
+#   Channel 8: Spare 4 (e.g. floor return)
+# ==============================================================================
+
+uart:
+  - id: uart_rs485_3
+    tx_pin: ${dhw_rs4853_tx_pin}
+    rx_pin: ${dhw_rs4853_rx_pin}
+    baud_rate: 9600
+    data_bits: 8
+    stop_bits: 1
+    parity: NONE
+    rx_full_threshold: 1
+    rx_timeout: 1
+
+modbus:
+  - uart_id: uart_rs485_3
+    id: mod_bus_3
+    send_wait_time: 150ms
+
+modbus_controller:
+  - id: cwt_pt_module
+    address: 1
+    modbus_id: mod_bus_3
+    update_interval: 5s
+    command_throttle: 80ms
+    max_cmd_retries: 1
+    offline_skip_updates: 2
+    setup_priority: -10
+
+sensor:
+  - platform: modbus_controller
+    modbus_controller_id: cwt_pt_module
+    id: cwt_pt_ch1_c
+    name: "CWT Ch1 — DHW Tank Top"
+    register_type: holding
+    address: 0x68
+    value_type: S_WORD
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: cwt_pt_module
+    id: cwt_pt_ch2_c
+    name: "CWT Ch2 — DHW Tank Bottom"
+    register_type: holding
+    address: 0x69
+    value_type: S_WORD
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: cwt_pt_module
+    id: cwt_pt_ch3_c
+    name: "CWT Ch3 — DHW Coil In"
+    register_type: holding
+    address: 0x6A
+    value_type: S_WORD
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: cwt_pt_module
+    id: cwt_pt_ch4_c
+    name: "CWT Ch4 — DHW Coil Out"
+    register_type: holding
+    address: 0x6B
+    value_type: S_WORD
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: cwt_pt_module
+    id: cwt_pt_ch5_c
+    name: "CWT Ch5 — T-Aanvoer"
+    register_type: holding
+    address: 0x6C
+    value_type: S_WORD
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_temperatures
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: cwt_pt_module
+    id: cwt_pt_ch6_c
+    name: "CWT Ch6 — Spare 2"
+    register_type: holding
+    address: 0x6D
+    value_type: S_WORD
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    disabled_by_default: true
+    web_server:
+      sorting_group_id: oq_boiler
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: cwt_pt_module
+    id: cwt_pt_ch7_c
+    name: "CWT Ch7 — Spare 3"
+    register_type: holding
+    address: 0x6E
+    value_type: S_WORD
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    disabled_by_default: true
+    web_server:
+      sorting_group_id: oq_boiler
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: cwt_pt_module
+    id: cwt_pt_ch8_c
+    name: "CWT Ch8 — Spare 4"
+    register_type: holding
+    address: 0x6F
+    value_type: S_WORD
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    disabled_by_default: true
+    web_server:
+      sorting_group_id: oq_boiler
+    filters:
+      - multiply: 0.1

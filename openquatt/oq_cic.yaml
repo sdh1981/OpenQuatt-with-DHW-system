@@ -46,7 +46,11 @@ text:
     mode: text
     optimistic: true
     restore_value: true
-    initial_value: "http://192.168.2.117:8080/beta/feed/data.json"
+    # Default wijst naar de CIC in dit huis (DHCP-reservering aanbevolen) zodat
+    # de feed ook na een factory flash direct werkt zonder handmatige config.
+    # restore_value: de URL wordt opgeslagen in flash en kan via HA of het
+    # webserver-UI worden aangepast zonder hercompileren of her-flashen.
+    initial_value: "http://192.168.1.177:8080/beta/feed/data.json"
     web_server:
       sorting_group_id: oq_cic
 

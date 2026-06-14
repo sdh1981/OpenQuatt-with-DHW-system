@@ -55,6 +55,81 @@ sensor:
     web_server:
       sorting_group_id: oq_ha_inputs
 
+  # Optional: outdoor temperature forecast 1-3h ahead. Used by Power House
+  # preheat / pre-conditioning logic. If the entity does not exist in HA,
+  # this stays unset and preheat falls back to current Tout.
+  - platform: homeassistant
+    id: outside_temp_forecast_ha
+    name: "HA - Outside Temperature Forecast"
+    entity_id: ${ha_outside_temp_forecast_entity_id}
+    internal: false
+    icon: mdi:weather-partly-cloudy
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    web_server:
+      sorting_group_id: oq_ha_inputs
+
+  # Optional: upcoming room setpoint (e.g. next hour from a schedule).
+  # Used by Power House preheat to anticipate setback-up transitions.
+  - platform: homeassistant
+    id: room_setpoint_next_ha
+    name: "HA - Room Setpoint Next"
+    entity_id: ${ha_room_setpoint_next_entity_id}
+    internal: false
+    icon: mdi:thermostat-auto
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    web_server:
+      sorting_group_id: oq_ha_inputs
+
+  # Optional: current dynamic electricity tariff [EUR/kWh].
+  # Used by Power House tariff-aware setpoint shift / throttle.
+  - platform: homeassistant
+    id: electricity_tariff_now_ha
+    name: "HA - Electricity Tariff Now"
+    entity_id: ${ha_electricity_tariff_now_entity_id}
+    internal: false
+    icon: mdi:currency-eur
+    unit_of_measurement: "EUR/kWh"
+    state_class: measurement
+    accuracy_decimals: 4
+    web_server:
+      sorting_group_id: oq_ha_inputs
+
+  # Optional: 24h average dynamic tariff. Used as reference to compute the
+  # relative-cost ratio (now / avg24). If absent, the strategy uses the running
+  # average it computes itself.
+  - platform: homeassistant
+    id: electricity_tariff_avg24_ha
+    name: "HA - Electricity Tariff Avg 24h"
+    entity_id: ${ha_electricity_tariff_avg24_entity_id}
+    internal: false
+    icon: mdi:currency-eur
+    unit_of_measurement: "EUR/kWh"
+    state_class: measurement
+    accuracy_decimals: 4
+    web_server:
+      sorting_group_id: oq_ha_inputs
+
+  # Optional: grid net power [W]. Negative = export to grid, positive = import.
+  # Used by PV self-consumption boost.
+  - platform: homeassistant
+    id: grid_net_power_ha
+    name: "HA - Grid Net Power"
+    entity_id: ${ha_grid_net_power_entity_id}
+    internal: false
+    icon: mdi:transmission-tower-export
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    web_server:
+      sorting_group_id: oq_ha_inputs
+
   - platform: homeassistant
     id: thermostat_room_temp_ha
     name: "HA - Thermostat Room Temperature"

@@ -51,7 +51,7 @@
   function formatComponentPositionLabel(key) {
     const entity = state.entities[key];
     if (!entity) {
-      return "Positie: â€”";
+      return "Positie: -";
     }
     const numeric = getEntityNumericValue(key);
     if (!Number.isNaN(numeric)) {
@@ -62,7 +62,7 @@
 
   function formatFourWayPositionLabel(key) {
     if (!hasEntity(key)) {
-      return "Positie: â€”";
+      return "Positie: -";
     }
     return `Positie: ${isEntityActive(key) ? "Koelen/Defrost" : "Verwarmen"}`;
   }
@@ -808,6 +808,7 @@
           <div class="oq-overview-main">
             ${renderOverviewNarrativePanel(getOverviewStrategySectionModel())}
             ${renderOverviewTempsPanel()}
+            ${renderOverviewAdvisorPanel()}
           </div>
           ${heatPumpControls ? `<div class="oq-overview-hp-tools">${heatPumpControls}</div>` : ""}
           <div class="oq-overview-hp-grid ${heatPumpPanels.length === 1 ? "oq-overview-hp-grid--single" : ""} ${heatPumpPanels.length > 1 ? `oq-overview-hp-grid--${hpLayoutMode}` : ""}">
@@ -993,7 +994,7 @@
     });
   }
 
-  function patchHeatPumpPanel(panel, title, keys, accent, layoutAction = null, runtime = null) {
+  function patchHeatPumpPanel(panel, title, keys, accent, layoutAction = null, runtime = null, options = {}) {
     if (!panel) {
       return;
     }
@@ -1098,7 +1099,9 @@
       updatePipeGroup(board, id.replace(/[A-Z]/g, (match) => `-${match.toLowerCase()}`), pipe.tone, pipe.d);
     });
     ensureTechTooltipLayering(board);
-    refreshMotionTargets();
+    if (options.refreshMotionTargets !== false) {
+      refreshMotionTargets();
+    }
   }
 
   function patchOverviewDom() {
@@ -1115,10 +1118,15 @@
     const summaryShell = board.querySelector(".oq-overview-summary-shell");
     const system = board.querySelector(".oq-overview-system");
     const temps = board.querySelector(".oq-overview-temps");
+    const advisor = board.querySelector(".oq-overview-advisor");
     const dhw = board.querySelector(".oq-overview-dhw");
     const hpTools = board.querySelector(".oq-overview-hp-tools");
     const hpGrid = board.querySelector(".oq-overview-hp-grid");
     const heatPumpPanels = getHeatPumpPanels();
+    const strategySectionModel = getOverviewStrategySectionModel();
+    const tempsModel = getOverviewTempsModel();
+    const nextDhwModel = getOverviewDhwModel();
+    const nextDhwMarkup = nextDhwModel ? renderOverviewDhwPanel() : "";
 
     if (summaryShell) {
       const top = summaryShell.querySelector(".oq-overview-top");
@@ -1149,30 +1157,34 @@
     if (system) {
       replaceOuterHtmlIfSignatureChanged(
         system,
-        getRenderSignature(getOverviewStrategySectionModel()),
-        renderOverviewNarrativePanel(getOverviewStrategySectionModel()),
+        getRenderSignature(strategySectionModel),
+        renderOverviewNarrativePanel(strategySectionModel),
       );
     }
 
     if (temps) {
       replaceOuterHtmlIfSignatureChanged(
         temps,
-        getRenderSignature(getOverviewTempsModel()),
+        getRenderSignature(tempsModel),
         renderOverviewTempsPanel(),
       );
     }
 
-    const nextDhwMarkup = renderOverviewDhwPanel();
+    if (advisor) {
+      replaceOuterHtmlIfSignatureChanged(
+        advisor,
+        getRenderSignature(getOverviewAdvisorModel()),
+        renderOverviewAdvisorPanel(),
+      );
+    }
+
     if (dhw) {
       if (nextDhwMarkup) {
-        const nextDhwModel = getOverviewDhwModel();
-        if (nextDhwModel) {
-          replaceOuterHtmlIfSignatureChanged(
-            dhw,
-            getRenderSignature(nextDhwModel),
-            nextDhwMarkup,
-          );
-        }
+        replaceOuterHtmlIfSignatureChanged(
+          dhw,
+          getRenderSignature(nextDhwModel),
+          nextDhwMarkup,
+        );
       } else {
         dhw.remove();
       }
@@ -1193,14 +1205,25 @@
 
     const hpLayoutMode = getEffectiveHpLayoutMode(heatPumpPanels);
     setVariantClass(hpGrid, "oq-overview-hp-grid--", heatPumpPanels.length === 1 ? "single" : hpLayoutMode, ["single", "equal", "focus-hp1", "focus-hp2"]);
+    const panelNodes = Array.from(renderedPanels);
+    const panelNodeByTitle = new Map(panelNodes.map((node) => [node.getAttribute("data-oq-hp-panel"), node]));
     heatPumpPanels.forEach((panel, index) => {
-      const panelNode = board.querySelector(`[data-oq-hp-panel="${panel.title}"]`);
+      const panelNode = panelNodeByTitle.get(panel.title);
       if (panelNode) {
         const runtime = getHeatPumpRuntimeModel(panel.title, panel.keys, panel.accent);
         setVariantClass(panelNode, "oq-overview-hp--", getHeatPumpPanelEmphasis(index, heatPumpPanels, hpLayoutMode), ["normal", "focus", "muted"]);
-        patchHeatPumpPanel(panelNode, panel.title, panel.keys, panel.accent, getHeatPumpPanelLayoutAction(index, heatPumpPanels, hpLayoutMode), runtime);
+        patchHeatPumpPanel(
+          panelNode,
+          panel.title,
+          panel.keys,
+          panel.accent,
+          getHeatPumpPanelLayoutAction(index, heatPumpPanels, hpLayoutMode),
+          runtime,
+          { refreshMotionTargets: false },
+        );
       }
     });
+    refreshMotionTargets();
 
     return true;
   }

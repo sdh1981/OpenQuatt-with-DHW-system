@@ -288,8 +288,8 @@
   function applyDerivedState() {
     state.complete = hasEntity("setupComplete")
       ? isEntityActive("setupComplete")
-      : false;
-    state.stage = state.complete ? "Gereed" : "Quick Start";
+      : true;
+    state.stage = "Gereed";
     state.summary = renderAppSummary();
     if (!state.appView) {
       setAppView(getUrlAppView() || getDefaultAppView(), { syncMode: "replace", forceSync: true });
@@ -320,7 +320,9 @@
       ? [...OVERVIEW_KEYS, ...HEADER_ENTITY_KEYS, "setupComplete", ...FIRMWARE_ENTITY_KEYS]
       : state.appView === "settings"
         ? ["setupComplete", ...FIRMWARE_ENTITY_KEYS, ...HEADER_ENTITY_KEYS, ...SETTINGS_KEYS]
-        : [
+        : state.appView === "service"
+          ? [...CAL_ENTITY_KEYS, ...HEADER_ENTITY_KEYS, "setupComplete", ...FIRMWARE_ENTITY_KEYS]
+          : [
             "setupComplete",
             ...FIRMWARE_ENTITY_KEYS,
             ...HEADER_ENTITY_KEYS,
@@ -786,6 +788,24 @@
 
     if (action === "apply" || action === "reset") {
       triggerButton(action);
+      return;
+    }
+
+    // Sensor calibration actions
+    if (action === "cal-start") {
+      void triggerNamedButton("calStart", { refreshKeys: CAL_ENTITY_KEYS });
+      return;
+    }
+    if (action === "cal-stop") {
+      void triggerNamedButton("calStop", { refreshKeys: CAL_ENTITY_KEYS });
+      return;
+    }
+    if (action === "cal-apply") {
+      void triggerNamedButton("calApply", { refreshKeys: CAL_ENTITY_KEYS });
+      return;
+    }
+    if (action === "cal-reset") {
+      void triggerNamedButton("calReset", { refreshKeys: CAL_ENTITY_KEYS });
       return;
     }
 
@@ -1302,4 +1322,3 @@
       </article>
     `;
   }
-

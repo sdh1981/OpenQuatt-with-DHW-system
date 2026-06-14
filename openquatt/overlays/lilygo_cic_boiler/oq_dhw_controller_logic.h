@@ -28,8 +28,22 @@ enum class Fault : uint8_t {
 struct Config {
   float start_top_c = 46.0f;
   float hp_stop_top_c = 49.0f;
+  // When stop_on_bottom_enable=true, the regular DHW HP cycle uses tank_bottom_c
+  // instead of tank_top_c for the HP stop check. This forces longer cycles that
+  // fully reheat the tank — better COP (longer low-lift run), much more usable
+  // hot water per cycle, and natural legionella suppression because the cold
+  // bottom zone gets heated through every cycle.
+  bool  stop_on_bottom_enable = true;   // Hard-enabled per user requirement
+  float hp_stop_bottom_c = 52.0f;        // Hard-coded per user requirement (option C)
+  // v0.40 temp: tijdens legionella-run de klep op DHW-stand HOUDEN (i.p.v.
+  // terugzetten naar CV tijdens de element-only fase). Hiermee blijft de
+  // pomp het tankwater door de DHW-spiraal circuleren → mixing → uniforme
+  // legionella-pasteurisatie. Te disabelen zodra een fysieke circulatiepomp
+  // tussen top en bottom van de tank is geïnstalleerd.
+  bool  legionella_use_coil_circulation = true;
   float boost_target_c = 56.0f;
-  float legionella_target_c = 61.0f;
+  float legionella_target_c = 68.0f;  // Inventum boiler vereiste: 68°C
+  float legionella_hp_stop_top_c = 53.0f;  // HP handover temp during legionella (element finishes the rest)
   float hp_target_flow_c = 55.0f;
 
   float temp_min_c = -10.0f;
@@ -72,6 +86,11 @@ struct Inputs {
 
   bool solar_boost_request = false;
   bool legionella_force_request = false;
+
+  // Set to true once the persistent legionella timestamp has been seeded from
+  // flash/NTP. The controller waits for this before scheduling automatic runs
+  // to avoid triggering on stale millis() immediately after boot.
+  bool legionella_seeded = false;
 };
 
 struct Outputs {
@@ -210,8 +229,18 @@ class Controller {
         }
         break;
 
-      case State::DHW_HEAT_PUMP:
-        if (in.tank_top_c >= cfg.hp_stop_top_c || elapsed_in_state_(in.now_ms) >= cfg.hp_max_runtime_ms) {
+      case State::DHW_HEAT_PUMP: {
+        // Decide which tank sensor drives the HP stop. Bottom-based stop
+        // (when enabled and bottom sensor is plausible) ensures the full tank
+        // is reheated through every cycle. Falls back to top-stop transparently
+        // if the bottom sensor is missing/implausible.
+        bool stop_temp_reached = false;
+        if (cfg.stop_on_bottom_enable && plausible_temp_(in.tank_bottom_c, cfg)) {
+          stop_temp_reached = (in.tank_bottom_c >= cfg.hp_stop_bottom_c);
+        } else {
+          stop_temp_reached = (in.tank_top_c >= cfg.hp_stop_top_c);
+        }
+        if (stop_temp_reached || elapsed_in_state_(in.now_ms) >= cfg.hp_max_runtime_ms) {
           if (cfg.enable_boost_after_hp && in.tank_top_c < cfg.boost_target_c) {
             transition_(State::DHW_BOOST, in.now_ms);
           } else {
@@ -220,6 +249,7 @@ class Controller {
           }
         }
         break;
+      }
 
       case State::DHW_BOOST:
         if (in.tank_top_c >= cfg.boost_target_c) {
@@ -247,8 +277,18 @@ class Controller {
       return out;
     }
 
-    out.valve_to_boiler = (state_ != State::IDLE_CV);
-    out.block_cv_priority = (state_ != State::IDLE_CV);
+    // During legionella element-only phase (HP done, element finishes to target):
+    // historically we released the valve to CV. v0.40 temp: when
+    // legionella_use_coil_circulation is true (default, no physical circ pump),
+    // we KEEP the valve on DHW throughout the entire legionella run so the
+    // OpenQuatt pump can circulate tank water through the DHW coil — this
+    // mixes the tank and ensures uniform pasteurisation. Set the config flag
+    // to false once a real circulation pump between top and bottom is fitted.
+    const bool legionella_element_only = (state_ == State::LEGIONELLA && hp_phase_done_);
+    const bool release_valve = legionella_element_only && !cfg.legionella_use_coil_circulation;
+
+    out.valve_to_boiler   = (state_ != State::IDLE_CV) && !release_valve;
+    out.block_cv_priority = (state_ != State::IDLE_CV) && !release_valve;
 
     if (state_ == State::DHW_HEAT_PUMP) {
       out.hp_dhw_request = true;
@@ -262,15 +302,26 @@ class Controller {
     const float element_target_c = (state_ == State::LEGIONELLA) ? cfg.legionella_target_c : cfg.boost_target_c;
     const bool element_state_allowed = (state_ == State::DHW_BOOST || state_ == State::LEGIONELLA);
 
+    // Element control: if klep wordt teruggezet naar CV tijdens element-only
+    // (release_valve = true), dan moet element ook draaien zonder boiler-bevestiging.
+    // Met de coil-circulation fix (default ON) staat klep op DHW → reguliere
+    // valve_confirms_boiler check werkt gewoon.
+    const bool element_valve_ok = release_valve || valve_confirms_boiler;
+
     out.element_on =
         element_state_allowed &&
-        valve_confirms_boiler &&
+        element_valve_ok &&
         !in.lockout_active &&
         !in.hp_fault_active &&
         in.tank_top_c < element_target_c;
 
-    if ((state_ == State::DHW_HEAT_PUMP || state_ == State::DHW_BOOST || state_ == State::LEGIONELLA) &&
-        in.valve_feedback_valid && in.valve_feedback_cv) {
+    // Valve mismatch fault: only check when the valve is supposed to be in boiler
+    // position. Tijdens release_valve staat klep bewust in CV → mismatch oké.
+    const bool valve_should_be_boiler =
+        (state_ == State::DHW_HEAT_PUMP) ||
+        (state_ == State::DHW_BOOST) ||
+        (state_ == State::LEGIONELLA && !release_valve);
+    if (valve_should_be_boiler && in.valve_feedback_valid && in.valve_feedback_cv) {
       if (valve_mismatch_since_ms_ == 0) valve_mismatch_since_ms_ = in.now_ms;
       if ((in.now_ms - valve_mismatch_since_ms_) >= cfg.valve_mismatch_fault_ms) {
         latch_fault_(Fault::VALVE_MISMATCH, in.now_ms);
@@ -376,8 +427,16 @@ class Controller {
   bool should_start_legionella_(const Inputs &in, const Config &cfg) const {
     if (fault_latched_ || in.lockout_active || in.hp_fault_active) return false;
     if (in.legionella_force_request) return true;
-    if (cfg.legionella_interval_ms == 0 || in.now_ms < cfg.legionella_interval_ms) return false;
-    if (legionella_last_done_ms_ == 0) return true;
+    if (cfg.legionella_interval_ms == 0) return false;
+    // Wait until the persistent timestamp has been seeded (NTP + flash restore).
+    // This replaces the old `now_ms < interval` uptime guard which incorrectly
+    // blocked legionella scheduling after every reboot/OTA.
+    if (!in.legionella_seeded) return false;
+    // Never done: schedule after a short boot-settle period (30 min) so that
+    // the system is stable before the first legionella run.
+    if (legionella_last_done_ms_ == 0) {
+      return in.now_ms >= (30UL * 60UL * 1000UL);
+    }
     return (in.now_ms - legionella_last_done_ms_) >= cfg.legionella_interval_ms;
   }
 
@@ -387,15 +446,30 @@ class Controller {
       return;
     }
 
+    // v0.40: Legionella checks gebruiken tank_bottom_c (zonder kraan: tank
+    // bottom is de moeilijkst te verwarmen zone). Als bottom op pasteurisatie-
+    // temperatuur is, dan is de hele tank op temp. Met coil-circulation
+    // (oq_dhw_legionella_coil_circulation_enable, default ON) wordt de tank
+    // automatisch gemixt waardoor bottom snel volgt op top.
+    // Fallback: als tank_bottom_c niet beschikbaar is, val terug op tank_top_c.
+    auto leg_temp_for_check = [&]() -> float {
+      if (plausible_temp_(in.tank_bottom_c, cfg)) return in.tank_bottom_c;
+      return in.tank_top_c;  // fallback safety
+    };
+    const float leg_check_c = leg_temp_for_check();
+
     if (!hp_phase_done_) {
-      if (in.tank_top_c >= cfg.hp_stop_top_c || elapsed_in_state_(in.now_ms) >= cfg.hp_max_runtime_ms) {
+      // HP-fase: stoppen wanneer leg_check (bottom of fallback top) de
+      // handover-temp bereikt of HP max runtime overschreden.
+      const float leg_hp_stop = cfg.legionella_hp_stop_top_c;
+      if (leg_check_c >= leg_hp_stop || elapsed_in_state_(in.now_ms) >= cfg.hp_max_runtime_ms) {
         hp_phase_done_ = true;
         legionella_hold_start_ms_ = 0;
       }
       return;
     }
 
-    if (in.tank_top_c >= cfg.legionella_target_c) {
+    if (leg_check_c >= cfg.legionella_target_c) {
       if (legionella_hold_start_ms_ == 0) legionella_hold_start_ms_ = in.now_ms;
       if ((in.now_ms - legionella_hold_start_ms_) >= cfg.legionella_hold_ms) {
         legionella_last_done_ms_ = in.now_ms;
