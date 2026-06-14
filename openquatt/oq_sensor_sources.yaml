@@ -211,7 +211,6 @@ binary_sensor:
     icon: mdi:alert-circle-outline
     device_class: problem
     entity_category: diagnostic
-    update_interval: 10s
     lambda: return id(oq_pt1000_supply_fallback_active);
     on_press:
       - homeassistant.service:
