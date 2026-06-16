@@ -430,6 +430,18 @@ switch:
       sorting_group_id: oq_boiler
 
   - platform: template
+    id: oq_dhw_boost_hp_assist_enable
+    name: "DHW boost HP assist"
+    icon: mdi:heat-pump-outline
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action: []
+    turn_off_action: []
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
     id: oq_dhw_stop_on_bottom_enable
     name: "DHW stop on tank bottom"
     icon: mdi:arrow-collapse-down
@@ -674,6 +686,38 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 56
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_boost_hp_assist_bottom_c
+    name: "DHW boost HP assist bottom threshold"
+    icon: mdi:thermometer-low
+    unit_of_measurement: "°C"
+    min_value: 15
+    max_value: 45
+    step: 1
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 35
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_boost_hp_assist_stop_top_c
+    name: "DHW boost HP assist stop top"
+    icon: mdi:thermometer-high
+    unit_of_measurement: "°C"
+    min_value: 45
+    max_value: 55
+    step: 0.5
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 52
+    entity_category: config
     web_server:
       sorting_group_id: oq_boiler
 
@@ -2169,6 +2213,9 @@ interval:
           cfg.hp_max_runtime_ms = 180UL * 60UL * 1000UL;
           cfg.hp_target_flow_c = id(oq_dhw_hp_target_flow_c).state;
           cfg.enable_boost_after_hp = id(oq_dhw_boost_after_hp).state;
+          cfg.boost_hp_assist_enable = id(oq_dhw_boost_hp_assist_enable).state;
+          cfg.boost_hp_assist_bottom_c = id(oq_dhw_boost_hp_assist_bottom_c).state;
+          cfg.boost_hp_assist_stop_top_c = id(oq_dhw_boost_hp_assist_stop_top_c).state;
           cfg.min_cycle_rest_ms = (uint32_t)(id(oq_dhw_min_rest_s).state * 1000.0f);
           const float flow_min_cfg = id(oq_dhw_flow_min_lph).state;
           const float flow_max_cfg = id(oq_dhw_flow_max_lph).state;

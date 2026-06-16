@@ -68,6 +68,13 @@ struct Config {
 
   uint8_t valve_retries = 1;
   bool enable_boost_after_hp = true;
+
+  // DHW boost HP assist: when tank_bottom is cold at boost-entry, run both the
+  // element and the HP together. Decision is latched at the start of boost to
+  // prevent hunting (drawing hot water always cools the bottom).
+  bool  boost_hp_assist_enable = false;
+  float boost_hp_assist_bottom_c = 35.0f;   // activate assist when bottom < this at entry
+  float boost_hp_assist_stop_top_c = 52.0f; // HP stops when top >= this during boost
 };
 
 struct Inputs {
@@ -231,6 +238,11 @@ class Controller {
           if (active_legionella_) {
             transition_(State::LEGIONELLA, in.now_ms);
           } else if (active_solar_boost_) {
+            if (cfg.boost_hp_assist_enable &&
+                plausible_temp_(in.tank_bottom_c, cfg) &&
+                in.tank_bottom_c < cfg.boost_hp_assist_bottom_c) {
+              boost_hp_assist_active_ = true;
+            }
             transition_(State::DHW_BOOST, in.now_ms);
           } else {
             transition_(State::DHW_HEAT_PUMP, in.now_ms);
@@ -258,6 +270,11 @@ class Controller {
         }
         if (stop_temp_reached || elapsed_in_state_(in.now_ms) >= cfg.hp_max_runtime_ms) {
           if (cfg.enable_boost_after_hp && in.tank_top_c < cfg.boost_target_c) {
+            if (cfg.boost_hp_assist_enable &&
+                plausible_temp_(in.tank_bottom_c, cfg) &&
+                in.tank_bottom_c < cfg.boost_hp_assist_bottom_c) {
+              boost_hp_assist_active_ = true;
+            }
             transition_(State::DHW_BOOST, in.now_ms);
           } else {
             cycle_end_ms_ = in.now_ms;
@@ -269,6 +286,13 @@ class Controller {
       }
 
       case State::DHW_BOOST:
+        // Stop HP assist when top reaches the assist-stop threshold (default 52°C).
+        // Element continues alone to boost_target_c (56°C).
+        if (boost_hp_assist_active_ &&
+            plausible_temp_(in.tank_top_c, cfg) &&
+            in.tank_top_c >= cfg.boost_hp_assist_stop_top_c) {
+          boost_hp_assist_active_ = false;
+        }
         if (in.tank_top_c >= cfg.boost_target_c) {
           cycle_end_ms_ = in.now_ms;
           transition_(State::IDLE_CV, in.now_ms);
@@ -314,6 +338,9 @@ class Controller {
     } else if (state_ == State::LEGIONELLA && !hp_phase_done_) {
       out.hp_dhw_request = true;
       out.target_flow_temp_c = cfg.hp_target_flow_c;
+    } else if (state_ == State::DHW_BOOST && boost_hp_assist_active_) {
+      out.hp_dhw_request = true;
+      out.target_flow_temp_c = cfg.hp_target_flow_c;
     }
 
     const bool valve_confirms_boiler = valve_is_boiler_(in);
@@ -349,7 +376,8 @@ class Controller {
       valve_mismatch_since_ms_ = 0;
     }
 
-    if (state_ == State::DHW_HEAT_PUMP || (state_ == State::LEGIONELLA && !hp_phase_done_)) {
+    if (state_ == State::DHW_HEAT_PUMP || (state_ == State::LEGIONELLA && !hp_phase_done_) ||
+        (state_ == State::DHW_BOOST && boost_hp_assist_active_)) {
       if (in.flow_valid && !std::isnan(in.flow_lph) &&
           (in.flow_lph < cfg.flow_min_lph || in.flow_lph > cfg.flow_max_lph)) {
         if (flow_fault_since_ms_ == 0) flow_fault_since_ms_ = in.now_ms;
@@ -387,6 +415,7 @@ class Controller {
   bool active_solar_boost_ = false;
   bool hp_phase_done_ = false;
   bool fault_latched_ = false;
+  bool boost_hp_assist_active_ = false;
 
   static bool plausible_temp_(float t, const Config &cfg) {
     return !std::isnan(t) && t >= cfg.temp_min_c && t <= cfg.temp_max_c;
@@ -567,6 +596,7 @@ class Controller {
     active_legionella_ = false;
     active_solar_boost_ = false;
     hp_phase_done_ = false;
+    boost_hp_assist_active_ = false;
     legionella_hold_start_ms_ = 0;
     valve_retry_count_ = 0;
   }
