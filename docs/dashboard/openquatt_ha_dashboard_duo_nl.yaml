@@ -396,6 +396,55 @@ views:
                   fill: last
             grid_options:
               columns: full
+      # ── EnergyOS integratie ───────────────────────────────
+      - type: grid
+        cards:
+          - type: heading
+            icon: mdi:lightning-bolt-circle
+            heading: EnergyOS integratie
+            heading_style: title
+          - type: markdown
+            content: >-
+              EOS stuurt de warmtepomp aan op basis van tarief, PV-surplus en
+              buitentemperatuur. De comfort floor voorkomt dat de HP te ver
+              gethrotteld wordt bij koud weer.
+            text_only: true
+          - type: tile
+            entity: sensor.openquatt_ext_electricity_tariff_now
+            name: Tarief (EOS)
+            vertical: false
+            features:
+              - type: trend-graph
+          - type: tile
+            entity: sensor.openquatt_ext_electricity_tariff_avg24
+            name: Tarief 24h gem
+            vertical: false
+          - type: tile
+            entity: sensor.openquatt_ext_grid_net_power
+            name: Grid netto (W)
+            vertical: false
+            features:
+              - type: trend-graph
+          - type: tile
+            entity: sensor.eos_asset_hp_min_comfort_cap
+            name: Comfort floor
+            vertical: false
+          - type: tile
+            entity: sensor.eos_asset_hp_pv_covered
+            name: PV dekt HP
+            vertical: false
+          - type: tile
+            entity: binary_sensor.openquatt_ext_dhw_solar_boost
+            name: DHW solar boost
+            vertical: false
+          - type: tile
+            entity: binary_sensor.openquatt_ext_dhw_legionella_cheap_window
+            name: Legionella goedkoop
+            vertical: false
+          - type: tile
+            entity: input_text.eos_current_reason
+            name: EOS reden
+            vertical: false
     cards: []
     header:
       card:
@@ -471,6 +520,12 @@ views:
                 name: Reset DHW fout
               - entity: number.openquatt_dhw_boost_target
                 name: Boost doel (degC)
+              - entity: switch.openquatt_dhw_boost_hp_assist
+                name: Boost HP assist
+              - entity: number.openquatt_dhw_boost_hp_assist_bottom_threshold
+                name: Boost HP assist bodem drempel (°C)
+              - entity: number.openquatt_dhw_boost_hp_assist_stop_top
+                name: Boost HP assist stop top (°C)
               - entity: number.openquatt_dhw_legionella_target
                 name: Legionella doel (degC)
               - entity: number.openquatt_dhw_hp_level
