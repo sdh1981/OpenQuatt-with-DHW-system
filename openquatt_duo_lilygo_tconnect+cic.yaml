@@ -37,3 +37,6 @@ packages:
   openquatt_hw_profile: !include openquatt/profiles/oq_substitutions_lilygo_tconnect_cic.yaml
   openquatt_base: !include openquatt_base.yaml
   oq_cic_modbus_slave: !include openquatt/oq_cic_modbus_slave.yaml
+  # Energy OS bridge: stelt EOS in staat de HP cap extern te schrijven via HA.
+  # Na flash: verwijder commentaar bij number.set_value in eos_03_dispatcher.yaml.
+  energy_os_bridge: !include openquatt/oq_energy_os_bridge.yaml

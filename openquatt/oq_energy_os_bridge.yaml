@@ -1,0 +1,61 @@
+# ==============================================================================
+# OpenQuatt — Energy OS Bridge
+# ==============================================================================
+# Doel:
+#   Voeg een HA-schrijfbaar HP cap override toe aan de OpenQuatt firmware.
+#   Het Energy OS in HA kan hiermee de warmtepomp extern throttlen,
+#   als aanvulling op de interne supervisory power limiter.
+#
+# Gebruik:
+#   1. Voeg als package toe in openquatt_duo_lilygo_tconnect+cic.yaml:
+#        packages:
+#          energy_os_bridge: !include openquatt/oq_energy_os_bridge.yaml
+#
+#   2. Hercompileer en flash de firmware.
+#
+#   3. In HA: verwijder commentaar bij `number.set_value` in
+#      script.eos_apply_hp_cap (eos_03_dispatcher.yaml).
+#
+# Werking:
+#   - Schrijft de gedeelde global `oq_eos_external_cap` (gedefinieerd in
+#     oq_supervisory_controlmode.yaml, default 20 = geen beperking).
+#   - De supervisory power-limiter clampt `oq_power_cap_f` elke tick HARD op deze
+#     externe cap (laatste stap van de limiter), zodat supervisory-herstel de cap
+#     nooit boven de externe waarde kan tillen.
+#   - De number on_value past de clamp bovendien direct toe voor lage latency.
+#   - Exposed als number entity "EOS HP Cap HA" → number.openquatt_eos_hp_cap_ha.
+#
+# Veiligheid:
+#   - Default = 20 (volledig vrij) → geen invloed bij uitgeschakeld Energy OS
+#   - OpenQuatt's eigen supervisory (16A grid guard) heeft altijd prioriteit
+#   - Override werkt alleen als AANVULLENDE beperking, nooit als verhoging
+# ==============================================================================
+
+number:
+  - platform: template
+    id: oq_eos_hp_cap_ha
+    name: "EOS HP Cap HA"
+    icon: mdi:heat-pump-outline
+    unit_of_measurement: "lvl"
+    min_value: 0
+    max_value: 20
+    step: 1
+    mode: slider
+    restore_value: true
+    optimistic: true
+    initial_value: 20
+    entity_category: config
+    on_value:
+      then:
+        - lambda: |-
+            int cap = (int) lroundf(x);
+            if (cap < 0) cap = 0;
+            if (cap > 20) cap = 20;
+            id(oq_eos_external_cap) = cap;
+            // Pas direct toe als neerwaartse clamp; de supervisory power-limiter
+            // herhaalt deze clamp elke tick (laatste stap), zodat herstel de cap
+            // niet kan ophogen. De cap werkt alleen naar beneden.
+            if (cap < id(oq_power_cap_f)) {
+              id(oq_power_cap_f) = cap;
+            }
+            ESP_LOGI("eos", "External HP cap set to %d by Energy OS", cap);

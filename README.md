@@ -88,6 +88,37 @@ Technischere naslag blijft beschikbaar, maar staat niet meer centraal in de publ
 - [Regelgedrag van OpenQuatt](docs/regelgedrag-van-openquatt.md)
 - [Instellingen en meetwaarden](docs/instellingen-en-meetwaarden.md)
 
+## EnergyOS-integratie
+
+De `+CIC`-build (LilyGO T-Connect) ondersteunt een directe koppeling met [Energy OS](https://github.com/sdh1981/energy-os) voor gecombineerde HP- en batterijsturing.
+
+### Wat het doet
+
+| Functie | Detail |
+|---|---|
+| **HP cap extern schrijven** | EOS kan de warmtepomp extern throttlen via `number.openquatt_eos_hp_cap_ha` (0–20). De cap werkt alleen naar beneden — OpenQuatt's eigen supervisory (16 A grid guard) heeft altijd prioriteit. |
+| **Comfort floor** | EOS respecteert een buitentemperatuurafhankelijk minimum en verlaagt de cap nooit zover dat comfort in het gedrang komt. |
+| **PV-voorrang** | Als zonnepanelen meer leveren dan de HP verbruikt, geeft EOS de HP vrij ongeacht de batterijmodus. |
+| **DHW-vensters** | EOS schrijft de goedkoopste en duurste tariefvensters door naar HA-datetimes die OpenQuatt leest voor legionellabescherming en DHW-opwarming. |
+
+### Activering
+
+1. Het package `openquatt/oq_energy_os_bridge.yaml` is al opgenomen in `openquatt_duo_lilygo_tconnect+cic.yaml`.
+2. Compileer en flash de firmware:
+   ```
+   python -m esphome compile openquatt_duo_lilygo_tconnect+cic.yaml
+   python -m esphome upload openquatt_duo_lilygo_tconnect+cic.yaml
+   ```
+3. Verwijder na de flash het commentaar bij `number.set_value` in `script.eos_apply_hp_cap` (eos_03_dispatcher.yaml in Energy OS).
+
+Na activering verschijnt `number.openquatt_eos_hp_cap_ha` als entiteit in Home Assistant.
+
+### Veiligheidsgedrag
+
+- Default waarde is 20 (geen beperking) — als Energy OS niet actief is doet de brug niets.
+- OpenQuatt's eigen supervisory verlaagt de cap altijd verder indien het grid dat vereist.
+- De brug kan de cap nooit verhogen, alleen verlagen.
+
 ## Licentie
 
 Dit project bevat een `LICENSE`-bestand in de root van de repository.
