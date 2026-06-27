@@ -566,6 +566,7 @@ views:
                       const mins = g('sensor.dhw_douchetijd');
                       const tankL = g('sensor.dhw_warm_water_in_tank');
                       const vol = g('number.openquatt_dhw_tank_volume') || 220;
+                      const flow = g('input_number.dhw_calc_shower_flow_lpm') || 8;
                       const f = (v, u) => (v === null ? '–' : v + u);
                       const topY = Math.max(34, Math.min(258, 260 - (pct / 100) * 226));
                       const labelY = Math.min(254, topY + 24);
@@ -604,7 +605,7 @@ views:
                           <text x="184" y="120" fill="var(--primary-text-color)" font-size="23" font-weight="600">${f(liters, ' L')} @ 40°C</text>
                           <text x="184" y="140" fill="var(--secondary-text-color)" font-size="15">tapbaar mengwater</text>
                           <text x="184" y="180" fill="var(--primary-text-color)" font-size="23" font-weight="600">${f(mins, ' min')}</text>
-                          <text x="184" y="200" fill="var(--secondary-text-color)" font-size="15">douchen (8 L/min · 40°C)</text>
+                          <text x="184" y="200" fill="var(--secondary-text-color)" font-size="15">douchen (${flow} L/min · 40°C)</text>
                           <text x="184" y="234" fill="var(--secondary-text-color)" font-size="15">top ${f(tt, '°')}  ·  bodem ${f(tb, '°')}</text>
                         </svg>`;
                     ]]]
