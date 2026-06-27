@@ -1055,6 +1055,25 @@ binary_sensor:
     web_server:
       sorting_group_id: oq_hp_diagnostics
 
+  # Compressor frequency-limiting / speed-down active (Failure protection 1,
+  # doc reg 2120 = OQ 2119). These bits mean the HP is itself REDUCING/capping the
+  # compressor frequency — i.e. it is overriding the commanded level:
+  #   BIT5  (0x0020) = speed-down caused by too high pressure
+  #   BIT11 (0x0800) = frequency limit protection by ambient temperature
+  #   BIT13 (0x2000) = speed-down caused by too low pressure
+  - platform: template
+    id: ${hp_id}_freq_limited
+    name: "${prefix}Compressor frequency limited"
+    icon: mdi:speedometer-slow
+    entity_category: diagnostic
+    lambda: |-
+      const float raw = id(${hp_id}_status_2119_raw).state;
+      if (isnan(raw)) return false;
+      const uint16_t s = static_cast<uint16_t>(lroundf(raw));
+      return (s & (0x0020u | 0x0800u | 0x2000u)) != 0;
+    web_server:
+      sorting_group_id: oq_hp_diagnostics
+
   - platform: template
     id: ${hp_id}_ot_fault_active
     name: "${prefix}OT fault active"
@@ -1103,6 +1122,29 @@ binary_sensor:
   # TEXT SENSOR
   # ----------------------------
 text_sensor:
+  # Human-readable reason why the HP is limiting/reducing the compressor frequency
+  # (decoded from Failure protection 1, doc reg 2120 = OQ 2119). "Geen" = the HP is
+  # free to follow the commanded level; anything else means the HP is overriding it.
+  - platform: template
+    id: ${hp_id}_freq_limit_reason
+    name: "${prefix}Frequency limit reason"
+    icon: mdi:speedometer-slow
+    entity_category: diagnostic
+    update_interval: 10s
+    web_server:
+      sorting_group_id: oq_hp_diagnostics
+    lambda: |-
+      const float raw = id(${hp_id}_status_2119_raw).state;
+      if (isnan(raw)) return {"Onbekend"};
+      const uint16_t s = static_cast<uint16_t>(lroundf(raw));
+      std::string out;
+      auto add = [&](const char *t) { if (!out.empty()) out += ", "; out += t; };
+      if (s & 0x0020u) add("Hoge druk (speed-down)");
+      if (s & 0x2000u) add("Lage druk (speed-down)");
+      if (s & 0x0800u) add("Ambient freq-limit");
+      if (out.empty()) return {"Geen"};
+      return {out};
+
   - platform: template
     id: ${hp_id}_working_mode_label
     name: "${prefix}Working Mode Label"
