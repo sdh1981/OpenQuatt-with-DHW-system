@@ -497,49 +497,113 @@ views:
     sections:
       - type: grid
         cards:
+          - type: heading
+            icon: mdi:water-boiler
+            heading: DHW regeling
+            heading_style: title
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: sensor.openquatt_dhw_state
+                name: DHW status
+              - entity: sensor.openquatt_dhw_fault
+                name: DHW fout
+              - entity: switch.openquatt_dhw_lockout
+                name: DHW lockout
+              - entity: switch.openquatt_dhw_solar_boost_auto
+                name: Boiler solar boost auto
+              - entity: sensor.openquatt_dhw_electricity_tariff
+                name: Stroomtarief (EUR/kWh)
+              - entity: binary_sensor.openquatt_dhw_tariff_negative
+                name: Tarief negatief
+              - entity: button.openquatt_dhw_clear_fault
+                name: Reset DHW fout
+              - entity: number.openquatt_dhw_boost_target
+                name: Boost doel (degC)
+              - entity: switch.openquatt_dhw_boost_hp_assist
+                name: Boost HP assist
+              - entity: number.openquatt_dhw_boost_hp_assist_bottom_threshold
+                name: Boost HP assist bodem drempel (°C)
+              - entity: number.openquatt_dhw_boost_hp_assist_stop_top
+                name: Boost HP assist stop top (°C)
+              - entity: number.openquatt_dhw_legionella_target
+                name: Legionella doel (degC)
+              - entity: number.openquatt_dhw_hp_level
+                name: DHW HP niveau
+              - entity: number.openquatt_dhw_flow_min
+                name: DHW flow min (l/h)
+              - entity: number.openquatt_dhw_flow_max
+                name: DHW flow max (l/h)
+      - type: grid
+        cards:
           - type: vertical-stack
             cards:
               - type: heading
                 heading: Warmwatervoorraad
                 heading_style: title
                 icon: mdi:water-boiler
-              - type: custom:apexcharts-card
-                header:
-                  show: true
-                  title: Tank lading
-                  show_states: true
-                  colorize_states: true
-                chart_type: radialBar
-                series:
-                  - entity: sensor.dhw_tank_lading
-                    name: Lading
-                    min: 0
-                    max: 100
-                apex_config:
-                  chart:
-                    height: 230
-                  plotOptions:
-                    radialBar:
-                      startAngle: -120
-                      endAngle: 120
-                      hollow:
-                        size: 60%
-                      dataLabels:
-                        name:
-                          show: true
-                          fontSize: "14px"
-                        value:
-                          fontSize: "30px"
-                          formatter: |
-                            EVAL:function (val) { return Math.round(val) + '%'; }
-                  fill:
-                    type: gradient
-                    gradient:
-                      shade: light
-                      type: horizontal
-                      gradientToColors: ["#f0682f"]
-                      stops: [0, 100]
-                  colors: ["#2f7fe0"]
+              - type: custom:button-card
+                entity: sensor.dhw_tank_lading
+                show_name: false
+                show_icon: false
+                show_state: false
+                tap_action:
+                  action: more-info
+                styles:
+                  card:
+                    - padding: 8px
+                  custom_fields:
+                    tank:
+                      - width: 100%
+                custom_fields:
+                  tank: |
+                    [[[
+                      const pct = Math.max(0, Math.min(100, Math.round(Number(entity.state) || 0)));
+                      const g = (id) => (states[id] && !isNaN(Number(states[id].state))) ? Math.round(Number(states[id].state)) : null;
+                      const tt = g('sensor.openquatt_dhw_tank_top');
+                      const tb = g('sensor.openquatt_dhw_tank_bottom');
+                      const liters = g('sensor.dhw_bruikbaar_warm_water');
+                      const mins = g('sensor.dhw_douchetijd');
+                      const f = (v, u) => (v === null ? '–' : v + u);
+                      const topY = Math.max(34, Math.min(258, 260 - (pct / 100) * 226));
+                      const labelY = Math.min(254, topY + 24);
+                      return `
+                        <svg viewBox="0 0 360 290" style="width:100%;height:auto">
+                          <defs>
+                            <linearGradient id="oqw" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stop-color="#f0682f"/>
+                              <stop offset="40%" stop-color="#ee8d3a"/>
+                              <stop offset="72%" stop-color="#9d77c9"/>
+                              <stop offset="100%" stop-color="#2f7fe0"/>
+                            </linearGradient>
+                            <clipPath id="oqc"><rect x="40" y="34" width="96" height="226" rx="34"/></clipPath>
+                            <style>
+                              @keyframes oqwave{0%,100%{transform:translateX(0)}50%{transform:translateX(-16px)}}
+                              @keyframes oqrise{0%{transform:translateY(0);opacity:0}12%{opacity:.55}100%{transform:translateY(-150px);opacity:0}}
+                              .oqwave{animation:oqwave 3.6s ease-in-out infinite}
+                              .oqb{animation:oqrise 4.4s linear infinite}
+                              .oqb2{animation-duration:5.4s;animation-delay:1.1s}
+                              .oqb3{animation-duration:4.8s;animation-delay:2.2s}
+                            </style>
+                          </defs>
+                          <rect x="40" y="34" width="96" height="226" rx="34" fill="#d8d6cd" opacity="0.30"/>
+                          <g clip-path="url(#oqc)">
+                            <rect x="36" y="${topY}" width="104" height="${262 - topY}" fill="url(#oqw)"/>
+                            <g class="oqwave"><path d="M30 ${topY} q 13 -8 26 0 t 26 0 t 26 0 t 26 0 t 26 0 v 26 h -156 z" fill="#f0682f" opacity="0.9"/></g>
+                            <circle class="oqb" cx="64" cy="256" r="3" fill="#fff" opacity="0.5"/>
+                            <circle class="oqb oqb2" cx="92" cy="256" r="2.4" fill="#fff" opacity="0.45"/>
+                            <circle class="oqb oqb3" cx="110" cy="256" r="3.4" fill="#fff" opacity="0.4"/>
+                          </g>
+                          <rect x="40" y="34" width="96" height="226" rx="34" fill="none" stroke="var(--divider-color,#8f8e87)" stroke-width="2.5"/>
+                          <rect x="68" y="24" width="40" height="12" rx="5" fill="var(--divider-color,#8f8e87)"/>
+                          <text x="88" y="${labelY}" text-anchor="middle" fill="#ffffff" font-size="17" font-weight="600">${pct}%</text>
+                          <text x="184" y="74" fill="var(--primary-text-color)" font-size="42" font-weight="600">${f(liters, '')}</text>
+                          <text x="184" y="96" fill="var(--secondary-text-color)" font-size="15">liter bruikbaar warm water</text>
+                          <text x="184" y="146" fill="var(--primary-text-color)" font-size="27" font-weight="600">${f(mins, ' min')}</text>
+                          <text x="184" y="167" fill="var(--secondary-text-color)" font-size="15">douchen (8 L/min · 40°C)</text>
+                          <text x="184" y="212" fill="var(--secondary-text-color)" font-size="15">top ${f(tt, '°')}  ·  bodem ${f(tb, '°')}</text>
+                        </svg>`;
+                    ]]]
               - type: grid
                 columns: 2
                 square: false
@@ -603,45 +667,6 @@ views:
                     name: "'Vol' referentietemp"
                   - entity: number.openquatt_dhw_tank_volume
                     name: Tankinhoud
-      - type: grid
-        cards:
-          - type: heading
-            icon: mdi:water-boiler
-            heading: DHW regeling
-            heading_style: title
-          - type: entities
-            show_header_toggle: false
-            entities:
-              - entity: sensor.openquatt_dhw_state
-                name: DHW status
-              - entity: sensor.openquatt_dhw_fault
-                name: DHW fout
-              - entity: switch.openquatt_dhw_lockout
-                name: DHW lockout
-              - entity: switch.openquatt_dhw_solar_boost_auto
-                name: Boiler solar boost auto
-              - entity: sensor.openquatt_dhw_electricity_tariff
-                name: Stroomtarief (EUR/kWh)
-              - entity: binary_sensor.openquatt_dhw_tariff_negative
-                name: Tarief negatief
-              - entity: button.openquatt_dhw_clear_fault
-                name: Reset DHW fout
-              - entity: number.openquatt_dhw_boost_target
-                name: Boost doel (degC)
-              - entity: switch.openquatt_dhw_boost_hp_assist
-                name: Boost HP assist
-              - entity: number.openquatt_dhw_boost_hp_assist_bottom_threshold
-                name: Boost HP assist bodem drempel (°C)
-              - entity: number.openquatt_dhw_boost_hp_assist_stop_top
-                name: Boost HP assist stop top (°C)
-              - entity: number.openquatt_dhw_legionella_target
-                name: Legionella doel (degC)
-              - entity: number.openquatt_dhw_hp_level
-                name: DHW HP niveau
-              - entity: number.openquatt_dhw_flow_min
-                name: DHW flow min (l/h)
-              - entity: number.openquatt_dhw_flow_max
-                name: DHW flow max (l/h)
       - type: grid
         cards:
           - type: heading
