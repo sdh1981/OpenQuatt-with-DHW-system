@@ -68,16 +68,6 @@ globals:
     restore_value: false
     initial_value: '0'
 
-  # Minimum runtime tracking
-  - id: oq_cooling_min_runtime_start_ms
-    type: uint32_t
-    restore_value: false
-    initial_value: '0'
-  - id: oq_cooling_min_runtime_active
-    type: bool
-    restore_value: false
-    initial_value: 'false'
-
   # Slew rate: last applied demand level (for ±1/tick rate limiting)
   - id: oq_cooling_last_f
     type: int
@@ -96,8 +86,9 @@ globals:
 
   # Cooling stop reason diagnostics:
   # 0=running_or_idle_normal, 1=disabled, 2=no_cooling_request, 3=not_permitted,
-  # 4=target_invalid, 5=supply_invalid, 6=demand_max_zero, 7=safe_floor_stop,
-  # 8=not_in_cm5, 9=no_owner_available
+  # 4=target_invalid, 5=supply_invalid, 6=demand_max_zero,
+  # 8=not_in_cm5, 9=no_owner_available, 10=dhw_active, 11=night_free_cooling
+  # (7=safe_floor_stop verwijderd: safe-floor throttle bestaat niet meer)
   - id: oq_cooling_stop_reason_code
     type: int
     restore_value: false
@@ -405,7 +396,6 @@ text_sensor:
         case 4: return {"target_invalid"};
         case 5: return {"supply_invalid"};
         case 6: return {"demand_max_zero"};
-        case 7: return {"safe_floor_stop"};
         case 8: return {"not_in_cm5"};
         case 9: return {"no_owner_available"};
         case 10: return {"dhw_active"};
@@ -458,8 +448,6 @@ interval:
             const bool hard_reset =
                 !id(cooling_enable_selected).state || !id(cooling_permitted).state;
             if (hard_reset) {
-              id(oq_cooling_min_runtime_active) = false;
-              id(oq_cooling_min_runtime_start_ms) = 0;
               id(oq_cooling_auto_dual_hp_enabled) = false;
               id(oq_cooling_auto_dual_hp_elapsed_accum_min) = 0.0f;
             }
@@ -479,8 +467,6 @@ interval:
             id(oq_cooling_demand_raw) = 0;
             id(oq_cooling_pid_integral) = 0.0f;
             id(oq_cooling_pid_last_error_c) = 0.0f;
-            id(oq_cooling_min_runtime_active) = false;
-            id(oq_cooling_min_runtime_start_ms) = 0;
             id(oq_cooling_auto_dual_hp_enabled) = false;
             id(oq_cooling_auto_dual_hp_elapsed_accum_min) = 0.0f;
             return;
@@ -567,9 +553,7 @@ interval:
           id(oq_cooling_pid_integral) = integral;
           id(oq_cooling_pid_last_error_c) = error_c;
           id(oq_cooling_demand_raw) = demand;
-          // Keep stop_reason 7 (safe_floor_stop) even when demand=1 so the UI
-          // shows the throttled state; only clear it when we're genuinely free-running.
-          if (demand > 0 && stop_reason != 7) stop_reason = 0;
+          if (demand > 0) stop_reason = 0;
           id(oq_cooling_stop_reason_code) = stop_reason;
 
   - interval: ${oq_heat_loop_tick_s}s
@@ -586,8 +570,6 @@ interval:
             id(oq_cooling_request_owner_hp) = 0;
             id(oq_cooling_owner_hp) = 0;
             id(oq_cooling_request_reason_code) = 0;
-            id(oq_cooling_min_runtime_active) = false;
-            id(oq_cooling_min_runtime_start_ms) = 0;
             id(oq_cooling_auto_dual_hp_elapsed_accum_min) = 0.0f;
             id(oq_cooling_auto_dual_hp_enabled) = false;
             id(oq_cooling_last_f) = 0;
@@ -616,29 +598,6 @@ interval:
           f_cap = std::max(0, std::min(demand_max_f, f_cap));
           if (f > f_cap) f = f_cap;
 
-          // Minimum runtime tracking (kept for consistency; minimum-level-1 logic below
-          // ensures we rarely reach the min_runtime path anyway).
-          const uint32_t min_rt_ms = (uint32_t)(id(cooling_min_runtime_s).state * 1000.0f);
-          if (f > 0) {
-            if (!id(oq_cooling_min_runtime_active)) {
-              id(oq_cooling_min_runtime_active) = true;
-              id(oq_cooling_min_runtime_start_ms) = now_ms;
-            }
-          } else if (id(oq_cooling_min_runtime_active) && min_rt_ms > 0) {
-            const uint32_t elapsed_ms = (now_ms >= id(oq_cooling_min_runtime_start_ms))
-                ? (now_ms - id(oq_cooling_min_runtime_start_ms)) : 0;
-            if (elapsed_ms < min_rt_ms) {
-              f = 1;
-            } else {
-              id(oq_cooling_min_runtime_active) = false;
-              id(oq_cooling_min_runtime_start_ms) = 0;
-            }
-          }
-          if (f == 0) {
-            id(oq_cooling_min_runtime_active) = false;
-            id(oq_cooling_min_runtime_start_ms) = 0;
-          }
-
           // Minimum level 1 in CM5: the compressor never fully stops during active cooling.
           // Instead of cycling off and on, it idles at level 1 until demand returns.
           // Only hard conditions (cooling disabled, safety trip, or DHW conflict) allow f=0.
@@ -651,10 +610,6 @@ interval:
               (id(oq_dhw_state_code) != 0 && !legionella_element_only_hl);
           if (!hard_cooling_stop && f < 1) {
             f = 1;
-            if (!id(oq_cooling_min_runtime_active)) {
-              id(oq_cooling_min_runtime_active) = true;
-              id(oq_cooling_min_runtime_start_ms) = now_ms;
-            }
           }
 
           // Slew rate limiter: max ±1 level step per loop tick.

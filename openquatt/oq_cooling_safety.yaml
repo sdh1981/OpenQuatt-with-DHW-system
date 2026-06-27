@@ -805,12 +805,16 @@ sensor:
     accuracy_decimals: 2
     update_interval: 60s
     lambda: |-
-      // Increase safety margin when dew point is rising (condensation risk increasing).
+      // Display the margin that is ACTUALLY applied by minimum_safe_supply_temp,
+      // derived as (safe floor - selected dew point). This guarantees the shown
+      // value can never drift from the real safety floor (single source of truth).
+      if (id(minimum_safe_supply_temp).has_state() && !isnan(id(minimum_safe_supply_temp).state) &&
+          id(cooling_dew_point_selected).has_state() && !isnan(id(cooling_dew_point_selected).state)) {
+        return id(minimum_safe_supply_temp).state - id(cooling_dew_point_selected).state;
+      }
+      // Fallback when no dew-point floor is available: the configured base margin.
       float margin_c = id(cooling_safety_margin).state;
       if (margin_c < 0.0f) margin_c = 0.0f;
-      const float trend = id(oq_cooling_dew_point_trend_cph);
-      if (trend > 0.8f) margin_c += 0.6f;
-      else if (trend > 0.3f) margin_c += 0.3f;
       if (margin_c > 4.5f) margin_c = 4.5f;
       return margin_c;
     web_server:
