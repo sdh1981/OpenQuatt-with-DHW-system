@@ -126,6 +126,41 @@ template:
             0
           {% endif %}
 
+      # ---- Fysiek warm water in de tank (liters >= taptemp, <= tankinhoud) ----
+      # Twee-zone schatting met top/bodem: aanname van een lineair temperatuur-
+      # profiel tussen bodem en top. Blijft altijd <= tankinhoud. Dit is de
+      # intuitieve "hoeveel van mijn 220 L is warm"-waarde; verschilt bewust van
+      # 'DHW bruikbaar warm water' (V40-mengwater, kan > tankinhoud zijn).
+      - name: "DHW warm water in tank"
+        unique_id: openquatt_dhw_hot_water_in_tank
+        unit_of_measurement: "L"
+        state_class: measurement
+        icon: mdi:cup-water
+        availability: >
+          {{ has_value('sensor.openquatt_dhw_tank_top')
+             or has_value('sensor.openquatt_dhw_tank_bottom') }}
+        state: >
+          {% set v  = states('number.openquatt_dhw_tank_volume') | float(220) %}
+          {% set tp = states('input_number.dhw_calc_tap_temp_c') | float(40) %}
+          {% set tt = states('sensor.openquatt_dhw_tank_top') | float(0) if has_value('sensor.openquatt_dhw_tank_top') else none %}
+          {% set tb = states('sensor.openquatt_dhw_tank_bottom') | float(0) if has_value('sensor.openquatt_dhw_tank_bottom') else none %}
+          {% if tt is not none and tb is not none %}
+            {% if tb >= tp %}
+              {{ v | round(0) }}
+            {% elif tt <= tp %}
+              0
+            {% elif tt > tb %}
+              {{ (v * (tt - tp) / (tt - tb)) | round(0) }}
+            {% else %}
+              {{ (v | round(0)) if (((tt + tb) / 2) >= tp) else 0 }}
+            {% endif %}
+          {% elif tt is not none or tb is not none %}
+            {% set t = tt if tt is not none else tb %}
+            {{ (v | round(0)) if (t >= tp) else 0 }}
+          {% else %}
+            unknown
+          {% endif %}
+
       # ---- Energie-inhoud boven koudwater (kWh) ----
       - name: "DHW energie-inhoud"
         unique_id: openquatt_dhw_energy_content

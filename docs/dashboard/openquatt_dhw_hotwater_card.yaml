@@ -58,8 +58,13 @@ cards:
     square: false
     cards:
       - type: tile
+        entity: sensor.dhw_warm_water_in_tank
+        name: Warm water in tank
+        icon: mdi:cup-water
+        color: red
+      - type: tile
         entity: sensor.dhw_bruikbaar_warm_water
-        name: Bruikbaar warm water
+        name: Tapbaar @40°C
         icon: mdi:water
         color: blue
       - type: tile

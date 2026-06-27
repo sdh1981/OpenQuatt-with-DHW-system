@@ -2,8 +2,10 @@
 # OpenQuatt — Geanimeerde warmwater-tank (custom:button-card)
 # ==============================================================================
 # Een geanimeerde SVG-boilertank: waterniveau = lading%, kleurverloop van warm
-# (boven) naar koud (onder), bewegende golf + opstijgende belletjes. Rechts de
-# kerncijfers uit de warmwater-berekening.
+# (boven) naar koud (onder), bewegende golf + opstijgende belletjes. Rechts twee
+# cijfers:
+#   - "warm water in tank"  = fysiek warm tankwater (<= tankinhoud)
+#   - "tapbaar @40°C"       = mengwater op taptemperatuur (V40, kan > tankinhoud)
 #
 # Vereist:
 #   - HACS-kaart: button-card  (https://github.com/custom-cards/button-card)
@@ -32,8 +34,10 @@ custom_fields:
       const g = (id) => (states[id] && !isNaN(Number(states[id].state))) ? Math.round(Number(states[id].state)) : null;
       const tt = g('sensor.openquatt_dhw_tank_top');
       const tb = g('sensor.openquatt_dhw_tank_bottom');
+      const tankL = g('sensor.dhw_warm_water_in_tank');
       const liters = g('sensor.dhw_bruikbaar_warm_water');
       const mins = g('sensor.dhw_douchetijd');
+      const vol = g('number.openquatt_dhw_tank_volume') || 220;
       const f = (v, u) => (v === null ? '–' : v + u);
       const topY = Math.max(34, Math.min(258, 260 - (pct / 100) * 226));
       const labelY = Math.min(254, topY + 24);
@@ -67,10 +71,12 @@ custom_fields:
           <rect x="40" y="34" width="96" height="226" rx="34" fill="none" stroke="var(--divider-color,#8f8e87)" stroke-width="2.5"/>
           <rect x="68" y="24" width="40" height="12" rx="5" fill="var(--divider-color,#8f8e87)"/>
           <text x="88" y="${labelY}" text-anchor="middle" fill="#ffffff" font-size="17" font-weight="600">${pct}%</text>
-          <text x="184" y="74" fill="var(--primary-text-color)" font-size="42" font-weight="600">${f(liters, '')}</text>
-          <text x="184" y="96" fill="var(--secondary-text-color)" font-size="15">liter bruikbaar warm water</text>
-          <text x="184" y="146" fill="var(--primary-text-color)" font-size="27" font-weight="600">${f(mins, ' min')}</text>
-          <text x="184" y="167" fill="var(--secondary-text-color)" font-size="15">douchen (8 L/min · 40°C)</text>
-          <text x="184" y="212" fill="var(--secondary-text-color)" font-size="15">top ${f(tt, '°')}  ·  bodem ${f(tb, '°')}</text>
+          <text x="184" y="58" fill="var(--primary-text-color)" font-size="38" font-weight="600">${f(tankL, ' L')}</text>
+          <text x="184" y="80" fill="var(--secondary-text-color)" font-size="15">warm water in tank (max ${vol} L)</text>
+          <text x="184" y="120" fill="var(--primary-text-color)" font-size="23" font-weight="600">${f(liters, ' L')} @ 40°C</text>
+          <text x="184" y="140" fill="var(--secondary-text-color)" font-size="15">tapbaar mengwater</text>
+          <text x="184" y="180" fill="var(--primary-text-color)" font-size="23" font-weight="600">${f(mins, ' min')}</text>
+          <text x="184" y="200" fill="var(--secondary-text-color)" font-size="15">douchen (8 L/min · 40°C)</text>
+          <text x="184" y="234" fill="var(--secondary-text-color)" font-size="15">top ${f(tt, '°')}  ·  bodem ${f(tb, '°')}</text>
         </svg>`;
     ]]]
