@@ -74,15 +74,27 @@ globals:
     restore_value: false
     initial_value: '0'
 
-  # Auto dual-HP cooling tracking
-  - id: oq_cooling_auto_dual_hp_elapsed_accum_min
-    type: float
-    restore_value: false
-    initial_value: '0.0'
-  - id: oq_cooling_auto_dual_hp_enabled
+  # Auto cooling assist (2nd compressor) — stepped engage/ramp/disengage state.
+  - id: oq_cooling_assist_active
     type: bool
     restore_value: false
     initial_value: 'false'
+  - id: oq_cooling_assist_level
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: oq_cooling_assist_eng_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: oq_cooling_assist_step_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: oq_cooling_assist_on_since_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
 
   # Cooling stop reason diagnostics:
   # 0=running_or_idle_normal, 1=disabled, 2=no_cooling_request, 3=not_permitted,
@@ -161,6 +173,17 @@ select:
               set_number_value(id(cooling_auto_dual_demand_threshold), 20.0f);
             }
 
+switch:
+  - platform: template
+    id: cooling_auto_assist_enable
+    name: "Cooling auto assist (2nd compressor)"
+    icon: mdi:heat-pump
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_cooling
+
 number:
   - platform: template
     id: cooling_min_supply_temp
@@ -238,6 +261,38 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 0
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_cooling
+
+  - platform: template
+    id: cooling_assist_max_level
+    name: "Cooling assist max level (2nd)"
+    icon: mdi:speedometer
+    unit_of_measurement: "level"
+    min_value: 1
+    max_value: 10
+    step: 1
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 3
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_cooling
+
+  - platform: template
+    id: cooling_assist_engage_error_c
+    name: "Cooling assist engage error"
+    icon: mdi:thermometer-plus
+    unit_of_measurement: "°C"
+    min_value: 0.0
+    max_value: 3.0
+    step: 0.1
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 0.6
     entity_category: config
     web_server:
       sorting_group_id: oq_cooling
@@ -382,6 +437,19 @@ sensor:
     lambda: |-
       return (float) id(oq_cooling_demand_raw);
 
+  - platform: template
+    id: cooling_assist_level_sensor
+    name: "Cooling Assist Level (2nd)"
+    icon: mdi:heat-pump
+    unit_of_measurement: "level"
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 5s
+    web_server:
+      sorting_group_id: oq_cooling
+    lambda: |-
+      return (float) id(oq_cooling_assist_level);
+
 text_sensor:
   - platform: template
     id: cooling_stop_reason
@@ -448,8 +516,11 @@ interval:
             const bool hard_reset =
                 !id(cooling_enable_selected).state || !id(cooling_permitted).state;
             if (hard_reset) {
-              id(oq_cooling_auto_dual_hp_enabled) = false;
-              id(oq_cooling_auto_dual_hp_elapsed_accum_min) = 0.0f;
+              id(oq_cooling_assist_active) = false;
+              id(oq_cooling_assist_level) = 0;
+              id(oq_cooling_assist_eng_ms) = 0;
+              id(oq_cooling_assist_step_ms) = 0;
+              id(oq_cooling_assist_on_since_ms) = 0;
             }
             return;
           }
@@ -467,8 +538,8 @@ interval:
             id(oq_cooling_demand_raw) = 0;
             id(oq_cooling_pid_integral) = 0.0f;
             id(oq_cooling_pid_last_error_c) = 0.0f;
-            id(oq_cooling_auto_dual_hp_enabled) = false;
-            id(oq_cooling_auto_dual_hp_elapsed_accum_min) = 0.0f;
+            id(oq_cooling_assist_active) = false;
+            id(oq_cooling_assist_level) = 0;
             return;
           }
 
@@ -570,8 +641,11 @@ interval:
             id(oq_cooling_request_owner_hp) = 0;
             id(oq_cooling_owner_hp) = 0;
             id(oq_cooling_request_reason_code) = 0;
-            id(oq_cooling_auto_dual_hp_elapsed_accum_min) = 0.0f;
-            id(oq_cooling_auto_dual_hp_enabled) = false;
+            id(oq_cooling_assist_active) = false;
+            id(oq_cooling_assist_level) = 0;
+            id(oq_cooling_assist_eng_ms) = 0;
+            id(oq_cooling_assist_step_ms) = 0;
+            id(oq_cooling_assist_on_since_ms) = 0;
             id(oq_cooling_last_f) = 0;
             return;
           }
@@ -626,16 +700,84 @@ interval:
             id(oq_cooling_last_f) = f;
           }
 
-          // Auto dual-HP: escalate to dual HP when demand is sustained above threshold for 10 min.
-          const int auto_dual_thresh = (int)lroundf(id(cooling_auto_dual_demand_threshold).state);
-          if (f >= auto_dual_thresh && f > 0) {
-            id(oq_cooling_auto_dual_hp_elapsed_accum_min) += (float)loop_target_ms / 60000.0f;
-            if (id(oq_cooling_auto_dual_hp_elapsed_accum_min) >= 10.0f) {
-              id(oq_cooling_auto_dual_hp_enabled) = true;
+          // --- Auto cooling assist (2nd compressor): stepped, with hysteresis ---
+          // Only engages when the lead is at/above the engage demand AND the supply
+          // stays above the (dew-point-safe) target — i.e. one compressor cannot
+          // pull it down. The 2nd then ramps 1 -> max in steps (no full-throttle
+          // jump), steps back down once the supply reaches target, and finally drops
+          // out after a minimum on-time. Manual HP2 assist (>0) overrides all of this.
+          {
+            const uint32_t dt_ms = loop_target_ms;
+            const bool auto_on = id(cooling_auto_assist_enable).state;
+            const int manual_assist = (int) lroundf(id(cooling_hp2_assist_level).state);
+            const int engage_demand = (int) lroundf(id(cooling_auto_dual_demand_threshold).state);
+            int assist_cap = (int) lroundf(id(cooling_assist_max_level).state);
+            if (assist_cap < 1) assist_cap = 1;
+            if (assist_cap > max_level) assist_cap = max_level;
+            const float engage_err = id(cooling_assist_engage_error_c).state;
+            const float err = (id(cooling_supply_error).has_state() && !isnan(id(cooling_supply_error).state))
+                                ? id(cooling_supply_error).state : NAN;
+            // Tuning constants (kept in-code, consistent with the rest of this file).
+            const uint32_t ENGAGE_MS = 300000UL;  // sustained saturated+too-warm before engaging
+            const uint32_t STEP_MS   = 180000UL;  // dwell between ramp-up / ramp-down steps
+            const uint32_t MINON_MS  = 600000UL;  // minimum on-time for the 2nd (anti-pendel)
+
+            if (!auto_on || manual_assist > 0 || f <= 0 || isnan(err)) {
+              id(oq_cooling_assist_active) = false;
+              id(oq_cooling_assist_level) = 0;
+              id(oq_cooling_assist_eng_ms) = 0;
+              id(oq_cooling_assist_step_ms) = 0;
+              id(oq_cooling_assist_on_since_ms) = 0;
+            } else {
+              const bool saturated = (engage_demand > 0) && (f >= engage_demand);
+              const bool too_warm  = (err > engage_err);
+              const bool at_target = (err <= 0.0f);
+              if (!id(oq_cooling_assist_active)) {
+                if (saturated && too_warm) id(oq_cooling_assist_eng_ms) += dt_ms;
+                else id(oq_cooling_assist_eng_ms) = 0;
+                if (id(oq_cooling_assist_eng_ms) >= ENGAGE_MS) {
+                  id(oq_cooling_assist_active) = true;
+                  id(oq_cooling_assist_level) = 1;
+                  id(oq_cooling_assist_on_since_ms) = now_ms;
+                  id(oq_cooling_assist_step_ms) = 0;
+                }
+              } else {
+                const uint32_t on_elapsed = (now_ms >= id(oq_cooling_assist_on_since_ms))
+                    ? (now_ms - id(oq_cooling_assist_on_since_ms)) : 0;
+                if (saturated && too_warm) {
+                  // Still not enough → ramp the 2nd up one step at a time.
+                  id(oq_cooling_assist_step_ms) += dt_ms;
+                  if (id(oq_cooling_assist_level) < assist_cap &&
+                      id(oq_cooling_assist_step_ms) >= STEP_MS) {
+                    id(oq_cooling_assist_level) += 1;
+                    id(oq_cooling_assist_step_ms) = 0;
+                  }
+                } else if (at_target) {
+                  // Single comfortably reaches target → step the 2nd back down,
+                  // then drop it once at level 1 and the min on-time has passed.
+                  id(oq_cooling_assist_step_ms) += dt_ms;
+                  if (id(oq_cooling_assist_step_ms) >= STEP_MS) {
+                    if (id(oq_cooling_assist_level) > 1) {
+                      id(oq_cooling_assist_level) -= 1;
+                      id(oq_cooling_assist_step_ms) = 0;
+                    } else if (on_elapsed >= MINON_MS) {
+                      id(oq_cooling_assist_active) = false;
+                      id(oq_cooling_assist_level) = 0;
+                      id(oq_cooling_assist_step_ms) = 0;
+                      id(oq_cooling_assist_on_since_ms) = 0;
+                    }
+                  }
+                } else {
+                  // In-between band (just above target): hold the current level.
+                  id(oq_cooling_assist_step_ms) = 0;
+                }
+                if (id(oq_cooling_assist_active) && id(oq_cooling_assist_level) < 1) {
+                  id(oq_cooling_assist_level) = 1;
+                }
+              }
+              // Honour a live-lowered cap.
+              if (id(oq_cooling_assist_level) > assist_cap) id(oq_cooling_assist_level) = assist_cap;
             }
-          } else {
-            id(oq_cooling_auto_dual_hp_elapsed_accum_min) = 0.0f;
-            if (f == 0) id(oq_cooling_auto_dual_hp_enabled) = false;
           }
 
           #if OQ_TOPOLOGY_DUO
@@ -716,9 +858,10 @@ interval:
           int hp2_assist_level = (int) lroundf(id(cooling_hp2_assist_level).state);
           if (hp2_assist_level < 0) hp2_assist_level = 0;
           if (hp2_assist_level > max_level) hp2_assist_level = max_level;
-          // Auto dual-HP overrides manual assist level when demand is sustained high.
-          if (id(oq_cooling_auto_dual_hp_enabled) && hp2_assist_level == 0) {
-            hp2_assist_level = std::min(f, 3);
+          // No manual assist set → fall back to the auto cooling-assist level
+          // (0 when inactive, otherwise the stepped 1..max from the state machine).
+          if (hp2_assist_level == 0) {
+            hp2_assist_level = id(oq_cooling_assist_level);
           }
 
           #if OQ_TOPOLOGY_DUO
