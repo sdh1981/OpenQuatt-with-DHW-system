@@ -102,9 +102,10 @@ This prevents hidden control coupling and keeps debugging deterministic.
 ### 4.1 Input layer
 
 - HP telemetry and status from `oq_HP_io` (Modbus registers)
+- DHW tank/coil + CV supply PT1000 temperatures from the CWT-TM-8PT module on Modbus 3 (`oq_cwt_pt_module`)
 - CIC cloud feed from `oq_cic`
 - Home Assistant proxy inputs from `oq_ha_inputs`
-- Local DS18B20 from `oq_local_sensors`
+- Local DS18B20 (optional) from `oq_local_sensors`
 
 ### 4.2 Source abstraction layer
 
