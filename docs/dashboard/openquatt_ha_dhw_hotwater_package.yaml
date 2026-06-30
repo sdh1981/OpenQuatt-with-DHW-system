@@ -1,0 +1,213 @@
+# ==============================================================================
+# OpenQuatt — Warmwater-voorraad berekening (Home Assistant package)
+# ==============================================================================
+# Berekent op basis van de boilertank-temperaturen hoeveel bruikbaar warm water
+# er in de tank zit en hoe lang je kunt tappen/douchen.
+#
+# INSTALLATIE (geen firmware-reflash nodig):
+#   1. Zorg dat HA packages aanstaan. In configuration.yaml:
+#        homeassistant:
+#          packages: !include_dir_named packages
+#   2. Plaats dit bestand in  <config>/packages/openquatt_dhw_hotwater.yaml
+#   3. Herstart Home Assistant (of "YAML configuratie opnieuw laden" +
+#      "Template entities opnieuw laden" + "Invoer (input_number) opnieuw laden").
+#
+# MODEL / AANNAMES:
+#   - Twee-zone tankmodel: gemiddelde tanktemp = (top + bodem) / 2.
+#   - "Bruikbaar warm water" = liters mengwater op taptemperatuur (V40-methode):
+#         V_tap = V_tank * (T_gemiddeld - T_koud) / (T_tap - T_koud)
+#     Dit telt mee dat je koud bijmengt tot taptemperatuur, dus de uitkomst kan
+#     groter zijn dan de tankinhoud. Het is een schatting met 2 sensoren.
+#   - Energie-inhoud boven koudwater: 1,16 Wh per liter per °C.
+#   - Alle drempels staan als input_number en zijn live in HA aanpasbaar.
+#
+# BRON-ENTITEITEN (uit de OpenQuatt firmware):
+#   sensor.openquatt_dhw_tank_top      — effectieve tank-top temperatuur
+#   sensor.openquatt_dhw_tank_bottom   — effectieve tank-bodem temperatuur
+#   number.openquatt_dhw_tank_volume   — tankinhoud in liter (default 220)
+# ==============================================================================
+
+input_number:
+  dhw_calc_cold_inlet_c:
+    name: DHW berekening - koudwater inlaat
+    min: 4
+    max: 20
+    step: 0.5
+    unit_of_measurement: "°C"
+    icon: mdi:snowflake
+  dhw_calc_tap_temp_c:
+    name: DHW berekening - taptemperatuur
+    min: 35
+    max: 45
+    step: 0.5
+    unit_of_measurement: "°C"
+    icon: mdi:water-thermometer
+  dhw_calc_shower_flow_lpm:
+    name: DHW berekening - douchedebiet
+    min: 4
+    max: 25
+    step: 0.5
+    unit_of_measurement: "L/min"
+    icon: mdi:shower-head
+  dhw_calc_full_temp_c:
+    name: DHW berekening - vol referentietemperatuur
+    min: 45
+    max: 70
+    step: 1
+    unit_of_measurement: "°C"
+    icon: mdi:gauge-full
+
+# Zinnige startwaarden voor de input_numbers bij eerste keer laden.
+# (input_number heeft geen 'initial' meer in nieuwe HA; daarom via automation.)
+automation:
+  - id: openquatt_dhw_calc_set_defaults
+    alias: "OpenQuatt DHW berekening - standaardwaarden zetten"
+    trigger:
+      - platform: homeassistant
+        event: start
+    condition:
+      # Alleen zetten als nog leeg/onbekend, zodat handmatige aanpassingen blijven.
+      - condition: template
+        value_template: >
+          {{ states('input_number.dhw_calc_cold_inlet_c') in ['unknown','unavailable','0','0.0'] }}
+    action:
+      - service: input_number.set_value
+        target: {entity_id: input_number.dhw_calc_cold_inlet_c}
+        data: {value: 12}
+      - service: input_number.set_value
+        target: {entity_id: input_number.dhw_calc_tap_temp_c}
+        data: {value: 40}
+      - service: input_number.set_value
+        target: {entity_id: input_number.dhw_calc_shower_flow_lpm}
+        data: {value: 15}
+      - service: input_number.set_value
+        target: {entity_id: input_number.dhw_calc_full_temp_c}
+        data: {value: 55}
+    mode: single
+
+template:
+  - sensor:
+      # ---- Gemiddelde tanktemperatuur (twee-zone) ----
+      - name: "DHW gemiddelde tanktemperatuur"
+        unique_id: openquatt_dhw_mean_temp
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+        icon: mdi:thermometer
+        availability: >
+          {{ has_value('sensor.openquatt_dhw_tank_top')
+             or has_value('sensor.openquatt_dhw_tank_bottom') }}
+        state: >
+          {% set tt = states('sensor.openquatt_dhw_tank_top') | float(0) if has_value('sensor.openquatt_dhw_tank_top') else none %}
+          {% set tb = states('sensor.openquatt_dhw_tank_bottom') | float(0) if has_value('sensor.openquatt_dhw_tank_bottom') else none %}
+          {% if tt is not none and tb is not none %}
+            {{ ((tt + tb) / 2) | round(1) }}
+          {% elif tt is not none %}
+            {{ tt | round(1) }}
+          {% else %}
+            {{ tb | round(1) }}
+          {% endif %}
+
+      # ---- Bruikbaar warm water (liters op taptemperatuur, V40) ----
+      - name: "DHW bruikbaar warm water"
+        unique_id: openquatt_dhw_usable_hot_water
+        unit_of_measurement: "L"
+        state_class: measurement
+        icon: mdi:water
+        availability: "{{ has_value('sensor.dhw_gemiddelde_tanktemperatuur') }}"
+        state: >
+          {% set v  = states('number.openquatt_dhw_tank_volume') | float(220) %}
+          {% set tm = states('sensor.dhw_gemiddelde_tanktemperatuur') | float(0) %}
+          {% set tc = states('input_number.dhw_calc_cold_inlet_c') | float(12) %}
+          {% set tp = states('input_number.dhw_calc_tap_temp_c') | float(40) %}
+          {% if tp > tc and tm > tc %}
+            {{ (v * (tm - tc) / (tp - tc)) | round(0) }}
+          {% else %}
+            0
+          {% endif %}
+
+      # ---- Fysiek warm water in de tank (liters >= taptemp, <= tankinhoud) ----
+      # Twee-zone schatting met top/bodem: aanname van een lineair temperatuur-
+      # profiel tussen bodem en top. Blijft altijd <= tankinhoud. Dit is de
+      # intuitieve "hoeveel van mijn 220 L is warm"-waarde; verschilt bewust van
+      # 'DHW bruikbaar warm water' (V40-mengwater, kan > tankinhoud zijn).
+      - name: "DHW warm water in tank"
+        unique_id: openquatt_dhw_hot_water_in_tank
+        unit_of_measurement: "L"
+        state_class: measurement
+        icon: mdi:cup-water
+        availability: >
+          {{ has_value('sensor.openquatt_dhw_tank_top')
+             or has_value('sensor.openquatt_dhw_tank_bottom') }}
+        state: >
+          {% set v  = states('number.openquatt_dhw_tank_volume') | float(220) %}
+          {% set tp = states('input_number.dhw_calc_tap_temp_c') | float(40) %}
+          {% set tt = states('sensor.openquatt_dhw_tank_top') | float(0) if has_value('sensor.openquatt_dhw_tank_top') else none %}
+          {% set tb = states('sensor.openquatt_dhw_tank_bottom') | float(0) if has_value('sensor.openquatt_dhw_tank_bottom') else none %}
+          {% if tt is not none and tb is not none %}
+            {% if tb >= tp %}
+              {{ v | round(0) }}
+            {% elif tt <= tp %}
+              0
+            {% elif tt > tb %}
+              {{ (v * (tt - tp) / (tt - tb)) | round(0) }}
+            {% else %}
+              {{ (v | round(0)) if (((tt + tb) / 2) >= tp) else 0 }}
+            {% endif %}
+          {% elif tt is not none or tb is not none %}
+            {% set t = tt if tt is not none else tb %}
+            {{ (v | round(0)) if (t >= tp) else 0 }}
+          {% else %}
+            unknown
+          {% endif %}
+
+      # ---- Energie-inhoud boven koudwater (kWh) ----
+      - name: "DHW energie-inhoud"
+        unique_id: openquatt_dhw_energy_content
+        unit_of_measurement: "kWh"
+        device_class: energy
+        state_class: measurement
+        icon: mdi:lightning-bolt
+        availability: "{{ has_value('sensor.dhw_gemiddelde_tanktemperatuur') }}"
+        state: >
+          {% set v  = states('number.openquatt_dhw_tank_volume') | float(220) %}
+          {% set tm = states('sensor.dhw_gemiddelde_tanktemperatuur') | float(0) %}
+          {% set tc = states('input_number.dhw_calc_cold_inlet_c') | float(12) %}
+          {% if tm > tc %}
+            {{ (v * (tm - tc) * 1.16 / 1000) | round(1) }}
+          {% else %}
+            0
+          {% endif %}
+
+      # ---- Geschatte douchetijd (minuten) ----
+      - name: "DHW douchetijd"
+        unique_id: openquatt_dhw_shower_minutes
+        unit_of_measurement: "min"
+        state_class: measurement
+        icon: mdi:shower
+        availability: "{{ has_value('sensor.dhw_bruikbaar_warm_water') }}"
+        state: >
+          {% set liters = states('sensor.dhw_bruikbaar_warm_water') | float(0) %}
+          {% set flow   = states('input_number.dhw_calc_shower_flow_lpm') | float(8) %}
+          {% if flow > 0 %}
+            {{ (liters / flow) | round(0) }}
+          {% else %}
+            0
+          {% endif %}
+
+      # ---- Lading van de tank (% t.o.v. 'vol' referentie) ----
+      - name: "DHW tank lading"
+        unique_id: openquatt_dhw_tank_charge_pct
+        unit_of_measurement: "%"
+        state_class: measurement
+        icon: mdi:battery-heart-variant
+        availability: "{{ has_value('sensor.dhw_gemiddelde_tanktemperatuur') }}"
+        state: >
+          {% set tm = states('sensor.dhw_gemiddelde_tanktemperatuur') | float(0) %}
+          {% set tc = states('input_number.dhw_calc_cold_inlet_c') | float(12) %}
+          {% set tf = states('input_number.dhw_calc_full_temp_c') | float(55) %}
+          {% if tf > tc %}
+            {{ [[((tm - tc) / (tf - tc) * 100), 0] | max, 100] | min | round(0) }}
+          {% else %}
+            0
+          {% endif %}

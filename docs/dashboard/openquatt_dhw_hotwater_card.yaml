@@ -1,0 +1,127 @@
+# ==============================================================================
+# OpenQuatt — Warmwatervoorraad kaart (Lovelace)
+# ==============================================================================
+# Plak deze kaart in je dashboard (werkt in zowel 'sections' als 'masonry').
+# Vereist:
+#   - Package openquatt_ha_dhw_hotwater_package.yaml (de berekende sensoren)
+#   - HACS-kaarten: apexcharts-card en mini-graph-card (heb je al)
+# ==============================================================================
+type: vertical-stack
+cards:
+  - type: heading
+    heading: Warmwatervoorraad
+    heading_style: title
+    icon: mdi:water-boiler
+
+  # ---- Radiale lading-gauge (geanimeerd, gradient blauw -> oranje) ----
+  - type: custom:apexcharts-card
+    header:
+      show: true
+      title: Tank lading
+      show_states: true
+      colorize_states: true
+    chart_type: radialBar
+    series:
+      - entity: sensor.dhw_tank_lading
+        name: Lading
+        min: 0
+        max: 100
+    apex_config:
+      chart:
+        height: 230
+      plotOptions:
+        radialBar:
+          startAngle: -120
+          endAngle: 120
+          hollow:
+            size: 60%
+          dataLabels:
+            name:
+              show: true
+              fontSize: "14px"
+            value:
+              fontSize: "30px"
+              formatter: |
+                EVAL:function (val) { return Math.round(val) + '%'; }
+      fill:
+        type: gradient
+        gradient:
+          shade: light
+          type: horizontal
+          gradientToColors: ["#f0682f"]
+          stops: [0, 100]
+      colors: ["#2f7fe0"]
+
+  # ---- Kerncijfers ----
+  - type: grid
+    columns: 2
+    square: false
+    cards:
+      - type: tile
+        entity: sensor.dhw_warm_water_in_tank
+        name: Warm water in tank
+        icon: mdi:cup-water
+        color: red
+      - type: tile
+        entity: sensor.dhw_bruikbaar_warm_water
+        name: Tapbaar @40°C
+        icon: mdi:water
+        color: blue
+      - type: tile
+        entity: sensor.dhw_douchetijd
+        name: Douchetijd
+        icon: mdi:shower
+        color: cyan
+      - type: tile
+        entity: sensor.dhw_energie_inhoud
+        name: Energie-inhoud
+        icon: mdi:lightning-bolt
+        color: amber
+      - type: tile
+        entity: sensor.dhw_gemiddelde_tanktemperatuur
+        name: Gem. tanktemp
+        icon: mdi:thermometer
+        color: deep-orange
+      - type: tile
+        entity: sensor.openquatt_dhw_state
+        name: DHW status
+        icon: mdi:state-machine
+      - type: tile
+        entity: sensor.openquatt_dhw_estimated_time_to_ready
+        name: Klaar over
+        icon: mdi:timer-sand
+
+  # ---- Stratificatie: top vs bodem over de tijd ----
+  - type: custom:mini-graph-card
+    name: Tankstratificatie
+    icon: mdi:chart-bell-curve
+    hours_to_show: 24
+    points_per_hour: 4
+    line_width: 3
+    smoothing: true
+    entities:
+      - entity: sensor.openquatt_dhw_tank_top
+        name: Top
+        color: "#f0682f"
+      - entity: sensor.openquatt_dhw_tank_bottom
+        name: Bodem
+        color: "#2f7fe0"
+    show:
+      labels: true
+      fill: fade
+
+  # ---- Instelbare aannames voor de berekening ----
+  - type: entities
+    title: Berekening - aannames
+    icon: mdi:tune-variant
+    entities:
+      - entity: input_number.dhw_calc_cold_inlet_c
+        name: Koudwater inlaat
+      - entity: input_number.dhw_calc_tap_temp_c
+        name: Taptemperatuur (comfort)
+      - entity: input_number.dhw_calc_shower_flow_lpm
+        name: Douchedebiet
+      - entity: input_number.dhw_calc_full_temp_c
+        name: "'Vol' referentietemp"
+      - entity: number.openquatt_dhw_tank_volume
+        name: Tankinhoud

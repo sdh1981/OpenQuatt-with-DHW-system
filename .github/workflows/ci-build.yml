@@ -17,10 +17,10 @@ jobs:
         profile:
           - id: duo-lilygo-tconnect-cic
             config: openquatt_duo_lilygo_tconnect+cic.yaml
-            build_path: .esphome/build/openquatt_duo_lilygo_tconnect_cic
+            build_path: build/openquatt_duo_lilygo_tconnect+cic
           - id: duo-lilygo-tconnect
             config: openquatt_duo_lilygo_tconnect.yaml
-            build_path: .esphome/build/openquatt_duo_lilygo_tconnect
+            build_path: build/openquatt_duo_lilygo_tconnect
 
     steps:
       - name: Checkout
@@ -53,12 +53,19 @@ jobs:
       - name: Compile firmware
         run: esphome compile ${{ matrix.profile.config }}
 
+      - name: Show build outputs
+        if: always()
+        run: |
+          echo "Build path: ${{ matrix.profile.build_path }}"
+          ls -la "${{ matrix.profile.build_path }}" || true
+          find "${{ matrix.profile.build_path }}" -maxdepth 4 -type f -name "firmware*.bin" -print || true
+
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v6
         with:
           name: openquatt-${{ matrix.profile.id }}-firmware-${{ github.sha }}
           if-no-files-found: error
           path: |
-            ${{ matrix.profile.build_path }}/.pioenvs/*/firmware.bin
-            ${{ matrix.profile.build_path }}/.pioenvs/*/firmware.ota.bin
-            ${{ matrix.profile.build_path }}/.pioenvs/*/firmware.factory.bin
+            ${{ matrix.profile.build_path }}/.pioenvs/**/firmware.bin
+            ${{ matrix.profile.build_path }}/.pioenvs/**/firmware.ota.bin
+            ${{ matrix.profile.build_path }}/.pioenvs/**/firmware.factory.bin

@@ -188,6 +188,17 @@ globals:
     restore_value: false
     initial_value: '20'
 
+  # Energy OS external cap (optional EnergyOS bridge). The bridge package
+  # oq_energy_os_bridge.yaml exposes a HA number that writes this global; the
+  # power limiter below clamps oq_power_cap_f down to it as its final step.
+  # Default 20 = no limit, so builds WITHOUT the bridge are unaffected. Defined
+  # here (always compiled) so the supervisory lambda can reference it whether or
+  # not the optional bridge package is included.
+  - id: oq_eos_external_cap
+    type: int
+    restore_value: true
+    initial_value: '20'
+
   - id: oq_power_over_soft_s
     type: int
     restore_value: false
@@ -887,6 +898,18 @@ interval:
           id(oq_power_over_peak_s) = 0;
           id(oq_power_under_ok_s) = 0;
           #endif
+
+          // Energy OS external cap (optional bridge): hard downward clamp applied
+          // as the final step of the power limiter, so supervisory recovery (+1)
+          // can never raise oq_power_cap_f above the externally requested cap.
+          // Default global = 20 (no limit) → builds without the EnergyOS bridge
+          // are unaffected.
+          {
+            const int ext_cap = id(oq_eos_external_cap);
+            if (ext_cap < (int) ${oq_power_cap_max_f} && id(oq_power_cap_f) > ext_cap) {
+              id(oq_power_cap_f) = ext_cap;
+            }
+          }
 
           const uint32_t prepost_ms = (uint32_t)(${oq_cm_prepost_s}UL * 1000UL);
           const uint32_t frost_nan_grace_ms = (uint32_t)(${oq_cm_frost_nan_grace_s}UL * 1000UL);
