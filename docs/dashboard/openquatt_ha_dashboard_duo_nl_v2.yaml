@@ -2065,8 +2065,6 @@ views:
         name: Koeling zonder dauwpunt
       - entity: select.openquatt_cooling_enable_source
         name: Koeltoestemming bron
-      - entity: number.openquatt_cooling_minimum_runtime
-        name: Minimale koellooptijd (s)
       - entity: number.openquatt_cooling_night_free_cooling_threshold
         name: Nachtkoeling drempel (°C)
   - type: grid

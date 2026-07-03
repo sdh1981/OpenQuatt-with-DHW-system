@@ -100,17 +100,13 @@ Als de buitentemperatuur onder deze drempel daalt, de ruimtetemperatuur niet mee
 
 Zet dit lager dan je setpoint (bijv. setpoint 22 °C → drempel 20 °C) zodat free cooling alleen actief is als het buiten werkelijk koel is.
 
-## Minimale runtime
+## Anti-pendel (minimale looptijd)
 
-### Koeling minimale runtime
-
-- Entity: `number.openquatt_cooling_minimum_runtime`
-- Standaard: afhankelijk van profiel (480 s voor radiatoren, 900 s voor vloer)
-- Bereik: 0–1800 s (stap 60)
-
-Zodra de warmtepomp voor koeling opstart, wordt hij minimaal deze tijd op niveau 1 gehouden ook als de PI-regelaar de vraag al naar 0 heeft gebracht. Dit voorkomt korte aan-uitcycli bij lage koelvraag.
-
-Stel in op 0 om te deactiveren.
+Er is geen aparte `Cooling Minimum Runtime`-knop meer. Kortcyclus-bescherming loopt
+nu via het **minimum niveau 1 in CM5**: zodra de warmtepomp voor koeling draait,
+zakt hij niet volledig naar 0 maar blijft op niveau 1 tot de vraag terugkeert of
+een harde stop optreedt (koeling uit, veiligheids-trip of DHW-conflict). Zo pendelt
+de compressor niet bij lage koelvraag, zonder dat je een looptijd hoeft in te stellen.
 
 ## Dual-HP koeling (alleen Duo)
 
