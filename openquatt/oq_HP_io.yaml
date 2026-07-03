@@ -456,6 +456,7 @@ sensor:
 
   - platform: modbus_controller
     modbus_controller_id: ${hp_id}
+    id: ${hp_id}_gas_discharge_temp
     name: "${prefix}Gas discharge temperature"
     icon: mdi:thermometer
     register_type: holding
@@ -477,6 +478,7 @@ sensor:
 
   - platform: modbus_controller
     modbus_controller_id: ${hp_id}
+    id: ${hp_id}_gas_return_temp
     name: "${prefix}Gas return temperature"
     icon: mdi:thermometer
     register_type: holding
@@ -574,6 +576,7 @@ sensor:
 
   - platform: modbus_controller
     modbus_controller_id: ${hp_id}
+    id: ${hp_id}_condensing_temp
     name: "${prefix}Condensing temperature"
     icon: mdi:thermometer
     register_type: holding
@@ -595,6 +598,7 @@ sensor:
 
   - platform: modbus_controller
     modbus_controller_id: ${hp_id}
+    id: ${hp_id}_evaporating_temp
     name: "${prefix}Evaporating temperature"
     icon: mdi:thermometer
     register_type: holding
@@ -613,6 +617,41 @@ sensor:
     skip_updates: ${oq_skip_30s}
     web_server:
       sorting_group_id: oq_${hp_id}
+
+  # Afgeleide diagnostiek: oververhitting (superheat), uit al-gelezen gas- +
+  # verzadigingstemperaturen. Nuttig voor koudemiddel-lading/expansie-gezondheid.
+  # Read-only, geen regel-effect.
+  - platform: template
+    id: ${hp_id}_suction_superheat
+    name: "${prefix}Suction superheat"
+    icon: mdi:thermometer-lines
+    unit_of_measurement: "K"
+    state_class: measurement
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 30s
+    lambda: |-
+      if (!id(${hp_id}_gas_return_temp).has_state() || isnan(id(${hp_id}_gas_return_temp).state)) return NAN;
+      if (!id(${hp_id}_evaporating_temp).has_state() || isnan(id(${hp_id}_evaporating_temp).state)) return NAN;
+      return id(${hp_id}_gas_return_temp).state - id(${hp_id}_evaporating_temp).state;
+    web_server:
+      sorting_group_id: oq_hp_diagnostics
+
+  - platform: template
+    id: ${hp_id}_discharge_superheat
+    name: "${prefix}Discharge superheat"
+    icon: mdi:thermometer-lines
+    unit_of_measurement: "K"
+    state_class: measurement
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 30s
+    lambda: |-
+      if (!id(${hp_id}_gas_discharge_temp).has_state() || isnan(id(${hp_id}_gas_discharge_temp).state)) return NAN;
+      if (!id(${hp_id}_condensing_temp).has_state() || isnan(id(${hp_id}_condensing_temp).state)) return NAN;
+      return id(${hp_id}_gas_discharge_temp).state - id(${hp_id}_condensing_temp).state;
+    web_server:
+      sorting_group_id: oq_hp_diagnostics
 
   # ── Water in temperature ────────────────────────────────────────────────────
   # Lambda-filter past kalibratie-offset toe (oq_sensor_calibration.yaml).
