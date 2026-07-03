@@ -674,7 +674,7 @@ views:
     cards:
     - type: heading
       icon: mdi:heat-pump
-      heading: 2e compressor & begrenzing
+      heading: Compressor - begrenzing & superheat
       heading_style: title
     - type: entities
       show_header_toggle: false
@@ -685,10 +685,18 @@ views:
         name: HP1 toerental begrensd
       - entity: sensor.openquatt_hp1_frequency_limit_reason
         name: HP1 begrenzingsreden
+      - entity: sensor.openquatt_hp1_superheat_status
+        name: HP1 superheat status
+      - entity: sensor.openquatt_hp1_suction_superheat
+        name: HP1 suction superheat
       - entity: binary_sensor.openquatt_hp2_compressor_frequency_limited
         name: HP2 toerental begrensd
       - entity: sensor.openquatt_hp2_frequency_limit_reason
         name: HP2 begrenzingsreden
+      - entity: sensor.openquatt_hp2_superheat_status
+        name: HP2 superheat status
+      - entity: sensor.openquatt_hp2_suction_superheat
+        name: HP2 suction superheat
   - type: grid
     cards:
     - type: heading

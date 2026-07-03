@@ -328,6 +328,7 @@ sensor:
 
   - platform: modbus_controller
     modbus_controller_id: ${hp_id}
+    id: ${hp_id}_compressor_freq
     name: "${prefix}Compressor frequency"
     icon: mdi:sine-wave
     register_type: holding
@@ -1183,6 +1184,25 @@ text_sensor:
       if (s & 0x0800u) add("Ambient freq-limit");
       if (out.empty()) return {"Geen"};
       return {out};
+
+  # Superheat-status: labelt de suction superheat, en alleen wanneer de compressor
+  # echt draait (gated op werkelijke frequentie). Read-only diagnostiek.
+  - platform: template
+    id: ${hp_id}_superheat_status
+    name: "${prefix}Superheat status"
+    icon: mdi:gauge
+    entity_category: diagnostic
+    update_interval: 30s
+    web_server:
+      sorting_group_id: oq_hp_diagnostics
+    lambda: |-
+      const float hz = id(${hp_id}_compressor_freq).has_state() ? id(${hp_id}_compressor_freq).state : NAN;
+      if (isnan(hz) || hz < 10.0f) return {"Standby"};
+      if (!id(${hp_id}_suction_superheat).has_state() || isnan(id(${hp_id}_suction_superheat).state)) return {"Onbekend"};
+      const float sh = id(${hp_id}_suction_superheat).state;
+      if (sh < 2.0f) return {"Laag - floodback-risico"};
+      if (sh > 10.0f) return {"Hoog - weinig charge"};
+      return {"OK"};
 
   - platform: template
     id: ${hp_id}_working_mode_label
