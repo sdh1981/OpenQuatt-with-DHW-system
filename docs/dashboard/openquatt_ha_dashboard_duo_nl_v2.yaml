@@ -673,6 +673,33 @@ views:
   - type: grid
     cards:
     - type: heading
+      icon: mdi:heat-pump
+      heading: Compressor - begrenzing & superheat
+      heading_style: title
+    - type: entities
+      show_header_toggle: false
+      entities:
+      - entity: sensor.openquatt_cooling_assist_level_2nd
+        name: Auto-assist niveau (2e)
+      - entity: binary_sensor.openquatt_hp1_compressor_frequency_limited
+        name: HP1 toerental begrensd
+      - entity: sensor.openquatt_hp1_frequency_limit_reason
+        name: HP1 begrenzingsreden
+      - entity: sensor.openquatt_hp1_superheat_status
+        name: HP1 superheat status
+      - entity: sensor.openquatt_hp1_suction_superheat
+        name: HP1 suction superheat
+      - entity: binary_sensor.openquatt_hp2_compressor_frequency_limited
+        name: HP2 toerental begrensd
+      - entity: sensor.openquatt_hp2_frequency_limit_reason
+        name: HP2 begrenzingsreden
+      - entity: sensor.openquatt_hp2_superheat_status
+        name: HP2 superheat status
+      - entity: sensor.openquatt_hp2_suction_superheat
+        name: HP2 suction superheat
+  - type: grid
+    cards:
+    - type: heading
       icon: mdi:water-thermometer
       heading: Dauwpuntveiligheid
       heading_style: title
@@ -2047,8 +2074,14 @@ views:
         name: 2e compressor bijschakelen (handmatig)
       - entity: input_number.openquatt_cooling_room_count
         name: Aantal kamers
+      - entity: switch.openquatt_cooling_auto_assist_2nd_compressor
+        name: 2e compressor - auto-assist aan
       - entity: number.openquatt_cooling_auto_dual_hp_demand_threshold
-        name: Auto dual-HP drempel
+        name: 2e compressor - inschakel-vraag (auto)
+      - entity: number.openquatt_cooling_assist_max_level_2nd
+        name: 2e compressor - max niveau
+      - entity: number.openquatt_cooling_assist_engage_error
+        name: 2e compressor - inschakel-error (K)
       - entity: number.openquatt_cooling_demand_max
         name: Cooling demand max
       - entity: number.openquatt_cooling_minimum_supply_temp
@@ -2065,8 +2098,6 @@ views:
         name: Koeling zonder dauwpunt
       - entity: select.openquatt_cooling_enable_source
         name: Koeltoestemming bron
-      - entity: number.openquatt_cooling_minimum_runtime
-        name: Minimale koellooptijd (s)
       - entity: number.openquatt_cooling_night_free_cooling_threshold
         name: Nachtkoeling drempel (°C)
   - type: grid

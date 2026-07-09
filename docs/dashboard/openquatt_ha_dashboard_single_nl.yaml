@@ -1310,8 +1310,6 @@ views:
               - entity: number.openquatt_cooling_safety_margin
                 name: Cooling safety margin
                 icon: mdi:delta
-              - entity: number.openquatt_cooling_minimum_runtime
-                name: Minimale koellooptijd (s)
               - entity: number.openquatt_cooling_night_free_cooling_threshold
                 name: Nachtkoeling drempel (°C)
               - entity: sensor.openquatt_cooling_stop_reason

@@ -153,11 +153,14 @@ select:
               set_number_value(id(cooling_pid_ki), 0.18f);
               set_number_value(id(cooling_pid_kd), 0.00f);
               set_number_value(id(cooling_demand_max_f), 6.0f);
-              set_number_value(id(cooling_hp2_assist_level), 2.0f);
+              // Auto-assist doet de 2de compressor; geen handmatige assist forceren.
+              set_number_value(id(cooling_hp2_assist_level), 0.0f);
               set_number_value(id(cooling_safety_margin), 1.8f);
               set_number_value(id(cooling_min_supply_temp), 12.0f);
-              set_number_value(id(cooling_min_runtime_s), 480.0f);
-              set_number_value(id(cooling_auto_dual_demand_threshold), 3.0f);
+              set_number_value(id(cooling_auto_dual_demand_threshold), 4.0f);   // engage 2de bij vraag >= 4
+              set_number_value(id(cooling_assist_max_level), 3.0f);
+              set_number_value(id(cooling_assist_engage_error_c), 0.6f);
+              id(cooling_auto_assist_enable).turn_on();
             } else if (x == "Vloerkoeling") {
               set_number_value(id(cooling_request_on_delta), 0.6f);
               set_number_value(id(cooling_request_off_delta), 0.3f);
@@ -168,9 +171,11 @@ select:
               set_number_value(id(cooling_hp2_assist_level), 0.0f);
               set_number_value(id(cooling_safety_margin), 2.2f);
               set_number_value(id(cooling_min_supply_temp), 18.0f);
-              set_number_value(id(cooling_min_runtime_s), 900.0f);
-              // 20 = above the demand_max_f of 4 → auto dual-HP never triggers for floor cooling
               set_number_value(id(cooling_auto_dual_demand_threshold), 20.0f);
+              set_number_value(id(cooling_assist_max_level), 3.0f);
+              set_number_value(id(cooling_assist_engage_error_c), 0.6f);
+              // Vloerkoeling is zacht → één compressor; auto-assist uit.
+              id(cooling_auto_assist_enable).turn_off();
             }
 
 switch:
@@ -213,22 +218,6 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 4
-    entity_category: config
-    web_server:
-      sorting_group_id: oq_cooling
-
-  - platform: template
-    id: cooling_min_runtime_s
-    name: "Cooling Minimum Runtime"
-    icon: mdi:timer-outline
-    unit_of_measurement: "s"
-    min_value: 0
-    max_value: 1800
-    step: 60
-    mode: box
-    optimistic: true
-    restore_value: true
-    initial_value: 600
     entity_category: config
     web_server:
       sorting_group_id: oq_cooling

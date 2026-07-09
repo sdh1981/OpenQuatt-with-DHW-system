@@ -28,7 +28,7 @@ OpenQuatt is driven from explicit topology/hardware entrypoints:
 Each entrypoint includes:
 
 - global project/board/framework config
-- package includes via `openquatt/oq_packages.yaml` (Duo) or `openquatt/oq_packages_single.yaml` (Single)
+- package includes via `openquatt/oq_packages_common.yaml` plus a topology file (`openquatt/topology/oq_topology_packages_duo.yaml` for Duo, `oq_topology_packages_single.yaml` for Single)
 
 Shared runtime services are loaded from `openquatt/oq_common.yaml`, including:
 
@@ -36,7 +36,7 @@ Shared runtime services are loaded from `openquatt/oq_common.yaml`, including:
 - Improv Serial Wi-Fi provisioning plus captive portal fallback
 - HTTP client and Modbus transport
 
-Package include order is intentional:
+Package include order is intentional (Duo build, `openquatt/oq_packages_common.yaml`):
 
 1. `oq_common`
 2. `oq_supervisory_controlmode`
@@ -54,13 +54,22 @@ Package include order is intentional:
 14. `oq_cic`
 15. `oq_ha_inputs`
 16. `oq_local_sensors`
-17. `oq_sensor_sources`
-18. `oq_ot_slave`
-19. `oq_webserver`
-20. `oq_HP_io` (HP1 always; HP2 only on Duo)
+17. `oq_sensor_sources` (includes `oq_cooling_safety`)
+18. `oq_setup_status`
+19. `oq_sensor_calibration`
+20. `oq_pressure_protection`
+21. `oq_supply_temp_protection`
+22. `oq_smart_diagnostics`
+23. `oq_webserver`
+24. `oq_HP_io` (HP1 always; HP2 only on Duo)
+
+`openquatt_base.yaml` additionally loads `oq_cwt_pt_module` (PT1000 tank/coil/supply
+sensors on Modbus 3). The `+cic` entrypoint adds `oq_cic_modbus_slave` and,
+optionally, `oq_energy_os_bridge`.
 
 This order mirrors data dependencies and ownership boundaries.
-`oq_ot_slave` uses the ESP-IDF RMT-based OpenTherm runtime and is only intended for RMT-capable ESP32 targets.
+`oq_ot_slave` (ESP-IDF RMT OpenTherm) is kept in the repo but is **disabled by
+default since v0.40**; enable its include only on RMT-capable targets that need it.
 
 ## 2. Ownership Model
 
@@ -78,7 +87,13 @@ OpenQuatt follows strict subsystem ownership:
 - **External feed ingest**: `oq_cic`
 - **External HA proxy ingest**: `oq_ha_inputs`
 - **Local DS18B20 ingest**: `oq_local_sensors`
+- **PT1000 tank/coil/supply ingest (Modbus 3)**: `oq_cwt_pt_module`
 - **Source selection and selected-source synthesis**: `oq_sensor_sources`
+- **Dew-point cooling safety**: `oq_cooling_safety`
+- **Sensor offset calibration**: `oq_sensor_calibration`
+- **Pressure / supply-temperature safety guards**: `oq_pressure_protection`, `oq_supply_temp_protection`
+- **Smart diagnostics**: `oq_smart_diagnostics`
+- **CIC Modbus slave (RS485 #2)**: `oq_cic_modbus_slave` (+CIC build)
 - **Shared runtime services and service entities**: `oq_common`
 
 This prevents hidden control coupling and keeps debugging deterministic.

@@ -22,9 +22,8 @@ substitutions:
   # v0.40: OpenTherm pin substituties verwijderd (OT package niet meer geïncludeerd).
   # GPIO14 en GPIO12 zijn vrij voor toekomstig gebruik.
   oq_boiler_relay_pin: "GPIO48"                         # Boiler relay output placeholder.
-  oq_dhw_valve_relay_pin: "GPIO40"                      # Dedicated DHW 3-way valve relay output (kept separate from RS485 RTS GPIO21).
-  oq_dhw_valve_aux_drive_pin: "GPIO11"                  # DHW valve aux contact drive GPIO (held HIGH).
-  oq_dhw_valve_aux_sense_pin: "GPIO13"                  # DHW valve aux contact sense GPIO (reads HIGH when contact closes to drive).
+  # DHW-klep/aux pinnen (GPIO40 relais, GPIO11 aux-drive, GPIO13 aux-sense) komen
+  # uit oq_substitutions_common.yaml (gedeelde defaults) — hier niet dupliceren.
   # v0.40: MAX31865 SPI pin assignments removed (PT1000 coil sensors now via CWT-TM-8PT on Modbus 3).
   # GPIO38/39/41/47/2 are now free for future use.
 # profile_revision_log:

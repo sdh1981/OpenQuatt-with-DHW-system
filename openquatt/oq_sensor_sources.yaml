@@ -388,34 +388,70 @@ sensor:
     accuracy_decimals: 1
     update_interval: 5s
     lambda: |-
-      if (!id(flow_source).has_state()) return NAN;
-      const auto source = id(flow_source).current_option();
-      if (source == "CIC") {
-        if (id(flow_rate_cic).has_state()) return id(flow_rate_cic).state;
+      auto real_selected = [&]() -> float {
+        if (!id(flow_source).has_state()) return NAN;
+        const auto source = id(flow_source).current_option();
+        if (source == "CIC") {
+          if (id(flow_rate_cic).has_state()) return id(flow_rate_cic).state;
+          return NAN;
+        }
+        if (source == "Outdoor unit") {
+          #if OQ_TOPOLOGY_DUO
+          const auto local_mode = id(oq_duo_outdoor_flow_mode).current_option();
+          if (local_mode == "Flowmeter HP1") {
+            if (id(hp1_flow).has_state()) return id(hp1_flow).state;
+            return NAN;
+          }
+          if (local_mode == "Flowmeter HP2") {
+            if (id(${flow_secondary_flow_sensor_id}).has_state()) return id(${flow_secondary_flow_sensor_id}).state;
+            return NAN;
+          }
+          #endif
+          if (id(flow_rate_hp_avg).has_state()) return id(flow_rate_hp_avg).state;
+          return NAN;
+        }
         return NAN;
-      }
-      if (source == "Outdoor unit") {
+      };
+      const float real = real_selected();
+
+      // Predicted-flow fallback (opt-in, oq_flow_predict.yaml). Alleen inspringen
+      // als de echte flow ontbreekt of de bijbehorende sensor 'suspect' is. Een
+      // model ziet een echte verstopping niet → bewust vangnet; de HP-eigen druk/
+      // temp-beveiliging is dan het net. Schakelaar: flow_predicted_fallback_enable.
+      id(oq_flow_fallback_active) = false;
+      if (id(flow_predicted_fallback_enable).state) {
+        const auto source = id(flow_source).has_state() ? id(flow_source).current_option() : std::string("");
+        auto pred1 = [&]() -> float {
+          return (id(hp1_predicted_flow).has_state() && !isnan(id(hp1_predicted_flow).state)) ? id(hp1_predicted_flow).state : NAN;
+        };
+        bool bad = isnan(real);
+        float pred = NAN;
         #if OQ_TOPOLOGY_DUO
-        // Duo-only local flow selector:
-        // - HP1/HP2 = direct individual flowmeter
-        // - Local aggregate HP1/HP2 = existing combined local flow signal
-        //   (normally average, but with mismatch guard inside flow_rate_hp_avg)
-        // This keeps the main flow source selector compact while still allowing
-        // per-flowmeter inspection and explicit selection for local Duo flow.
-        const auto local_mode = id(oq_duo_outdoor_flow_mode).current_option();
-        if (local_mode == "Flowmeter HP1") {
-          if (id(hp1_flow).has_state()) return id(hp1_flow).state;
-          return NAN;
+        auto pred2 = [&]() -> float {
+          return (id(hp2_predicted_flow).has_state() && !isnan(id(hp2_predicted_flow).state)) ? id(hp2_predicted_flow).state : NAN;
+        };
+        const auto local_mode = id(oq_duo_outdoor_flow_mode).has_state() ? id(oq_duo_outdoor_flow_mode).current_option() : std::string("");
+        if (source == "Outdoor unit" && local_mode == "Flowmeter HP1") {
+          bad = bad || id(hp1_flow_suspect).state; pred = pred1();
+        } else if (source == "Outdoor unit" && local_mode == "Flowmeter HP2") {
+          bad = bad || id(hp2_flow_suspect).state; pred = pred2();
+        } else {
+          bad = bad || (id(hp1_flow_suspect).state && id(hp2_flow_suspect).state);
+          const float p1 = pred1(), p2 = pred2();
+          if (!isnan(p1) && !isnan(p2)) pred = 0.5f * (p1 + p2);
+          else if (!isnan(p1)) pred = p1;
+          else pred = p2;
         }
-        if (local_mode == "Flowmeter HP2") {
-          if (id(${flow_secondary_flow_sensor_id}).has_state()) return id(${flow_secondary_flow_sensor_id}).state;
-          return NAN;
-        }
+        #else
+        bad = bad || id(hp1_flow_suspect).state;
+        pred = pred1();
         #endif
-        if (id(flow_rate_hp_avg).has_state()) return id(flow_rate_hp_avg).state;
-        return NAN;
+        if (bad && !isnan(pred)) {
+          id(oq_flow_fallback_active) = true;
+          return pred;
+        }
       }
-      return NAN;
+      return real;
     web_server:
       sorting_group_id: oq_hydraulics
 

@@ -328,6 +328,7 @@ sensor:
 
   - platform: modbus_controller
     modbus_controller_id: ${hp_id}
+    id: ${hp_id}_compressor_freq
     name: "${prefix}Compressor frequency"
     icon: mdi:sine-wave
     register_type: holding
@@ -456,6 +457,7 @@ sensor:
 
   - platform: modbus_controller
     modbus_controller_id: ${hp_id}
+    id: ${hp_id}_gas_discharge_temp
     name: "${prefix}Gas discharge temperature"
     icon: mdi:thermometer
     register_type: holding
@@ -477,6 +479,7 @@ sensor:
 
   - platform: modbus_controller
     modbus_controller_id: ${hp_id}
+    id: ${hp_id}_gas_return_temp
     name: "${prefix}Gas return temperature"
     icon: mdi:thermometer
     register_type: holding
@@ -574,6 +577,7 @@ sensor:
 
   - platform: modbus_controller
     modbus_controller_id: ${hp_id}
+    id: ${hp_id}_condensing_temp
     name: "${prefix}Condensing temperature"
     icon: mdi:thermometer
     register_type: holding
@@ -595,6 +599,7 @@ sensor:
 
   - platform: modbus_controller
     modbus_controller_id: ${hp_id}
+    id: ${hp_id}_evaporating_temp
     name: "${prefix}Evaporating temperature"
     icon: mdi:thermometer
     register_type: holding
@@ -613,6 +618,41 @@ sensor:
     skip_updates: ${oq_skip_30s}
     web_server:
       sorting_group_id: oq_${hp_id}
+
+  # Afgeleide diagnostiek: oververhitting (superheat), uit al-gelezen gas- +
+  # verzadigingstemperaturen. Nuttig voor koudemiddel-lading/expansie-gezondheid.
+  # Read-only, geen regel-effect.
+  - platform: template
+    id: ${hp_id}_suction_superheat
+    name: "${prefix}Suction superheat"
+    icon: mdi:thermometer-lines
+    unit_of_measurement: "K"
+    state_class: measurement
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 30s
+    lambda: |-
+      if (!id(${hp_id}_gas_return_temp).has_state() || isnan(id(${hp_id}_gas_return_temp).state)) return NAN;
+      if (!id(${hp_id}_evaporating_temp).has_state() || isnan(id(${hp_id}_evaporating_temp).state)) return NAN;
+      return id(${hp_id}_gas_return_temp).state - id(${hp_id}_evaporating_temp).state;
+    web_server:
+      sorting_group_id: oq_hp_diagnostics
+
+  - platform: template
+    id: ${hp_id}_discharge_superheat
+    name: "${prefix}Discharge superheat"
+    icon: mdi:thermometer-lines
+    unit_of_measurement: "K"
+    state_class: measurement
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 30s
+    lambda: |-
+      if (!id(${hp_id}_gas_discharge_temp).has_state() || isnan(id(${hp_id}_gas_discharge_temp).state)) return NAN;
+      if (!id(${hp_id}_condensing_temp).has_state() || isnan(id(${hp_id}_condensing_temp).state)) return NAN;
+      return id(${hp_id}_gas_discharge_temp).state - id(${hp_id}_condensing_temp).state;
+    web_server:
+      sorting_group_id: oq_hp_diagnostics
 
   # ── Water in temperature ────────────────────────────────────────────────────
   # Lambda-filter past kalibratie-offset toe (oq_sensor_calibration.yaml).
@@ -720,6 +760,13 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.618
+      # Glitch/spike-onderdrukking (v0.42): de Huba-flowsensor kan bij (beginnende)
+      # storing losse ruispieken/dips geven. Een korte median filtert enkele
+      # uitschieters weg zonder een echte, aanhoudende verandering te verbergen.
+      - median:
+          window_size: 5
+          send_every: 1
+          send_first_at: 1
       # Phantom flow suppression (v0.40):
       # De Quatt flow-sensor rapporteert in CM0 soms een kleine niet-nul waarde
       # door natuurlijke convectie of sensor-offset ("phantom flow"). Dit leidt
@@ -1074,6 +1121,26 @@ binary_sensor:
     web_server:
       sorting_group_id: oq_hp_diagnostics
 
+  # Flow reading suspect: compressor draait (freq > 10 Hz) maar de flow leest
+  # aanhoudend te laag/afwezig → waarschijnlijk een falende flowsensor (of een
+  # echte flowstoring). Read-only diagnose; verandert de interlock/veiligheid niet.
+  - platform: template
+    id: ${hp_id}_flow_suspect
+    name: "${prefix}Flow reading suspect"
+    icon: mdi:water-alert
+    device_class: problem
+    entity_category: diagnostic
+    lambda: |-
+      const float hz = id(${hp_id}_compressor_freq).has_state() ? id(${hp_id}_compressor_freq).state : NAN;
+      const float fl = id(${hp_id}_flow).has_state() ? id(${hp_id}_flow).state : NAN;
+      if (isnan(hz) || isnan(fl)) return false;
+      return (hz > 10.0f) && (fl < 100.0f);
+    filters:
+      - delayed_on: 90s
+      - delayed_off: 30s
+    web_server:
+      sorting_group_id: oq_hp_diagnostics
+
   - platform: template
     id: ${hp_id}_ot_fault_active
     name: "${prefix}OT fault active"
@@ -1144,6 +1211,25 @@ text_sensor:
       if (s & 0x0800u) add("Ambient freq-limit");
       if (out.empty()) return {"Geen"};
       return {out};
+
+  # Superheat-status: labelt de suction superheat, en alleen wanneer de compressor
+  # echt draait (gated op werkelijke frequentie). Read-only diagnostiek.
+  - platform: template
+    id: ${hp_id}_superheat_status
+    name: "${prefix}Superheat status"
+    icon: mdi:gauge
+    entity_category: diagnostic
+    update_interval: 30s
+    web_server:
+      sorting_group_id: oq_hp_diagnostics
+    lambda: |-
+      const float hz = id(${hp_id}_compressor_freq).has_state() ? id(${hp_id}_compressor_freq).state : NAN;
+      if (isnan(hz) || hz < 10.0f) return {"Standby"};
+      if (!id(${hp_id}_suction_superheat).has_state() || isnan(id(${hp_id}_suction_superheat).state)) return {"Onbekend"};
+      const float sh = id(${hp_id}_suction_superheat).state;
+      if (sh < 2.0f) return {"Laag - floodback-risico"};
+      if (sh > 10.0f) return {"Hoog - weinig charge"};
+      return {"OK"};
 
   - platform: template
     id: ${hp_id}_working_mode_label
