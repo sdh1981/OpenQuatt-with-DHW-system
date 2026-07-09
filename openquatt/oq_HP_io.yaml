@@ -968,35 +968,6 @@ sensor:
     skip_updates: ${oq_skip_30s}
     internal: true
 
-  # ── Flow-sensor configuratie (experimenteel) ────────────────────────────────
-  # Leest de ODU-config: flowsensor-merk (doc 3459 = OQ 3458) en de bijbehorende
-  # correctiefactor (doc 3495 = OQ 3494). Handig om te bevestigen dat de print op
-  # 'Huba' staat en om een eventuele overstap naar 'Sika' te verifiëren. Read-only,
-  # laag pollritme. NB: zijn deze registers niet via fn03 leesbaar (config/EEPROM),
-  # dan blijven ze 'unavailable' → dan gewoon weghalen.
-  - platform: modbus_controller
-    modbus_controller_id: ${hp_id}
-    id: ${hp_id}_flow_sensor_type_raw
-    register_type: holding
-    address: 3458
-    value_type: U_WORD
-    skip_updates: 120
-    internal: true
-
-  - platform: modbus_controller
-    modbus_controller_id: ${hp_id}
-    id: ${hp_id}_flow_correction
-    name: "${prefix}Flow correction value"
-    icon: mdi:tune-variant
-    register_type: holding
-    address: 3494
-    value_type: U_WORD
-    accuracy_decimals: 0
-    entity_category: diagnostic
-    skip_updates: 120
-    web_server:
-      sorting_group_id: oq_hp_diagnostics
-
   # ----------------------------
   # BINARY SENSOR
   # ----------------------------
@@ -1259,23 +1230,6 @@ text_sensor:
       if (sh < 2.0f) return {"Laag - floodback-risico"};
       if (sh > 10.0f) return {"Hoog - weinig charge"};
       return {"OK"};
-
-  # Geconfigureerd flowsensor-merk in de ODU (reg 3459). Read-only diagnose.
-  - platform: template
-    id: ${hp_id}_flow_sensor_type
-    name: "${prefix}Flow sensor type"
-    icon: mdi:water-check
-    entity_category: diagnostic
-    update_interval: 60s
-    web_server:
-      sorting_group_id: oq_hp_diagnostics
-    lambda: |-
-      if (!id(${hp_id}_flow_sensor_type_raw).has_state() || isnan(id(${hp_id}_flow_sensor_type_raw).state)) return {"Onbekend"};
-      const int t = (int) lroundf(id(${hp_id}_flow_sensor_type_raw).state);
-      if (t == 0) return {"Uit (No Enable)"};
-      if (t == 1) return {"Sika"};
-      if (t == 2) return {"Huba"};
-      return {"Onbekend"};
 
   - platform: template
     id: ${hp_id}_working_mode_label
