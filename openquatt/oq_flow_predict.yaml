@@ -61,6 +61,12 @@ globals:
     restore_value: true
     initial_value: '0.0'
 
+  # Actief = de predicted-flow fallback vervangt nu de echte (kapotte) sensor.
+  - id: oq_flow_fallback_active
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
 interval:
   - interval: 10s
     then:
@@ -192,3 +198,33 @@ sensor:
       #else
       return NAN;
       #endif
+
+# ==============================================================================
+# Increment 2: opt-in fallback — laat de flow-keten op predicted draaien als de
+# echte sensor suspect/afwezig is. Raakt de veiligheidsketen (interlock), dus
+# bewust default UIT. De predicted flow voedt dan flow_rate_selected (zie
+# oq_sensor_sources.yaml). Een model ziet geen echte verstopping → gebruik alleen
+# als vangnet; de HP-eigen druk/temp-beveiliging is dan het net.
+# ==============================================================================
+switch:
+  - platform: template
+    id: flow_predicted_fallback_enable
+    name: "Flow predicted fallback (sensorless)"
+    icon: mdi:water-sync
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_hydraulics
+
+binary_sensor:
+  - platform: template
+    id: flow_predicted_fallback_active
+    name: "Flow predicted fallback active"
+    icon: mdi:water-alert
+    device_class: running
+    entity_category: diagnostic
+    lambda: |-
+      return id(oq_flow_fallback_active);
+    web_server:
+      sorting_group_id: oq_hydraulics
