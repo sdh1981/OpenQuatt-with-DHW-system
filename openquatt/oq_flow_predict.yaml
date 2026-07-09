@@ -1,0 +1,194 @@
+# ==============================================================================
+# OpenQuatt - Predicted flow (self-learning pomp→flow model)
+# ==============================================================================
+# Doel:
+#   Vangnet voor als de fysieke flowsensor(en) sneuvelen. Terwijl de echte flow
+#   gezond is (flow_valid + niet 'flow reading suspect'), leert OpenQuatt per HP
+#   de relatie tussen pomp-iPWM (${hp_id}_pump_speed, 0..1000) en de gemeten flow
+#   via een adaptieve lineaire regressie (EMA-covariantie). Daaruit volgt een
+#   'predicted flow' die je kunt vergelijken met de echte sensor.
+#
+# Veiligheid:
+#   - Puur READ-ONLY. Deze predicted flow voedt NIET de low-flow-interlock.
+#     (Een model kan een echte verstopping/luchtslot niet zien; dat zou de
+#      droogloop-beveiliging ondermijnen.) Een opt-in interlock-fallback is een
+#      aparte, bewuste vervolgstap.
+#   - De afwijking (gemeten − predicted) is ook een vroege sensor-fault-detector:
+#     loopt die op terwijl de pomp stabiel draait → sensor drift/defect.
+# ==============================================================================
+
+globals:
+  # Adaptief lineair model per HP: flow ≈ a + b·iPWM, via EMA van de covariantie.
+  - id: hp1_fm_mx
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: hp1_fm_my
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: hp1_fm_sxx
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: hp1_fm_sxy
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: hp1_fm_n
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+
+  - id: hp2_fm_mx
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: hp2_fm_my
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: hp2_fm_sxx
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: hp2_fm_sxy
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: hp2_fm_n
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+
+interval:
+  - interval: 10s
+    then:
+      - lambda: |-
+          const float alpha = 0.02f;   // leersnelheid (~50-sample venster, adaptief)
+          auto learn = [&](float ip, float fl, bool suspect,
+                           float &mx, float &my, float &sxx, float &sxy, float &n) {
+            if (isnan(ip) || isnan(fl)) return;
+            if (ip < 100.0f || fl < 80.0f) return;   // pomp moet meaningful draaien
+            if (suspect) return;                      // niet leren van een verdachte sensor
+            if (n < 1.0f) {
+              mx = ip; my = fl; sxx = 0.0f; sxy = 0.0f;
+            } else {
+              const float dx = ip - mx;
+              const float dy = fl - my;
+              mx += alpha * dx;
+              my += alpha * dy;
+              sxx = (1.0f - alpha) * (sxx + alpha * dx * dx);
+              sxy = (1.0f - alpha) * (sxy + alpha * dx * dy);
+            }
+            if (n < 100000.0f) n += 1.0f;
+          };
+
+          learn(
+            id(hp1_pump_speed).has_state() ? id(hp1_pump_speed).state : NAN,
+            id(hp1_flow).has_state() ? id(hp1_flow).state : NAN,
+            id(hp1_flow_suspect).state,
+            id(hp1_fm_mx), id(hp1_fm_my), id(hp1_fm_sxx), id(hp1_fm_sxy), id(hp1_fm_n));
+
+          #if OQ_TOPOLOGY_DUO
+          learn(
+            id(hp2_pump_speed).has_state() ? id(hp2_pump_speed).state : NAN,
+            id(hp2_flow).has_state() ? id(hp2_flow).state : NAN,
+            id(hp2_flow_suspect).state,
+            id(hp2_fm_mx), id(hp2_fm_my), id(hp2_fm_sxx), id(hp2_fm_sxy), id(hp2_fm_n));
+          #endif
+
+sensor:
+  - platform: template
+    id: hp1_predicted_flow
+    name: "HP1 - Predicted flow"
+    icon: mdi:water-sync
+    unit_of_measurement: "L/h"
+    device_class: volume_flow_rate
+    state_class: measurement
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: 10s
+    web_server:
+      sorting_group_id: oq_hydraulics
+    lambda: |-
+      if (id(hp1_fm_n) < 30.0f) return NAN;          // nog te weinig geleerd
+      const float ip = id(hp1_pump_speed).has_state() ? id(hp1_pump_speed).state : NAN;
+      if (isnan(ip)) return NAN;
+      float pred;
+      if (id(hp1_fm_sxx) >= 100.0f) {                // genoeg iPWM-spreiding → helling
+        const float b = id(hp1_fm_sxy) / id(hp1_fm_sxx);
+        pred = (id(hp1_fm_my) - b * id(hp1_fm_mx)) + b * ip;
+      } else {
+        pred = id(hp1_fm_my);                         // constante-flow fallback
+      }
+      if (pred < 0.0f) pred = 0.0f;
+      if (pred > 5000.0f) pred = 5000.0f;
+      return pred;
+
+  - platform: template
+    id: hp1_flow_deviation
+    name: "HP1 - Flow vs predicted"
+    icon: mdi:delta
+    unit_of_measurement: "L/h"
+    state_class: measurement
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: 10s
+    web_server:
+      sorting_group_id: oq_hydraulics
+    lambda: |-
+      if (!id(hp1_flow).has_state() || isnan(id(hp1_flow).state)) return NAN;
+      if (!id(hp1_predicted_flow).has_state() || isnan(id(hp1_predicted_flow).state)) return NAN;
+      return id(hp1_flow).state - id(hp1_predicted_flow).state;
+
+  - platform: template
+    id: hp2_predicted_flow
+    name: "HP2 - Predicted flow"
+    icon: mdi:water-sync
+    unit_of_measurement: "L/h"
+    device_class: volume_flow_rate
+    state_class: measurement
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: 10s
+    web_server:
+      sorting_group_id: oq_hydraulics
+    lambda: |-
+      #if OQ_TOPOLOGY_DUO
+      if (id(hp2_fm_n) < 30.0f) return NAN;
+      const float ip = id(hp2_pump_speed).has_state() ? id(hp2_pump_speed).state : NAN;
+      if (isnan(ip)) return NAN;
+      float pred;
+      if (id(hp2_fm_sxx) >= 100.0f) {
+        const float b = id(hp2_fm_sxy) / id(hp2_fm_sxx);
+        pred = (id(hp2_fm_my) - b * id(hp2_fm_mx)) + b * ip;
+      } else {
+        pred = id(hp2_fm_my);
+      }
+      if (pred < 0.0f) pred = 0.0f;
+      if (pred > 5000.0f) pred = 5000.0f;
+      return pred;
+      #else
+      return NAN;
+      #endif
+
+  - platform: template
+    id: hp2_flow_deviation
+    name: "HP2 - Flow vs predicted"
+    icon: mdi:delta
+    unit_of_measurement: "L/h"
+    state_class: measurement
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: 10s
+    web_server:
+      sorting_group_id: oq_hydraulics
+    lambda: |-
+      #if OQ_TOPOLOGY_DUO
+      if (!id(hp2_flow).has_state() || isnan(id(hp2_flow).state)) return NAN;
+      if (!id(hp2_predicted_flow).has_state() || isnan(id(hp2_predicted_flow).state)) return NAN;
+      return id(hp2_flow).state - id(hp2_predicted_flow).state;
+      #else
+      return NAN;
+      #endif
