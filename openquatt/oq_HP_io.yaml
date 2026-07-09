@@ -760,6 +760,13 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.618
+      # Glitch/spike-onderdrukking (v0.42): de Huba-flowsensor kan bij (beginnende)
+      # storing losse ruispieken/dips geven. Een korte median filtert enkele
+      # uitschieters weg zonder een echte, aanhoudende verandering te verbergen.
+      - median:
+          window_size: 5
+          send_every: 1
+          send_first_at: 1
       # Phantom flow suppression (v0.40):
       # De Quatt flow-sensor rapporteert in CM0 soms een kleine niet-nul waarde
       # door natuurlijke convectie of sensor-offset ("phantom flow"). Dit leidt
@@ -1111,6 +1118,26 @@ binary_sensor:
       if (isnan(raw)) return false;
       const uint16_t s = static_cast<uint16_t>(lroundf(raw));
       return (s & (0x0020u | 0x0800u | 0x2000u)) != 0;
+    web_server:
+      sorting_group_id: oq_hp_diagnostics
+
+  # Flow reading suspect: compressor draait (freq > 10 Hz) maar de flow leest
+  # aanhoudend te laag/afwezig → waarschijnlijk een falende flowsensor (of een
+  # echte flowstoring). Read-only diagnose; verandert de interlock/veiligheid niet.
+  - platform: template
+    id: ${hp_id}_flow_suspect
+    name: "${prefix}Flow reading suspect"
+    icon: mdi:water-alert
+    device_class: problem
+    entity_category: diagnostic
+    lambda: |-
+      const float hz = id(${hp_id}_compressor_freq).has_state() ? id(${hp_id}_compressor_freq).state : NAN;
+      const float fl = id(${hp_id}_flow).has_state() ? id(${hp_id}_flow).state : NAN;
+      if (isnan(hz) || isnan(fl)) return false;
+      return (hz > 10.0f) && (fl < 100.0f);
+    filters:
+      - delayed_on: 90s
+      - delayed_off: 30s
     web_server:
       sorting_group_id: oq_hp_diagnostics
 
