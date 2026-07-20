@@ -1,0 +1,300 @@
+# ==============================================================================
+# OpenQuatt - Adaptive Heating (zelflerende stooklijn-offset)
+# ==============================================================================
+# Doel:
+#   Derde ControlMode naast "Power House" en "Water Temperature Control".
+#   Adaptive Heating draait op dezelfde stooklijn-tak (oq_heat_mode_code == 1),
+#   maar legt daar een langzaam lerende offset overheen die zoekt naar de
+#   LAAGST mogelijke aanvoertemperatuur waarbij de kamer z'n setpoint nog haalt.
+#
+# Waarom:
+#   - Rendement: elke K lagere aanvoer is grofweg 2-3% betere COP.
+#   - Slijtage (R32): lagere lift = lagere persgastemperatuur = minder kans dat
+#     de ODU zichzelf afknijpt (high-pressure speed-down / freq-limit) en minder
+#     thermische stress op de compressor.
+#
+# Regel (integrerend, bewust asymmetrisch — comfort gaat voor):
+#   - kamer op/boven setpoint  -> offset LANGZAAM omlaag (zoeken naar minimum)
+#   - kamer onder setpoint     -> offset SNELLER omhoog (comfort terugpakken)
+#   - binnen deadband          -> vasthouden
+#   Het resultaat is een kleine slingering rond het echte minimum.
+#
+# Veiligheid / anti-misleren: leren wordt gepauzeerd bij
+#   - koelbedrijf (CM5), DHW-prioriteit (CV wordt dan niet bediend), defrost
+#   - kort na een setpoint-wijziging (huis is traag; anders overcorrigeert hij)
+#   Omhoog corrigeren mag alleen als het systeem ook echt warmte vraagt.
+#
+# De offset zelf blijft READ-ONLY t.o.v. de veiligheidsketen: hij wordt in
+# oq_heating_curve_strategy.yaml op het target toegepast en daar alsnog begrensd
+# door max_water_temp_limit_c (boven) en adapt_min_supply_c (onder).
+# ==============================================================================
+
+globals:
+  # Actief = ControlMode staat op "Adaptive Heating".
+  - id: oq_adapt_active
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+  # Geleerde offset op het stooklijn-target, in K. Negatief = lagere aanvoer.
+  # Blijft bewaard over reboots: dit is duur geleerde kennis over het huis.
+  - id: oq_adapt_offset_c
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+
+  - id: oq_adapt_last_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+  # Settle-timer na een setpoint-wijziging.
+  - id: oq_adapt_hold_until_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+  - id: oq_adapt_last_setpoint_c
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+
+  # 0=uit, 1=gepauzeerd, 2=leren omlaag, 3=stabiel, 4=corrigeren omhoog
+  - id: oq_adapt_state_code
+    type: int
+    restore_value: false
+    initial_value: '0'
+
+number:
+  - platform: template
+    id: adapt_max_down_c
+    name: "Adaptive max trim down"
+    icon: mdi:arrow-down-thin
+    unit_of_measurement: "K"
+    min_value: 0
+    max_value: 15
+    step: 0.5
+    restore_value: true
+    optimistic: true
+    initial_value: 8
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_heating_curve
+
+  - platform: template
+    id: adapt_max_up_c
+    name: "Adaptive max trim up"
+    icon: mdi:arrow-up-thin
+    unit_of_measurement: "K"
+    min_value: 0
+    max_value: 10
+    step: 0.5
+    restore_value: true
+    optimistic: true
+    initial_value: 4
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_heating_curve
+
+  - platform: template
+    id: adapt_rate_down_c_h
+    name: "Adaptive learn rate down"
+    icon: mdi:speedometer-slow
+    unit_of_measurement: "K/h"
+    min_value: 0.05
+    max_value: 2.0
+    step: 0.05
+    restore_value: true
+    optimistic: true
+    initial_value: 0.2
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_heating_curve
+
+  - platform: template
+    id: adapt_rate_up_c_h
+    name: "Adaptive learn rate up"
+    icon: mdi:speedometer
+    unit_of_measurement: "K/h"
+    min_value: 0.05
+    max_value: 5.0
+    step: 0.05
+    restore_value: true
+    optimistic: true
+    initial_value: 0.8
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_heating_curve
+
+  - platform: template
+    id: adapt_deadband_c
+    name: "Adaptive room deadband"
+    icon: mdi:arrow-expand-vertical
+    unit_of_measurement: "K"
+    min_value: 0
+    max_value: 1.0
+    step: 0.05
+    restore_value: true
+    optimistic: true
+    initial_value: 0.2
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_heating_curve
+
+  - platform: template
+    id: adapt_min_supply_c
+    name: "Adaptive minimum supply"
+    icon: mdi:thermometer-low
+    unit_of_measurement: "°C"
+    min_value: 20
+    max_value: 45
+    step: 1
+    restore_value: true
+    optimistic: true
+    initial_value: 25
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_heating_curve
+
+  - platform: template
+    id: adapt_settle_min
+    name: "Adaptive settle after setpoint change"
+    icon: mdi:timer-sand
+    unit_of_measurement: "min"
+    min_value: 0
+    max_value: 180
+    step: 5
+    restore_value: true
+    optimistic: true
+    initial_value: 30
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_heating_curve
+
+button:
+  - platform: template
+    id: adapt_reset_offset
+    name: "Adaptive reset learned offset"
+    icon: mdi:restart
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_heating_curve
+    on_press:
+      then:
+        - lambda: |-
+            id(oq_adapt_offset_c) = 0.0f;
+            id(oq_adapt_hold_until_ms) = 0;
+            id(oq_adapt_last_setpoint_c) = NAN;
+
+interval:
+  - interval: 60s
+    startup_delay: 20s
+    then:
+      - lambda: |-
+          const uint32_t now_ms = (uint32_t) millis();
+
+          // Verstreken tijd sinds de vorige leerstap (uur), met rollover-/gap-guard.
+          float dt_h = 0.0f;
+          const uint32_t last_ms = id(oq_adapt_last_ms);
+          if (last_ms != 0 && now_ms > last_ms) {
+            dt_h = (now_ms - last_ms) / 3600000.0f;
+            if (dt_h > 0.5f) dt_h = 0.5f;
+          }
+          id(oq_adapt_last_ms) = now_ms;
+
+          if (!id(oq_adapt_active)) {
+            id(oq_adapt_state_code) = 0;
+            return;
+          }
+
+          const float room_c = id(room_temp_selected).state;
+          const float sp_c = id(room_setpoint_selected).state;
+
+          // Setpoint verzet -> leren pauzeren; het huis heeft uren nodig om te
+          // reageren en zonder pauze zou de offset op die traagheid wegdrijven.
+          if (!isnan(sp_c)) {
+            const float prev_sp = id(oq_adapt_last_setpoint_c);
+            if (isnan(prev_sp)) {
+              id(oq_adapt_last_setpoint_c) = sp_c;
+            } else if (fabsf(sp_c - prev_sp) > 0.05f) {
+              id(oq_adapt_last_setpoint_c) = sp_c;
+              const float settle_min = id(adapt_settle_min).state;
+              id(oq_adapt_hold_until_ms) =
+                  now_ms + (uint32_t) (fmaxf(settle_min, 0.0f) * 60000.0f);
+            }
+          }
+
+          const bool settling =
+              (id(oq_adapt_hold_until_ms) != 0) && (now_ms < id(oq_adapt_hold_until_ms));
+          const bool cooling_mode = (id(oq_control_mode_code) == 5);
+          const bool dhw_block = id(oq_dhw_block_cv_priority);
+          bool defrosting = id(hp1_defrost).state;
+          #if OQ_TOPOLOGY_DUO
+          defrosting = defrosting || id(hp2_defrost).state;
+          #endif
+
+          if (isnan(room_c) || isnan(sp_c) || settling || cooling_mode ||
+              dhw_block || defrosting) {
+            id(oq_adapt_state_code) = 1;
+            return;
+          }
+
+          const float err_c = sp_c - room_c;          // > 0 = te koud
+          const float deadband_c = fmaxf(id(adapt_deadband_c).state, 0.0f);
+          const float max_down_c = fmaxf(id(adapt_max_down_c).state, 0.0f);
+          const float max_up_c = fmaxf(id(adapt_max_up_c).state, 0.0f);
+
+          float offset_c = id(oq_adapt_offset_c);
+          if (isnan(offset_c)) offset_c = 0.0f;
+
+          if (err_c > deadband_c) {
+            // Te koud. Alleen omhoog als het systeem ook echt warmte vraagt —
+            // anders "corrigeren" we een blokkade die niets met de curve te maken heeft.
+            if (id(oq_strategy_heat_request_active)) {
+              offset_c += fmaxf(id(adapt_rate_up_c_h).state, 0.0f) * dt_h;
+              id(oq_adapt_state_code) = 4;
+            } else {
+              id(oq_adapt_state_code) = 3;
+            }
+          } else if (err_c <= 0.0f) {
+            // Setpoint gehaald -> verder omlaag zoeken.
+            offset_c -= fmaxf(id(adapt_rate_down_c_h).state, 0.0f) * dt_h;
+            id(oq_adapt_state_code) = 2;
+          } else {
+            id(oq_adapt_state_code) = 3;
+          }
+
+          if (offset_c < -max_down_c) offset_c = -max_down_c;
+          if (offset_c > max_up_c) offset_c = max_up_c;
+          id(oq_adapt_offset_c) = offset_c;
+
+sensor:
+  - platform: template
+    id: oq_adapt_offset_sensor
+    name: "Adaptive supply offset"
+    icon: mdi:tune-vertical
+    unit_of_measurement: "K"
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 30s
+    web_server:
+      sorting_group_id: oq_heating_curve
+    lambda: |-
+      return id(oq_adapt_offset_c);
+
+text_sensor:
+  - platform: template
+    id: oq_adapt_state_text
+    name: "Adaptive heating status"
+    icon: mdi:brain
+    update_interval: 30s
+    web_server:
+      sorting_group_id: oq_heating_curve
+    lambda: |-
+      switch (id(oq_adapt_state_code)) {
+        case 1: return std::string("Gepauzeerd");
+        case 2: return std::string("Leren (omlaag)");
+        case 3: return std::string("Stabiel");
+        case 4: return std::string("Corrigeren (omhoog)");
+        default: return std::string("Uit");
+      }

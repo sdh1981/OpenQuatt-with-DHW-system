@@ -66,6 +66,9 @@ oq_heating_curve_strategy: !include
     curve_secondary_oil_return_id: "${secondary_hp_id}_prot_oil_return"
     curve_secondary_excluded_level_a_id: "${secondary_hp_id}_excluded_level_a"
     curve_secondary_excluded_level_b_id: "${secondary_hp_id}_excluded_level_b"
+# Adaptive Heating: lerende offset op de stooklijn (derde ControlMode).
+# Moet na de curve-strategy laden; het deelt haar target-berekening.
+oq_adaptive_heating: !include oq_adaptive_heating.yaml
 oq_power_house_strategy: !include
   file: oq_power_house_strategy.yaml
   vars:

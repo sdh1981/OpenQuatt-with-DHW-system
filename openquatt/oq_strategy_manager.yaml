@@ -83,6 +83,7 @@ select:
     options:
       - Power House
       - Water Temperature Control (heating curve)
+      - Adaptive Heating
     initial_option: Power House
     web_server:
       sorting_group_id: oq_heating_strategy
@@ -91,7 +92,16 @@ select:
         - climate.pid.reset_integral_term: oq_heating_curve_pid
         - lambda: |-
             // Reset the shared strategy interface and curve-local state on mode switches.
-            id(oq_heat_mode_code) = (x == "Water Temperature Control (heating curve)") ? 1 : 0;
+            // Adaptive Heating runs on the curve branch (mode code 1) and only adds a
+            // self-learning offset on the supply target; see oq_adaptive_heating.yaml.
+            id(oq_heat_mode_code) = (x == "Power House") ? 0 : 1;
+            id(oq_adapt_active) = (x == "Adaptive Heating");
+            // Keep the learned offset (it describes the house), but restart the
+            // settle/timing state so a mode switch never counts as a learning step.
+            id(oq_adapt_last_ms) = 0;
+            id(oq_adapt_hold_until_ms) = 0;
+            id(oq_adapt_last_setpoint_c) = NAN;
+            id(oq_adapt_state_code) = 0;
             id(oq_demand_raw) = 0;
             id(oq_strategy_phase_code) = 0;
             id(oq_strategy_requested_power_w) = NAN;
@@ -329,7 +339,12 @@ interval:
     startup_delay: 800ms
     then:
       - lambda: |-
-          id(oq_heat_mode_code) = id(oq_heat_control_mode).active_index().value_or(0) == 1 ? 1 : 0;
+          // 0 = Power House, 1 = Water Temperature Control, 2 = Adaptive Heating.
+          // Index 1 and 2 both drive the curve branch; only Adaptive adds the
+          // learned supply offset on top of it.
+          const int heat_mode_index = id(oq_heat_control_mode).active_index().value_or(0);
+          id(oq_heat_mode_code) = (heat_mode_index != 0) ? 1 : 0;
+          id(oq_adapt_active) = (heat_mode_index == 2);
 
           // Publish the shared strategy interface fields that are independent of
           // the active strategy implementation.

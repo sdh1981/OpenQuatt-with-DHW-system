@@ -696,6 +696,16 @@ sensor:
         }
       }
 
+      // Adaptive Heating: zelflerende offset bovenop de stooklijn. Zoekt de
+      // laagst mogelijke aanvoer die het setpoint nog haalt (zie
+      // oq_adaptive_heating.yaml). Onderbegrensd door adapt_min_supply_c; de
+      // bovengrens blijft max_water_temp_limit_c hieronder.
+      if (id(oq_adapt_active) && !isnan(target_c)) {
+        target_c += id(oq_adapt_offset_c);
+        const float min_supply_c = id(adapt_min_supply_c).state;
+        if (!isnan(min_supply_c)) target_c = fmaxf(target_c, min_supply_c);
+      }
+
       const float quant_step_c = tuning.quant_step_c;
       if (!isnan(target_c) && quant_step_c > 0.0f) {
         target_c = roundf(target_c / quant_step_c) * quant_step_c;
