@@ -69,6 +69,11 @@ jobs:
         with:
           name: openquatt-${{ matrix.profile.id }}-firmware-${{ github.sha }}
           if-no-files-found: error
+          # Verplicht hier: upload-artifact slaat sinds v4.4 standaard alles over
+          # wat in een verborgen map ligt, en zowel `.esphome` als `.pioenvs`
+          # begint met een punt. Zonder deze vlag vindt de stap niets, ook al
+          # staan de bins er gewoon.
+          include-hidden-files: true
           path: |
             ${{ matrix.profile.build_path }}/.pioenvs/**/firmware.bin
             ${{ matrix.profile.build_path }}/.pioenvs/**/firmware.ota.bin
