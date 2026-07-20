@@ -1,9 +1,10 @@
 # Heating Strategy
 
-Deze pagina geeft het overzicht van de twee verwarmingsstrategieën in OpenQuatt:
+Deze pagina geeft het overzicht van de drie verwarmingsstrategieën in OpenQuatt:
 
 - `Power House`
 - `Water Temperature Control`
+- `Adaptive Heating`
 
 Het doel is eenvoudig: je snel laten begrijpen **welke strategie wat doet**, **wanneer welke aanpak past**, en **waar de belangrijkste verschillen zitten**.
 
@@ -18,7 +19,7 @@ In gewone taal:
 - de strategie bepaalt **hoeveel warmte** OpenQuatt denkt nodig te hebben;
 - daarna bepaalt heat-control **hoe** die warmtevraag door de warmtepomp(en) geleverd wordt.
 
-## De twee strategieën
+## De drie strategieën
 
 ### 1. Power House
 
@@ -65,12 +66,36 @@ Meer detail:
 
 - [Water Temperature Control](water-temperature-control.md)
 
+### 3. Adaptive Heating
+
+`Adaptive Heating` is `Water Temperature Control` met een zelflerende offset erbovenop.
+
+Belangrijke kenmerken:
+
+- gebruikt dezelfde stooklijn, PID en Duo-opbouw als `Water Temperature Control`;
+- legt daar een geleerde offset overheen op het `Heating Curve Supply Target`;
+- zoekt de laagst mogelijke aanvoertemperatuur waarbij de kamer het setpoint nog haalt;
+- leert langzaam omlaag en sneller omhoog — comfort gaat voor rendement;
+- pauzeert het leren bij koelen, DHW-prioriteit, defrost en kort na een setpoint-wijziging;
+- bewaart de geleerde offset over een herstart.
+
+Deze strategie past vaak goed als je:
+
+- met een stooklijn wilt werken maar niet handmatig wilt blijven bijstellen;
+- rendement en compressorbelasting als belangrijkste doelen hebt;
+- een betrouwbare kamertemperatuurmeting hebt.
+
+Meer detail:
+
+- [Adaptive Heating](adaptive-heating.md)
+
 ## Belangrijkste verschil
 
 De kern is:
 
 - `Power House` denkt eerst in **warmtevraag van het huis**
 - `Water Temperature Control` denkt eerst in **gewenste aanvoertemperatuur**
+- `Adaptive Heating` denkt in **de laagste aanvoertemperatuur die nog volstaat**
 
 Dat verschil werkt door in bijna alles:
 
@@ -94,6 +119,13 @@ Dat verschil werkt door in bijna alles:
 - je aanvoertemperatuur en watergedrag centraal wilt zetten;
 - je liever eerst de curvepunten en PID instelt;
 - je een meer klassieke verwarmingsaanpak wilt.
+
+### Kies eerder `Adaptive Heating` als:
+
+- je stooklijn draait, maar je vermoedt dat hij te hoog staat;
+- je rendement wilt winnen zonder er zelf steeds aan te draaien;
+- je de persgastemperatuur en frequentiebegrenzing van je R32-units wilt ontlasten;
+- je kamertemperatuurmeting betrouwbaar is en niet door zon of open ramen wordt verstoord.
 
 ## Wat verandert niet per strategie?
 
@@ -122,6 +154,7 @@ Als je het kort wilt onthouden:
 
 - `Power House` = woning- en comfortgericht
 - `Water Temperature Control` = aanvoer- en stooklijngericht
+- `Adaptive Heating` = stooklijn die zichzelf zo laag mogelijk afstelt
 
 Geen van beide is "altijd beter". Het hangt af van:
 

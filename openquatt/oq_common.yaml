@@ -464,15 +464,16 @@ text_sensor:
       const uint32_t seconds = total_seconds % 60U;
 
       // Format the most compact readable representation for the dashboard.
+      // uint32_t is `unsigned long` op ESP32, dus %u vereist een expliciete cast.
       char buffer[32];
       if (days > 0U) {
-        snprintf(buffer, sizeof(buffer), "%ud %uh %um", days, hours, minutes);
+        snprintf(buffer, sizeof(buffer), "%ud %uh %um", (unsigned) days, (unsigned) hours, (unsigned) minutes);
       } else if (hours > 0U) {
-        snprintf(buffer, sizeof(buffer), "%uh %um", hours, minutes);
+        snprintf(buffer, sizeof(buffer), "%uh %um", (unsigned) hours, (unsigned) minutes);
       } else if (minutes > 0U) {
-        snprintf(buffer, sizeof(buffer), "%um", minutes);
+        snprintf(buffer, sizeof(buffer), "%um", (unsigned) minutes);
       } else {
-        snprintf(buffer, sizeof(buffer), "%us", seconds);
+        snprintf(buffer, sizeof(buffer), "%us", (unsigned) seconds);
       }
       return {buffer};
     web_server:
