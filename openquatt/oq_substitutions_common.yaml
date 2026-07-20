@@ -204,7 +204,15 @@ ha_electricity_tariff_entity_id: "sensor.zonneplan_current_electricity_tariff" #
 # HP IO (MODBUS POLLING)
 # ----------------------------
 oq_modbus_update_interval_s: "5"                    # Base Modbus controller polling interval [s].
-oq_modbus_command_throttle_ms: "300"                 # Minimum spacing between Modbus commands [ms].
+# v0.50: 300 -> 150 ms. Op de "volle" pollronde (elke 10s vuren alle 6 ranges
+# per HP) staan er 12 commando's in de rij; met 300 ms kostte alleen de throttle
+# al 3,6 s, waarna de ronde niet binnen update_interval (5 s) afkwam. Gevolg:
+# "Duplicate modbus command found: address=2099 count=40" -- het commando werd
+# opnieuw gequeued terwijl het vorige nog openstond. Bij 19200 baud duurt een
+# 40-register uitwisseling ~45 ms, dus 300 ms was grotendeels dode tijd.
+# Let op bij verder verlagen: houd de Modbus-foutentellers en on_offline in de
+# gaten, deze link is eerder wisselvallig geweest (zie max_cmd_retries).
+oq_modbus_command_throttle_ms: "150"                 # Minimum spacing between Modbus commands [ms].
 oq_modbus_max_cmd_retries: "1"                       # Retries per Modbus command; keep low to avoid long blocking on bad links.
 oq_skip_10s: "1"                                      # 1 skip; effective polling every 10s.
 oq_skip_30s: "5"                                      # 5 skips; effective polling every 30s.
