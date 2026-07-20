@@ -15,12 +15,16 @@ jobs:
       fail-fast: false
       matrix:
         profile:
+          # ESPHome lost een relatieve `build_path` op ten opzichte van de
+          # .esphome-datadir, niet ten opzichte van de repo-root. De entrypoints
+          # zetten `build_path: build/<naam>`, dus de artefacten belanden in
+          # `.esphome/build/<naam>`.
           - id: duo-lilygo-tconnect-cic
             config: openquatt_duo_lilygo_tconnect+cic.yaml
-            build_path: build/openquatt_duo_lilygo_tconnect+cic
+            build_path: .esphome/build/openquatt_duo_lilygo_tconnect+cic
           - id: duo-lilygo-tconnect
             config: openquatt_duo_lilygo_tconnect.yaml
-            build_path: build/openquatt_duo_lilygo_tconnect
+            build_path: .esphome/build/openquatt_duo_lilygo_tconnect
 
     steps:
       - name: Checkout
