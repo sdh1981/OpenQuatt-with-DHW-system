@@ -5,11 +5,12 @@
 #   Central layout of web_server groups so all packages use the same UI structure
 #   (consistent in HA/diagnostics workflow).
 # ==============================================================================
-external_components:
-  - source:
-      type: local
-      path: components
-    components: [web_server_idf]
+# v0.50: de lokale web_server_idf-override is verwijderd. Die kopie was
+# bevroren op een oudere ESPHome en brak bij elke core-update (de header
+# miste dan de nieuwe try_send_nodefer-signatuur die web_server.cpp aanroept).
+# De enige patch die er nog toe deed -- extra stack voor de HTTP-taak -- zit
+# inmiddels upstream; de grootte zelf komt uit CONFIG_HTTPD_TASK_STACKSIZE
+# in openquatt_base.yaml en blijft dus gewoon werken.
 
 web_server:
   port: 80
