@@ -46,6 +46,9 @@ modbus:
   - uart_id: uart_rs485_3
     id: mod_bus_3
     send_wait_time: 150ms
+    # Zie oq_common.yaml: ESPHome 2026.7.0 zette de client-default van
+    # turnaround_time op 600ms. Expliciet vastzetten op de oude 100ms.
+    turnaround_time: 100ms
 
 modbus_controller:
   - id: cwt_pt_module

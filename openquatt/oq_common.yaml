@@ -133,6 +133,13 @@ modbus:
     id: mod_bus
     flow_control_pin: ${uart_rts_pin}
     send_wait_time: 100ms
+    # Expliciet vastgezet: ESPHome 2026.7.0 verhoogde de client-defaults van
+    # turnaround_time 100ms -> 600ms (en send_wait_time 250ms -> 2000ms).
+    # turnaround_time zit tussen elk commando, dus dat werd +500ms x 12
+    # commando's op de volle pollronde = ruim over update_interval (5s). Gevolg:
+    # "Duplicate modbus command found" omdat de wachtrij niet leegliep.
+    # Niet op de default vertrouwen; die is al twee keer verschoven.
+    turnaround_time: 100ms
 
 # ==============================================================================
 # SHARED RUNTIME STATE
