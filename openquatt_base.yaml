@@ -72,7 +72,11 @@ esp32:
     type: esp-idf
     version: recommended
     sdkconfig_options:
-      COMPILER_OPTIMIZATION_SIZE: y
+      # v0.50: `COMPILER_OPTIMIZATION_SIZE: y` stond hier zonder CONFIG_-prefix,
+      # waardoor kconfgen de regel als malformed weggooide ("ignoring malformed
+      # line"). Toevoegen van de prefix is niet nodig: ESPHome zet zelf al
+      # CONFIG_COMPILER_OPTIMIZATION_SIZE=y, want `compiler_optimization` staat
+      # standaard op SIZE. De -Os-build blijft dus ongewijzigd.
       CONFIG_BT_ENABLED: n
       # ---- Stack sizing ----
       # The DHW controller tick lambda and cooling strategy lambdas grew large

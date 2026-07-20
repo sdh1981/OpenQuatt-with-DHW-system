@@ -1695,7 +1695,10 @@ interval:
 
             std::string now_hhmm = "invalid";
             if (time_valid) {
-              char buf[6];
+              // Ruim bemeten: uur/minuut zijn uint8_t, dus de compiler rekent met
+              // maximaal drie cijfers per veld. In de praktijk nooit, maar met een
+              // exact passende buffer waarschuwt hij (terecht) over afkappen.
+              char buf[8];
               snprintf(buf, sizeof(buf), "%02d:%02d", now_time.hour, now_time.minute);
               now_hhmm = std::string(buf);
             }
@@ -1704,7 +1707,7 @@ interval:
 
             auto s = id(oq_silent_start_time).state_as_esptime();
             auto e = id(oq_silent_end_time).state_as_esptime();
-            char win_buf[13];
+            char win_buf[16];
             snprintf(win_buf, sizeof(win_buf), "%02d:%02d-%02d:%02d", s.hour, s.minute, e.hour, e.minute);
             std::string window_hhmm(win_buf);
             static std::string last_window_hhmm;
