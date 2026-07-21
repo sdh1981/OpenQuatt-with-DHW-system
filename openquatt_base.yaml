@@ -41,10 +41,12 @@ esphome:
     - ${thermal_request_logic_header}
     - ${heating_curve_logic_header}
     - ${dhw_controller_logic_header}
-  platformio_options:
-    build_flags:
-      # Hard-pinned for Duo entrypoints to prevent accidental topology drift.
-      - -DOQ_TOPOLOGY_DUO=1
+  # v0.50: verplaatst uit platformio_options; dat pad is sinds 2026.7.0
+  # deprecated en verdwijnt in 2026.12.0. Beide routes roepen intern dezelfde
+  # cg.add_build_flag() aan, dus de vlag komt identiek terecht.
+  build_flags:
+    # Hard-pinned for Duo entrypoints to prevent accidental topology drift.
+    - -DOQ_TOPOLOGY_DUO=1
   on_boot:
     priority: -100
     then:
