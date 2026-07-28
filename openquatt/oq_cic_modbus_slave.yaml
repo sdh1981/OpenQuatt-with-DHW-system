@@ -21,20 +21,27 @@
 # - No forwarding/writing from RS485 #2 to HP bus.
 #
 # Register map (holding/input style, served on fn 0x03 and 0x04):
-#   0  hp1_working_mode              raw
+#   0  hp1_working_mode              raw, behalve mode 3 -> 2 (zie hieronder)
 #   1  hp1_water_in_temp             degC * 100 (signed int16)
 #   2  hp1_water_out_temp            degC * 100 (signed int16)
 #   3  hp1_flow                      L/h * 1
 #   4  hp1_outside_temp              degC * 100 (signed int16)
 #   5  hp1_voltage                   V * 10
 #   6  hp1_current                   A * 100
-#   8  hp2_working_mode              raw
+#   8  hp2_working_mode              raw, behalve mode 3 -> 2 (zie hieronder)
 #   9  hp2_water_in_temp             degC * 100 (signed int16)
 #   10 hp2_water_out_temp            degC * 100 (signed int16)
 #   11 hp2_flow                      L/h * 1
 #   12 hp2_outside_temp              degC * 100 (signed int16)
 #   13 hp2_voltage                   V * 10
 #   14 hp2_current                   A * 100
+#
+# DHW-maskering (schakelaar cic_mask_dhw_as_heating, default aan):
+#   De CiC kent working mode 3 (hot water) niet en stopt bij die waarde met
+#   doorsturen naar Quatt. Daarom wordt mode 3 richting de CiC gerapporteerd als
+#   2 (heating) -- op alle drie de uitleespaden: compacte map (reg 0/8), native
+#   map (reg 2099) en de actieve push-frames. Naar de ODU gaat onverminderd
+#   mode 3 via register 3999; alleen de rapportage verandert.
 # ==============================================================================
 
 substitutions:
@@ -128,6 +135,22 @@ switch:
           id(cic_verbose_log_enabled) = false;
     optimistic: true
     restore_mode: RESTORE_DEFAULT_OFF
+    web_server:
+      sorting_group_id: oq_cic
+
+  # De CiC kent working mode 3 (hot water) niet en stopt bij die waarde met
+  # doorsturen naar Quatt -- je krijgt dan gaten in de historie zolang DHW
+  # draait. Deze schakelaar rapporteert mode 3 richting de CiC als 2 (heating).
+  #
+  # Alleen de RAPPORTAGE verandert: naar de ODU gaat onverminderd mode 3 via
+  # register 3999, dus het DHW-bedrijf zelf blijft ongewijzigd.
+  - platform: template
+    id: cic_mask_dhw_as_heating
+    name: "CIC - Report DHW as heating"
+    icon: mdi:swap-horizontal
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    entity_category: config
     web_server:
       sorting_group_id: oq_cic
 
@@ -521,11 +544,28 @@ uart:
               return static_cast<uint16_t>(raw);
             };
 
+            // Working mode zoals de CiC hem te zien krijgt. Zie de schakelaar
+            // cic_mask_dhw_as_heating: mode 3 (hot water) kent de CiC niet, en
+            // bij die waarde stopt hij met doorsturen naar Quatt.
+            //
+            // Bewust op de rauwe waarde en niet op oq_control_mode_code == 4:
+            // CM4 en de readback van register 2099 lopen seconden uit de pas
+            // (poll elke 5s), en één push-frame met een 3 is al genoeg voor een
+            // gat in de historie. "Nooit een 3 naar de CiC" is sluitender.
+            //
+            // Identiek gedefinieerd in de push-lambda verderop -- zelfde patroon
+            // als encode_s16/encode_u16, die ook per lambda-scope staan.
+            auto wm_for_cic = [&](float raw) -> float {
+              if (isnan(raw)) return raw;
+              if (id(cic_mask_dhw_as_heating).state && lroundf(raw) == 3) return 2.0f;
+              return raw;
+            };
+
             auto get_hp_register_compact = [&](bool hp1, uint16_t reg) -> uint16_t {
               switch (reg) {
                 case 0: return hp1
-                  ? (id(hp1_working_mode).has_state() ? encode_u16(id(hp1_working_mode).state, 1.0f) : static_cast<uint16_t>(0))
-                  : (id(hp2_working_mode).has_state() ? encode_u16(id(hp2_working_mode).state, 1.0f) : static_cast<uint16_t>(0));
+                  ? (id(hp1_working_mode).has_state() ? encode_u16(wm_for_cic(id(hp1_working_mode).state), 1.0f) : static_cast<uint16_t>(0))
+                  : (id(hp2_working_mode).has_state() ? encode_u16(wm_for_cic(id(hp2_working_mode).state), 1.0f) : static_cast<uint16_t>(0));
                 case 1: return hp1
                   ? (id(hp1_water_in_temp).has_state() ? encode_s16(id(hp1_water_in_temp).state, 100.0f) : static_cast<uint16_t>(0x8000))
                   : (id(hp2_water_in_temp).has_state() ? encode_s16(id(hp2_water_in_temp).state, 100.0f) : static_cast<uint16_t>(0x8000));
@@ -551,8 +591,8 @@ uart:
             auto get_hp_register_native = [&](bool hp1, uint16_t reg) -> uint16_t {
               switch (reg) {
                 case 2099: return hp1
-                  ? (id(hp1_working_mode).has_state() ? encode_u16(id(hp1_working_mode).state, 1.0f) : static_cast<uint16_t>(0))
-                  : (id(hp2_working_mode).has_state() ? encode_u16(id(hp2_working_mode).state, 1.0f) : static_cast<uint16_t>(0));
+                  ? (id(hp1_working_mode).has_state() ? encode_u16(wm_for_cic(id(hp1_working_mode).state), 1.0f) : static_cast<uint16_t>(0))
+                  : (id(hp2_working_mode).has_state() ? encode_u16(wm_for_cic(id(hp2_working_mode).state), 1.0f) : static_cast<uint16_t>(0));
                 case 2100: return hp1
                   ? (id(hp1_voltage).has_state() ? encode_u16(id(hp1_voltage).state, 1.0f) : static_cast<uint16_t>(0))
                   : (id(hp2_voltage).has_state() ? encode_u16(id(hp2_voltage).state, 1.0f) : static_cast<uint16_t>(0));
@@ -587,14 +627,14 @@ uart:
                 return get_hp_register_compact(false, reg);
               }
               switch (reg) {
-                case 0:  return id(hp1_working_mode).has_state() ? encode_u16(id(hp1_working_mode).state, 1.0f) : 0;
+                case 0:  return id(hp1_working_mode).has_state() ? encode_u16(wm_for_cic(id(hp1_working_mode).state), 1.0f) : 0;
                 case 1:  return id(hp1_water_in_temp).has_state() ? encode_s16(id(hp1_water_in_temp).state, 100.0f) : 0x8000;
                 case 2:  return id(hp1_water_out_temp).has_state() ? encode_s16(id(hp1_water_out_temp).state, 100.0f) : 0x8000;
                 case 3:  return id(hp1_flow).has_state() ? encode_u16(id(hp1_flow).state, 1.0f) : 0;
                 case 4:  return id(hp1_outside_temp).has_state() ? encode_s16(id(hp1_outside_temp).state, 100.0f) : 0x8000;
                 case 5:  return id(hp1_voltage).has_state() ? encode_u16(id(hp1_voltage).state, 10.0f) : 0;
                 case 6:  return id(hp1_current).has_state() ? encode_u16(id(hp1_current).state, 100.0f) : 0;
-                case 8:  return id(hp2_working_mode).has_state() ? encode_u16(id(hp2_working_mode).state, 1.0f) : 0;
+                case 8:  return id(hp2_working_mode).has_state() ? encode_u16(wm_for_cic(id(hp2_working_mode).state), 1.0f) : 0;
                 case 9:  return id(hp2_water_in_temp).has_state() ? encode_s16(id(hp2_water_in_temp).state, 100.0f) : 0x8000;
                 case 10: return id(hp2_water_out_temp).has_state() ? encode_s16(id(hp2_water_out_temp).state, 100.0f) : 0x8000;
                 case 11: return id(hp2_flow).has_state() ? encode_u16(id(hp2_flow).state, 1.0f) : 0;
@@ -874,6 +914,14 @@ interval:
             return static_cast<uint16_t>(raw);
           };
 
+          // Zie de uitgebreide toelichting bij dezelfde helper in de
+          // fn03/04-handler hierboven. Houd beide gelijk.
+          auto wm_for_cic = [&](float raw) -> float {
+            if (isnan(raw)) return raw;
+            if (id(cic_mask_dhw_as_heating).state && lroundf(raw) == 3) return 2.0f;
+            return raw;
+          };
+
           auto build_hp_payload = [&](uint8_t hp_addr) -> std::vector<uint8_t> {
             std::vector<uint8_t> out;
             out.reserve(3 + 14 + 2);
@@ -883,8 +931,8 @@ interval:
 
             const bool hp1 = (hp_addr == 0x01);
             const uint16_t r0 = hp1
-              ? (id(hp1_working_mode).has_state() ? encode_u16(id(hp1_working_mode).state, 1.0f) : static_cast<uint16_t>(0))
-              : (id(hp2_working_mode).has_state() ? encode_u16(id(hp2_working_mode).state, 1.0f) : static_cast<uint16_t>(0));
+              ? (id(hp1_working_mode).has_state() ? encode_u16(wm_for_cic(id(hp1_working_mode).state), 1.0f) : static_cast<uint16_t>(0))
+              : (id(hp2_working_mode).has_state() ? encode_u16(wm_for_cic(id(hp2_working_mode).state), 1.0f) : static_cast<uint16_t>(0));
             const uint16_t r1 = hp1
               ? (id(hp1_water_in_temp).has_state() ? encode_s16(id(hp1_water_in_temp).state, 100.0f) : static_cast<uint16_t>(0x8000))
               : (id(hp2_water_in_temp).has_state() ? encode_s16(id(hp2_water_in_temp).state, 100.0f) : static_cast<uint16_t>(0x8000));
