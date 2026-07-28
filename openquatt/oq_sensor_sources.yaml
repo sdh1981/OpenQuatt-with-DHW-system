@@ -418,8 +418,10 @@ sensor:
       // als de echte flow ontbreekt of de bijbehorende sensor 'suspect' is. Een
       // model ziet een echte verstopping niet → bewust vangnet; de HP-eigen druk/
       // temp-beveiliging is dan het net. Schakelaar: flow_predicted_fallback_enable.
+      // flow_predict_enable is de master: staat die uit, dan blijft deze keten
+      // ongemoeid op de echte sensordata, ongeacht de fallback-schakelaar.
       id(oq_flow_fallback_active) = false;
-      if (id(flow_predicted_fallback_enable).state) {
+      if (id(flow_predict_enable).state && id(flow_predicted_fallback_enable).state) {
         const auto source = id(flow_source).has_state() ? id(flow_source).current_option() : std::string("");
         auto pred1 = [&]() -> float {
           return (id(hp1_predicted_flow).has_state() && !isnan(id(hp1_predicted_flow).state)) ? id(hp1_predicted_flow).state : NAN;
