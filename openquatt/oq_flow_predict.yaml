@@ -71,6 +71,11 @@ interval:
   - interval: 10s
     then:
       - lambda: |-
+          // Master-schakelaar: uit = niets leren, niets publiceren, geen invloed
+          // op de flow-keten. Het geleerde model blijft staan (restore_value), dus
+          // na weer inschakelen loopt hij verder waar hij gebleven was.
+          if (!id(flow_predict_enable).state) return;
+
           const float alpha = 0.02f;   // leersnelheid (~50-sample venster, adaptief)
           auto learn = [&](float ip, float fl, bool suspect,
                            float &mx, float &my, float &sxx, float &sxy, float &n) {
@@ -118,6 +123,7 @@ sensor:
     web_server:
       sorting_group_id: oq_hydraulics
     lambda: |-
+      if (!id(flow_predict_enable).state) return NAN;
       if (id(hp1_fm_n) < 30.0f) return NAN;          // nog te weinig geleerd
       const float ip = id(hp1_pump_speed).has_state() ? id(hp1_pump_speed).state : NAN;
       if (isnan(ip)) return NAN;
@@ -144,6 +150,7 @@ sensor:
     web_server:
       sorting_group_id: oq_hydraulics
     lambda: |-
+      if (!id(flow_predict_enable).state) return NAN;
       if (!id(hp1_flow).has_state() || isnan(id(hp1_flow).state)) return NAN;
       if (!id(hp1_predicted_flow).has_state() || isnan(id(hp1_predicted_flow).state)) return NAN;
       return id(hp1_flow).state - id(hp1_predicted_flow).state;
@@ -161,6 +168,7 @@ sensor:
     web_server:
       sorting_group_id: oq_hydraulics
     lambda: |-
+      if (!id(flow_predict_enable).state) return NAN;
       #if OQ_TOPOLOGY_DUO
       if (id(hp2_fm_n) < 30.0f) return NAN;
       const float ip = id(hp2_pump_speed).has_state() ? id(hp2_pump_speed).state : NAN;
@@ -191,6 +199,7 @@ sensor:
     web_server:
       sorting_group_id: oq_hydraulics
     lambda: |-
+      if (!id(flow_predict_enable).state) return NAN;
       #if OQ_TOPOLOGY_DUO
       if (!id(hp2_flow).has_state() || isnan(id(hp2_flow).state)) return NAN;
       if (!id(hp2_predicted_flow).has_state() || isnan(id(hp2_predicted_flow).state)) return NAN;
@@ -207,6 +216,24 @@ sensor:
 # als vangnet; de HP-eigen druk/temp-beveiliging is dan het net.
 # ==============================================================================
 switch:
+  # Master-schakelaar over de hele predicted-flow-laag. Uit betekent: geen leren,
+  # geen predicted/deviation-waarden, en geen enkele invloed op flow_rate_selected
+  # (ook niet als de fallback hieronder aan staat). Bedoeld om bij analyse door
+  # derden -- of gewoon bij twijfel -- terug te kunnen naar puur de sensordata.
+  # Zelfde gedachte als oq_flow_phantom_suppression_enable in oq_flow_control.yaml.
+  #
+  # Let op: dit schakelt het MODEL uit, niet de filtering op de sensor zelf.
+  # De median- en phantom-filters op ${hp_id}_flow (oq_HP_io.yaml) blijven staan.
+  - platform: template
+    id: flow_predict_enable
+    name: "Flow prediction (self-learning model)"
+    icon: mdi:chart-timeline-variant
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_hydraulics
+
   - platform: template
     id: flow_predicted_fallback_enable
     name: "Flow predicted fallback (sensorless)"
