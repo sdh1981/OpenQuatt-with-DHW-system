@@ -768,6 +768,28 @@ number:
     web_server:
       sorting_group_id: oq_boiler
 
+  # Beveiliging, geen comfortinstelling. De handover hierboven toetst op de
+  # tank-BODEM; dit plafond toetst op de TOP en stopt de compressors zodra die
+  # te heet wordt. Nodig omdat in legionella-fase 1 het element de top meeverwarmt
+  # terwijl de bodem nog laag staat: de HP condenseert dan steeds hoger tot de ODU
+  # afslaat op perszijdedruk. Bij R32 is die marge klein.
+  # Hoger zetten vergroot dat risico weer -- 55 °C is bewust conservatief.
+  - platform: template
+    id: oq_dhw_legionella_hp_top_ceiling_c
+    name: "DHW legionella HP top ceiling"
+    icon: mdi:gauge-full
+    unit_of_measurement: "°C"
+    min_value: 45
+    max_value: 60
+    step: 0.5
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 55
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
   - platform: template
     id: oq_dhw_hp_level
     name: "DHW HP level"
@@ -1721,7 +1743,11 @@ sensor:
       if (isnan(top)) return NAN;
 
       const float legionella_target = id(oq_dhw_legionella_target_c).state;
-      const float hp_stop = id(oq_dhw_legionella_hp_stop_top_c).state;
+      // Deze ETA rekent in TOP-temperatuur, dus gebruik de top-grens van fase 1:
+      // het HP-plafond. De handover op legionella_hp_stop_top_c toetst op de
+      // tank-BODEM en is hier meestal niet de beperkende factor, omdat het element
+      // de top sneller naar het plafond jaagt dan de bodem opwarmt.
+      const float hp_top_stop = id(oq_dhw_legionella_hp_top_ceiling_c).state;
       const float volume_l = id(oq_dhw_tank_volume_l).state;
       const float tank_wh_per_k = (volume_l > 0.0f ? volume_l : 220.0f) * 1.16f;
       const float element_w = 3000.0f;
@@ -1752,7 +1778,7 @@ sensor:
       }
 
       // Phase 2: element-only heating to legionella_target.
-      const float phase2_from = std::max(top, hp_stop);
+      const float phase2_from = std::max(top, hp_top_stop);
       if (phase2_from < legionella_target) {
         const float gap2 = legionella_target - phase2_from;
         const float wh_needed = gap2 * tank_wh_per_k;
@@ -1764,11 +1790,11 @@ sensor:
         }
       }
 
-      // Phase 1: HP + element heating to hp_stop (only if we're still in HP phase).
+      // Phase 1: HP + element heating to hp_top_stop (only if we're still in HP phase).
       // hp_phase_done_ in the controller maps to block_cv_priority=true while HP active.
-      const bool hp_phase_active = id(oq_dhw_block_cv_priority) && (top < hp_stop);
+      const bool hp_phase_active = id(oq_dhw_block_cv_priority) && (top < hp_top_stop);
       if (hp_phase_active) {
-        const float gap1 = hp_stop - top;
+        const float gap1 = hp_top_stop - top;
         const float wh_needed = gap1 * tank_wh_per_k;
 
         float p_hp = 0.0f;
@@ -2193,6 +2219,7 @@ interval:
           cfg.boost_target_c = id(oq_dhw_boost_target_c).state;
           cfg.legionella_target_c = id(oq_dhw_legionella_target_c).state;
           cfg.legionella_hp_stop_top_c = id(oq_dhw_legionella_hp_stop_top_c).state;
+          cfg.legionella_hp_top_ceiling_c = id(oq_dhw_legionella_hp_top_ceiling_c).state;
           // Hard-coded per user requirement: DHW HP always stops on tank-bottom = 52°C.
           // 52°C keeps the entire tank in the legionella-inhibition zone (50–55°C)
           // while maintaining a healthy ΔT vs the HP supply (60°C target) for good COP.
