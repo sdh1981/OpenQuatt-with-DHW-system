@@ -2086,6 +2086,18 @@ text_sensor:
     web_server:
       sorting_group_id: oq_boiler
     lambda: |-
+      // Handmatige force gaat vóór elke uitstel-reden: die checks worden er niet
+      // meer op toegepast. Wel expliciet terugmelden wat er dan gebeurt, want een
+      // force die is geaccepteerd terwijl DHW nog bezig is start pas zodra de
+      // regeling terug op IDLE_CV staat -- anders lijkt de knop niets te doen.
+      if (id(oq_dhw_src_legionella_force).state) {
+        const int st = id(oq_dhw_state_code);
+        if (st == 4) return std::string("Handmatige force - run actief");
+        if (st == 5) return std::string("Handmatige force geblokkeerd - DHW-storing, eerst 'DHW clear fault'");
+        if (id(oq_dhw_lockout).state) return std::string("Handmatige force geblokkeerd - DHW lockout staat aan");
+        if (st != 0) return std::string("Handmatige force geaccepteerd - wacht tot DHW-cyclus klaar is");
+        return std::string("Handmatige force - start nu");
+      }
       switch (id(oq_dhw_legionella_defer_reason_code)) {
         case 1:
           return std::string("Uitgesteld - recent natuurlijke pasteurisatie");
@@ -2345,7 +2357,14 @@ interval:
               !isnan(id(dhw_tariff_ha).state) &&
               (id(dhw_tariff_ha).state <= id(oq_dhw_solar_tariff_threshold).state);
           in.solar_boost_request = solar_boost_ha || solar_boost_auto_tariff;
-          in.legionella_force_request = id(dhw_legionella_force_ha).has_state() ? id(dhw_legionella_force_ha).state : id(oq_dhw_src_legionella_force).state;
+          // Handmatige force: lokale schakelaar OF de HA-proxy.
+          // Bewust een OR en geen prioriteit. Met de oude ternary maakte het
+          // enkele bestaan van de HA-entiteit de lokale schakelaar dood -- ook
+          // als die HA-entiteit gewoon 'off' stond.
+          const bool legionella_manual_force =
+              (id(dhw_legionella_force_ha).has_state() && id(dhw_legionella_force_ha).state) ||
+              id(oq_dhw_src_legionella_force).state;
+          in.legionella_force_request = legionella_manual_force;
           in.legionella_seeded = legionella_seeded;
 
           // ============================================================
@@ -2454,7 +2473,18 @@ interval:
             }
           }
 
-          if (in.legionella_force_request) {
+          // Uitstel-checks gelden alleen voor een AUTOMATISCH naar voren gehaalde
+          // run, niet voor een handmatige force. Een handmatige force is een
+          // expliciete opdracht en mag niet stilzwijgend worden weggeschreven --
+          // dat is precies wat "force" betekent.
+          //
+          // Zonder deze uitzondering konden deze checks alleen maar handmatige
+          // forces afbreken: de pull-forward hierboven zet de vlag namelijk al
+          // uitsluitend als uitstel niet van toepassing is. Gevolg was een knop
+          // die zichtbaar aan ging en verder niets deed, met als meest
+          // voorkomende oorzaak reden 1 (recente natuurlijke pasteurisatie) --
+          // juist waarschijnlijk kort na een geslaagde run.
+          if (in.legionella_force_request && !legionella_manual_force) {
             auto now_t_leg = id(oq_time).now();
             const bool now_valid_leg = now_t_leg.is_valid();
             const int64_t now_epoch_leg = now_valid_leg ? (int64_t) now_t_leg.timestamp : 0;
