@@ -44,6 +44,13 @@ struct Config {
   float boost_target_c = 56.0f;
   float legionella_target_c = 68.0f;  // Inventum boiler vereiste: 68°C
   float legionella_hp_stop_top_c = 53.0f;  // HP handover temp during legionella (element finishes the rest)
+  // Harde bovengrens op tank_top tijdens de legionella HP-fase. De handover
+  // hierboven toetst op tank_bottom (traagste zone), maar in fase 1 verwarmt het
+  // element de TOP mee. Zonder plafond loopt de top -- en daarmee de condensor-
+  // uittrede van de HP -- ver voorbij de handover-temp en tikt de ODU af op hoge
+  // perszijdedruk (waargenomen op HP2: "High pressure detected"). Bij R32 is die
+  // marge klein, dus dit is een beveiliging, geen optimalisatie.
+  float legionella_hp_top_ceiling_c = 55.0f;
   float hp_target_flow_c = 55.0f;
 
   float temp_min_c = -10.0f;
@@ -501,7 +508,16 @@ class Controller {
       const float hp_check_c = plausible_temp_(in.tank_bottom_c, cfg)
           ? in.tank_bottom_c : in.tank_top_c;
       const float leg_hp_stop = cfg.legionella_hp_stop_top_c;
-      if (hp_check_c >= leg_hp_stop || elapsed_in_state_(in.now_ms) >= cfg.hp_max_runtime_ms) {
+      // Bovengrens op tank_top: in deze fase draaien HP en element samen, dus de
+      // top stijgt veel sneller dan de bodem waar de handover op toetst. Wordt de
+      // top te heet, dan moet de HP eruit ongeacht de bodem -- anders loopt de
+      // condensordruk op tot de ODU zelf afslaat. Het element maakt de resterende
+      // graden naar legionella_target_c alleen af.
+      const bool top_ceiling_hit =
+          plausible_temp_(in.tank_top_c, cfg) &&
+          in.tank_top_c >= cfg.legionella_hp_top_ceiling_c;
+      if (hp_check_c >= leg_hp_stop || top_ceiling_hit ||
+          elapsed_in_state_(in.now_ms) >= cfg.hp_max_runtime_ms) {
         hp_phase_done_ = true;
         legionella_hold_start_ms_ = 0;
       }
