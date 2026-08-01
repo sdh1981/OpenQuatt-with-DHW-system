@@ -93,6 +93,19 @@ globals:
     restore_value: false
     initial_value: '0'
 
+  # ----- Zachte aanloop van de DHW-compressor -----
+  # Bovengrens die bij het starten van de HP-fase op 1 begint en per stap
+  # oploopt, zodat de compressor niet ineens op zijn volle niveau wordt gezet.
+  # 0 = geen aanloop actief (buiten de HP-fase).
+  - id: oq_dhw_softstart_cap
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: oq_dhw_softstart_next_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
   # ----- Stapsgewijze tweede-HP assist tijdens de DHW HP-fase -----
   # Draait alleen in single-HP mode: de vastgezette lead houdt zijn niveau, de
   # andere unit komt er stapsgewijs bij als de lead het alleen niet bijbeent.
@@ -1241,6 +1254,25 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 1
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  # Zachte aanloop: tijd per stap bij het opbouwen van het compressorniveau aan
+  # het begin van de DHW HP-fase (level 1 -> 2 -> 3 -> ...). 0 = uit, dan gaat de
+  # compressor direct naar het gevraagde niveau zoals voorheen.
+  - platform: template
+    id: oq_dhw_softstart_step_min
+    name: "DHW soft start step time"
+    icon: mdi:ramp-left
+    unit_of_measurement: "min"
+    min_value: 0
+    max_value: 15
+    step: 0.5
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 3
     entity_category: config
     web_server:
       sorting_group_id: oq_boiler
@@ -3072,8 +3104,43 @@ interval:
               // Mapping disabled or HP not active: reset state to base level
               mapped = base_level;
             }
-            id(oq_dhw_coil_map_level)   = mapped;
-            id(oq_dhw_hp_level_request) = mapped;
+            // De coil-map houdt zijn eigen hysterese-state bij; die blijft
+            // bewust ongeklemd, anders zou de zachte aanloop hieronder die
+            // toestandsmachine vervuilen en zou de hysterese vanaf een te laag
+            // niveau gaan rekenen.
+            id(oq_dhw_coil_map_level) = mapped;
+
+            // ----- Zachte aanloop -----
+            // Bij het starten van de HP-fase kreeg de compressor meteen zijn
+            // volle niveau (level 3-4, ~3 kW). Nu begint hij op level 1 en loopt
+            // per stap op tot wat er gevraagd wordt. Beperkt de mechanische en
+            // thermische schok bij het starten en geeft de olie tijd om mee te
+            // gaan. 0 min = geen aanloop.
+            int requested = mapped;
+            {
+              const uint32_t now_ss = (uint32_t) millis();
+              const float step_min = id(oq_dhw_softstart_step_min).state;
+              const uint32_t step_ms = (uint32_t) fmaxf(0.0f, step_min * 60000.0f);
+              if (!out.hp_dhw_request || step_ms == 0) {
+                // Buiten de HP-fase (of uitgeschakeld) staat de aanloop klaar
+                // voor de volgende start.
+                id(oq_dhw_softstart_cap) = 0;
+                id(oq_dhw_softstart_next_ms) = 0;
+              } else if (id(oq_dhw_softstart_cap) <= 0) {
+                id(oq_dhw_softstart_cap) = 1;
+                id(oq_dhw_softstart_next_ms) = now_ss + step_ms;
+              } else if (id(oq_dhw_softstart_cap) < 10) {
+                // Tekenvergelijking is rollover-veilig (millis wrapt na ~49 dagen).
+                if ((int32_t) (now_ss - id(oq_dhw_softstart_next_ms)) >= 0) {
+                  id(oq_dhw_softstart_cap) += 1;
+                  id(oq_dhw_softstart_next_ms) = now_ss + step_ms;
+                }
+              }
+              if (id(oq_dhw_softstart_cap) > 0 && requested > id(oq_dhw_softstart_cap)) {
+                requested = id(oq_dhw_softstart_cap);
+              }
+            }
+            id(oq_dhw_hp_level_request) = requested;
           }
 
           // ===========================================================

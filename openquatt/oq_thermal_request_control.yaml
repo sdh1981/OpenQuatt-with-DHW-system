@@ -1152,7 +1152,14 @@ interval:
 
               const int level_bump = std::max(0, std::min(3,
                   (int) roundf(id(oq_dhw_single_hp_level_bump).state)));
-              const int boosted = std::max(1, std::min(10, dhw_level + level_bump));
+              int boosted = std::max(1, std::min(10, dhw_level + level_bump));
+
+              // De zachte aanloop (oq_boiler_control.yaml) begrenst ook dit
+              // opgehoogde niveau. Zonder deze clamp zou de bump er bovenop
+              // komen en zou de compressor alsnog op level 2 starten in plaats
+              // van 1 -- de aanloop geldt voor het niveau dat de unit echt krijgt.
+              const int ss_cap = id(oq_dhw_softstart_cap);
+              if (ss_cap > 0 && boosted > ss_cap) boosted = ss_cap;
 
               // Stapsgewijze assist van de niet-lead unit; de toestandsmachine
               // zit in oq_boiler_control.yaml en publiceert alleen het niveau.
