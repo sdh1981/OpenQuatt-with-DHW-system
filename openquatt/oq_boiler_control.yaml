@@ -1357,6 +1357,35 @@ number:
     web_server:
       sorting_group_id: oq_boiler
 
+  # Staart van de cyclus: zodra de tankbodem hier boven komt gaat de tweede unit
+  # eruit en worden de laatste graden op één compressor gemaakt. De HP-fase zelf
+  # stopt op tankbodem 52 °C, dus 48 laat ruwweg de laatste 4 K single draaien.
+  #
+  # Zonder deze grens bouwt de assist alleen op voortgang af: -1 per 10 min en
+  # daarna nog de minimale draaitijd, samen al gauw een half uur. Juist aan het
+  # eind van een cyclus is de tank heet, dus draaien twee compressors dan in hun
+  # slechtste werkgebied -- hoge condensatietemperatuur, lage COP, hoogste
+  # perszijdedruk. Deze drempel kapt dat af.
+  #
+  # Werkt op de tankbodem, net als de stopvoorwaarde van de HP-fase. Is de
+  # bodemsensor niet beschikbaar, dan vervalt deze grens en blijft de assist
+  # afbouwen op voortgang; de temperatuurbewaking blijft in beide gevallen actief.
+  - platform: template
+    id: oq_dhw_assist_bottom_stop_c
+    name: "DHW assist tank bottom stop"
+    icon: mdi:arrow-collapse-down
+    unit_of_measurement: "°C"
+    min_value: 35
+    max_value: 55
+    step: 0.5
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 48
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
   # Ging de assist eruit op de water-uit grens, dan mag hij ook vóór het einde
   # van de wachttijd terugkomen zodra dat water hieronder zakt -- wachttijd OF
   # temperatuur, wat het eerst komt. Geldt niet na een persgas-trip: afgekoeld
@@ -2297,6 +2326,13 @@ text_sensor:
         return std::string(buf);
       }
       if (id(oq_dhw_state_code) != 2) return std::string("Geen HP-fase actief");
+      {
+        const float b = id(dhw_tank_bottom_input).state;
+        const float bs = id(oq_dhw_assist_bottom_stop_c).state;
+        if (!isnan(b) && !isnan(bs) && b >= bs) {
+          return std::string("Uit - tank bijna klaar, staart op 1 compressor");
+        }
+      }
       if ((uint32_t) millis() < id(oq_dhw_assist_lockout_until_ms)) {
         if (id(oq_dhw_assist_water_trip)) {
           return std::string("Wachttijd - of eerder als water-uit genoeg zakt");
@@ -3277,6 +3313,17 @@ interval:
               }
             };
 
+            // Staart van de cyclus: tank bijna op temperatuur, laatste graden op
+            // één compressor. Meteen eruit in plaats van stapsgewijs afbouwen --
+            // dat duurt met stap- en minimale draaitijd al gauw een half uur,
+            // precies in het gebied waar twee units het slechtst draaien.
+            // Geen wachttijd nodig: zolang de bodem boven de drempel blijft
+            // houdt deze tak de assist zelf tegen.
+            const float bottom_now = id(dhw_tank_bottom_input).state;
+            const float bottom_stop = id(oq_dhw_assist_bottom_stop_c).state;
+            const bool tail_phase =
+                !isnan(bottom_now) && !isnan(bottom_stop) && (bottom_now >= bottom_stop);
+
             if (!assist_context) {
               drop_assist(false);
               id(oq_dhw_top_rise_k_min) = NAN;
@@ -3285,6 +3332,15 @@ interval:
               // heeft hier weinig zin -- we zitten al aan de limiet van wat de
               // waterkring kwijt kan.
               if (id(oq_dhw_assist_level) > 0) drop_assist(true);
+            } else if (tail_phase) {
+              // Tank bijna op temperatuur: tweede unit eruit, laatste graden op
+              // één compressor. Meteen, niet stapsgewijs -- afbouwen kost met
+              // stap- en minimale draaitijd al gauw een half uur, precies in het
+              // gebied waar twee units het slechtst draaien.
+              // Geen wachttijd nodig: zolang de bodem boven de drempel blijft
+              // houdt deze tak de assist zelf tegen.
+              if (id(oq_dhw_assist_level) > 0) drop_assist(false);
+              id(oq_dhw_assist_eng_ms) = 0;
             } else {
               int assist_cap = (int) lroundf(id(oq_dhw_assist_max_level).state);
               if (assist_cap < 1) assist_cap = 1;
