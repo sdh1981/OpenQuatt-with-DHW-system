@@ -136,6 +136,12 @@ globals:
     type: bool
     restore_value: false
     initial_value: 'false'
+  # Was de laatste guard-trip puur de water-uit grens? Alleen dan mag de
+  # wachttijd vroegtijdig vervallen zodra dat water weer is afgekoeld.
+  - id: oq_dhw_assist_water_trip
+    type: bool
+    restore_value: false
+    initial_value: 'false'
   - id: oq_dhw_assist_last_loop_ms
     type: uint32_t
     restore_value: false
@@ -1351,6 +1357,28 @@ number:
     web_server:
       sorting_group_id: oq_boiler
 
+  # Ging de assist eruit op de water-uit grens, dan mag hij ook vóór het einde
+  # van de wachttijd terugkomen zodra dat water hieronder zakt -- wachttijd OF
+  # temperatuur, wat het eerst komt. Geldt niet na een persgas-trip: afgekoeld
+  # water zegt dan niets over de compressor zelf.
+  # Wordt intern begrensd tot (max water out - 2 K), gelijk aan de marge waarop
+  # de guard zelf vrijgeeft, zodat een te hoge instelling niet direct vrijgeeft.
+  - platform: template
+    id: oq_dhw_assist_water_release_c
+    name: "DHW assist water release temp"
+    icon: mdi:thermometer-chevron-down
+    unit_of_measurement: "°C"
+    min_value: 35
+    max_value: 58
+    step: 0.5
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 50
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
   # Tank water volume in litres — used for thermal capacity in #4 standby-loss
   # tracker and #6 time-to-ready estimator. Default 220 L (Inventum Maxtank).
   # Change this if you have a different tank.
@@ -2270,6 +2298,9 @@ text_sensor:
       }
       if (id(oq_dhw_state_code) != 2) return std::string("Geen HP-fase actief");
       if ((uint32_t) millis() < id(oq_dhw_assist_lockout_until_ms)) {
+        if (id(oq_dhw_assist_water_trip)) {
+          return std::string("Wachttijd - of eerder als water-uit genoeg zakt");
+        }
         return std::string("Wachttijd na uitschakelen");
       }
       return std::string("Standby - lead haalt het alleen");
@@ -3207,14 +3238,23 @@ interval:
             // Daarom één predicaat, en vrijgeven op "niets staat nog boven de
             // release-marge" in plaats van "alles is aantoonbaar koel".
             auto above = [](float v, float limit) { return !isnan(v) && v >= limit; };
-            const bool trip =
-                above(dis1, dis_max_c) || above(dis2, dis_max_c) || above(wout, wout_max_c);
+            const bool dis_over = above(dis1, dis_max_c) || above(dis2, dis_max_c);
+            const bool wout_over = above(wout, wout_max_c);
+            const bool trip = dis_over || wout_over;
             // Release: 5 K onder de persgasgrens, 2 K onder de watergrens.
             const bool still_hot =
                 above(dis1, dis_max_c - 5.0f) || above(dis2, dis_max_c - 5.0f) ||
                 above(wout, wout_max_c - 2.0f);
-            if (trip) id(oq_dhw_assist_guard_active) = true;
-            else if (id(oq_dhw_assist_guard_active) && !still_hot) id(oq_dhw_assist_guard_active) = false;
+            if (trip) {
+              id(oq_dhw_assist_guard_active) = true;
+              // Onthouden of dit puur de watergrens was. Alleen dan geldt de
+              // vroege vrijgave verderop: koelt het water af, dan is de reden om
+              // te blokkeren weg. Bij een persgas-trip zegt afgekoeld water niets
+              // over de compressor zelf, dus daar blijft de volle wachttijd staan.
+              id(oq_dhw_assist_water_trip) = wout_over && !dis_over;
+            } else if (id(oq_dhw_assist_guard_active) && !still_hot) {
+              id(oq_dhw_assist_guard_active) = false;
+            }
 
             const uint32_t ENGAGE_MS  = 600000UL;  // 10 min aanhoudend tekort voor de 2e start
             const uint32_t STEP_MS    = 600000UL;  // 10 min tussen elke op-/afstap
@@ -3226,7 +3266,15 @@ interval:
               id(oq_dhw_assist_eng_ms) = 0;
               id(oq_dhw_assist_step_ms) = 0;
               id(oq_dhw_assist_on_since_ms) = 0;
-              if (lockout) id(oq_dhw_assist_lockout_until_ms) = now_ms_a + LOCKOUT_MS;
+              if (lockout) {
+                id(oq_dhw_assist_lockout_until_ms) = now_ms_a + LOCKOUT_MS;
+              } else {
+                // Einde van de HP-fase: schoon beginnen aan de volgende cyclus.
+                // Een wachttijd uit de vorige cyclus laten doorlopen zou de
+                // assist nodeloos blokkeren terwijl de tank weer koud is.
+                id(oq_dhw_assist_lockout_until_ms) = 0;
+                id(oq_dhw_assist_water_trip) = false;
+              }
             };
 
             if (!assist_context) {
@@ -3252,9 +3300,24 @@ interval:
               const bool short_of_it = saturated && too_slow;
 
               if (id(oq_dhw_assist_level) == 0) {
-                const bool locked_out =
-                    (id(oq_dhw_assist_lockout_until_ms) != 0) &&
-                    (now_ms_a < id(oq_dhw_assist_lockout_until_ms));
+                const bool wait_elapsed =
+                    (id(oq_dhw_assist_lockout_until_ms) == 0) ||
+                    (now_ms_a >= id(oq_dhw_assist_lockout_until_ms));
+
+                // Is hij eruit gegaan op de water-uit grens, dan mag hij ook
+                // terug zodra dat water weer voldoende is afgekoeld -- dus de
+                // wachttijd OF de temperatuur, wat het eerst komt. Wordt het
+                // water snel koeler, dan is er geen reden meer om te blokkeren.
+                // Ondergrens t.o.v. de guard-release (max - 2 K) zodat een te
+                // hoog ingestelde drempel niet meteen na de trip vrijgeeft.
+                float release_c = id(oq_dhw_assist_water_release_c).state;
+                const float release_ceiling = wout_max_c - 2.0f;
+                if (!isnan(release_c) && release_c > release_ceiling) release_c = release_ceiling;
+                const bool water_released =
+                    id(oq_dhw_assist_water_trip) &&
+                    !isnan(wout) && !isnan(release_c) && (wout < release_c);
+
+                const bool locked_out = !wait_elapsed && !water_released;
                 if (short_of_it && !locked_out) id(oq_dhw_assist_eng_ms) += dt_ms_a;
                 else id(oq_dhw_assist_eng_ms) = 0;
                 if (id(oq_dhw_assist_eng_ms) >= ENGAGE_MS) {
@@ -3262,6 +3325,8 @@ interval:
                   id(oq_dhw_assist_on_since_ms) = now_ms_a;
                   id(oq_dhw_assist_step_ms) = 0;
                   id(oq_dhw_assist_eng_ms) = 0;
+                  id(oq_dhw_assist_lockout_until_ms) = 0;
+                  id(oq_dhw_assist_water_trip) = false;
                 }
               } else {
                 const uint32_t on_elapsed = (now_ms_a >= id(oq_dhw_assist_on_since_ms))
