@@ -127,6 +127,7 @@ oq_boiler_control: !include
   file: oq_boiler_control.yaml
   vars:
     heatpump_outlet_temp_id: "${secondary_hp_id}_water_out_temp"
+    dhw_secondary_gas_discharge_id: "${secondary_hp_id}_gas_discharge_temp"
 oq_energy: !include oq_energy.yaml
 oq_cic: !include
   file: oq_cic.yaml

@@ -93,6 +93,54 @@ globals:
     restore_value: false
     initial_value: '0'
 
+  # ----- Stapsgewijze tweede-HP assist tijdens de DHW HP-fase -----
+  # Draait alleen in single-HP mode: de vastgezette lead houdt zijn niveau, de
+  # andere unit komt er stapsgewijs bij als de lead het alleen niet bijbeent.
+  # Bewust NIET actief tijdens legionella -- daar geldt juist het tanktop-plafond
+  # van 55 °C omdat de perszijdedruk daar uit de hand liep.
+  - id: oq_dhw_assist_level
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: oq_dhw_assist_eng_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: oq_dhw_assist_step_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: oq_dhw_assist_on_since_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: oq_dhw_assist_lockout_until_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  # Latched guard: blijft staan tot de temperatuur onder de release-marge zakt.
+  - id: oq_dhw_assist_guard_active
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: oq_dhw_assist_last_loop_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  # Stijgsnelheid van de tanktop, over een venster gemeten (K/min).
+  - id: oq_dhw_top_prev_c
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: oq_dhw_top_prev_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: oq_dhw_top_rise_k_min
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+
   # ----- v0.32 DHW smart features -----
 
   # #1 Tariff-aware shift on effective start_top (°C). Positive = start earlier
@@ -604,6 +652,21 @@ switch:
     restore_mode: RESTORE_DEFAULT_OFF
     turn_on_action: []
     turn_off_action: []
+    web_server:
+      sorting_group_id: oq_boiler
+
+  # Laat de tweede unit stapsgewijs bijspringen als de lead het alleen niet
+  # bijbeent. Doet alleen iets in single-HP mode en alleen tijdens de gewone
+  # DHW HP-fase -- niet tijdens legionella.
+  - platform: template
+    id: oq_dhw_assist_enable
+    name: "DHW second HP assist"
+    icon: mdi:stairs-up
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    turn_on_action: []
+    turn_off_action: []
+    entity_category: config
     web_server:
       sorting_group_id: oq_boiler
 
@@ -1182,22 +1245,76 @@ number:
     web_server:
       sorting_group_id: oq_boiler
 
-  # Terugval naar duo als de enkele HP het niet bijbeent. Gemeten vanaf het begin
-  # van de single-DHW-fase. 0 = uit (altijd single blijven).
-  # Default 45 min ligt ruim onder de 75 min waarop de DHW-regeling de HP-fase
-  # sowieso afkapt, dus er blijft tijd over waarin twee units kunnen inhalen.
+  # ----- Stapsgewijze tweede-HP assist -----
+  # Vervangt de eerdere "val in één klap terug op duo": die sloeg de opbouw over
+  # en zette beide units ineens aan. Nu komt de tweede unit op level 1 binnen en
+  # klimt hij per stap, zodat we niet meer capaciteit inzetten dan nodig.
   - platform: template
-    id: oq_dhw_single_fallback_min
-    name: "DHW single HP fallback to duo"
-    icon: mdi:call-split
-    unit_of_measurement: "min"
-    min_value: 0
-    max_value: 90
-    step: 5
+    id: oq_dhw_assist_max_level
+    name: "DHW assist max level"
+    icon: mdi:stairs-up
+    unit_of_measurement: "lvl"
+    min_value: 1
+    max_value: 10
+    step: 1
     mode: slider
     optimistic: true
     restore_value: true
-    initial_value: 45
+    initial_value: 3
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  # Onder deze stijgsnelheid van de tanktop geldt de lead als "haalt het niet".
+  # 220 L met ~3 kW netto komt op ruwweg 0,2 K/min; 0,10 is dus duidelijk traag
+  # en niet zomaar de normale afvlakking aan het eind van een cyclus.
+  - platform: template
+    id: oq_dhw_assist_min_rise_k_min
+    name: "DHW assist min tank rise"
+    icon: mdi:trending-up
+    unit_of_measurement: "K/min"
+    min_value: 0.02
+    max_value: 0.50
+    step: 0.01
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 0.10
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  # Bewaking. Deze grenzen sturen ALLEEN de assist-beslissing aan; ze zetten geen
+  # tweede level-cap naast de bestaande supply-temp-protection (soft 55 / hard
+  # 58 °C). Twee regelaars op hetzelfde signaal zouden tegen elkaar in werken.
+  - platform: template
+    id: oq_dhw_assist_discharge_max_c
+    name: "DHW assist max discharge temp"
+    icon: mdi:thermometer-alert
+    unit_of_measurement: "°C"
+    min_value: 70
+    max_value: 110
+    step: 1
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 90
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_assist_water_out_max_c
+    name: "DHW assist max water out"
+    icon: mdi:thermometer-water
+    unit_of_measurement: "°C"
+    min_value: 45
+    max_value: 62
+    step: 0.5
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 57
     entity_category: config
     web_server:
       sorting_group_id: oq_boiler
@@ -2098,6 +2215,37 @@ text_sensor:
 
   # v0.40: legionella deferral status (smart + tariff-aware)
   - platform: template
+    id: oq_dhw_assist_status_text
+    name: "DHW second HP assist status"
+    icon: mdi:stairs-up
+    update_interval: 10s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      #if OQ_TOPOLOGY_DUO
+      if (!id(oq_dhw_assist_enable).state) return std::string("Uit");
+      if (!id(oq_dhw_single_hp_mode).state) return std::string("Niet van toepassing - duo DHW");
+      if (id(oq_dhw_state_code) == 4) return std::string("Uit tijdens legionella");
+      if (id(oq_dhw_assist_guard_active)) {
+        return std::string("Geblokkeerd - persgas of water-uit te hoog");
+      }
+      const int lvl = id(oq_dhw_assist_level);
+      if (lvl > 0) {
+        char buf[48];
+        snprintf(buf, sizeof(buf), "Actief - 2e HP op level %d", lvl);
+        return std::string(buf);
+      }
+      if (id(oq_dhw_state_code) != 2) return std::string("Geen HP-fase actief");
+      if ((uint32_t) millis() < id(oq_dhw_assist_lockout_until_ms)) {
+        return std::string("Wachttijd na uitschakelen");
+      }
+      return std::string("Standby - lead haalt het alleen");
+      #else
+      return std::string("Niet van toepassing - single topologie");
+      #endif
+
+  - platform: template
     id: oq_dhw_legionella_defer_status_text
     name: "DHW legionella deferral status"
     icon: mdi:information-outline
@@ -2927,6 +3075,153 @@ interval:
             id(oq_dhw_coil_map_level)   = mapped;
             id(oq_dhw_hp_level_request) = mapped;
           }
+
+          // ===========================================================
+          // Stapsgewijze tweede-HP assist (single-HP DHW).
+          //
+          // De lead houdt zijn eigen niveau; de andere unit komt binnen op
+          // level 1 en klimt per stap. Bewust stapsgewijs: in één klap naar duo
+          // zet meer capaciteit in dan nodig en jaagt de aanvoertemperatuur op.
+          //
+          // Alleen tijdens de gewone DHW HP-fase (state 2). Tijdens legionella
+          // (state 4) bewust uit: daar geldt juist het tanktop-plafond omdat de
+          // perszijdedruk uit de hand liep.
+          //
+          // De bewakingsgrenzen sturen alleen deze beslissing aan; het cappen
+          // van niveaus blijft bij de bestaande supply-temp-protection.
+          // ===========================================================
+          #if OQ_TOPOLOGY_DUO
+          {
+            const uint32_t now_ms_a = (uint32_t) millis();
+            uint32_t dt_ms_a = 0;
+            if (id(oq_dhw_assist_last_loop_ms) != 0 && now_ms_a > id(oq_dhw_assist_last_loop_ms)) {
+              dt_ms_a = now_ms_a - id(oq_dhw_assist_last_loop_ms);
+              if (dt_ms_a > 60000UL) dt_ms_a = 60000UL;  // gat na reboot/OTA niet meetellen
+            }
+            id(oq_dhw_assist_last_loop_ms) = now_ms_a;
+
+            // --- Stijgsnelheid tanktop over een venster van 2 minuten ---
+            const float top_now = id(dhw_tank_top_input).state;
+            if (!isnan(top_now)) {
+              if (id(oq_dhw_top_prev_ms) == 0 || now_ms_a < id(oq_dhw_top_prev_ms)) {
+                id(oq_dhw_top_prev_c) = top_now;
+                id(oq_dhw_top_prev_ms) = now_ms_a;
+              } else if ((now_ms_a - id(oq_dhw_top_prev_ms)) >= 120000UL) {
+                const float dt_min = (now_ms_a - id(oq_dhw_top_prev_ms)) / 60000.0f;
+                if (dt_min > 0.0f && !isnan(id(oq_dhw_top_prev_c))) {
+                  id(oq_dhw_top_rise_k_min) = (top_now - id(oq_dhw_top_prev_c)) / dt_min;
+                }
+                id(oq_dhw_top_prev_c) = top_now;
+                id(oq_dhw_top_prev_ms) = now_ms_a;
+              }
+            }
+
+            const bool assist_context =
+                id(oq_dhw_assist_enable).state &&
+                id(oq_dhw_single_hp_mode).state &&
+                id(oq_dhw_hp_request_active) &&
+                (id(oq_dhw_state_code) == 2);   // alleen DHW_HEAT_PUMP
+
+            // --- Bewaking: persgas van BEIDE units en water-uit van de
+            //     assisterende unit (de niet-lead). Gelatcht met een
+            //     release-marge, zodat hij niet op de grens gaat klapperen.
+            const float dis1 = id(hp1_gas_discharge_temp).state;
+            const float dis2 = id(${dhw_secondary_gas_discharge_id}).state;
+            const float dis_max_c = id(oq_dhw_assist_discharge_max_c).state;
+            const float wout_max_c = id(oq_dhw_assist_water_out_max_c).state;
+            // Assist = de unit die NIET de vastgezette lead is. Bij lead HP1
+            // (de normale situatie) is dat HP2.
+            const bool assist_is_hp2 = (id(oq_dhw_single_lead_hp) != 2);
+            const float wout = assist_is_hp2 ? id(${heatpump_outlet_temp_id}).state
+                                             : id(hp1_water_out_temp).state;
+
+            // NaN telt nergens mee: een ontbrekende sensor mag de assist niet
+            // blokkeren, maar mag een gelatchte guard ook niet vasthouden.
+            // Daarom één predicaat, en vrijgeven op "niets staat nog boven de
+            // release-marge" in plaats van "alles is aantoonbaar koel".
+            auto above = [](float v, float limit) { return !isnan(v) && v >= limit; };
+            const bool trip =
+                above(dis1, dis_max_c) || above(dis2, dis_max_c) || above(wout, wout_max_c);
+            // Release: 5 K onder de persgasgrens, 2 K onder de watergrens.
+            const bool still_hot =
+                above(dis1, dis_max_c - 5.0f) || above(dis2, dis_max_c - 5.0f) ||
+                above(wout, wout_max_c - 2.0f);
+            if (trip) id(oq_dhw_assist_guard_active) = true;
+            else if (id(oq_dhw_assist_guard_active) && !still_hot) id(oq_dhw_assist_guard_active) = false;
+
+            const uint32_t ENGAGE_MS  = 600000UL;  // 10 min aanhoudend tekort voor de 2e start
+            const uint32_t STEP_MS    = 600000UL;  // 10 min tussen elke op-/afstap
+            const uint32_t MINON_MS   = 900000UL;  // 15 min minimale draaitijd (anti-pendel)
+            const uint32_t LOCKOUT_MS = 900000UL;  // 15 min voor hij terug mag komen
+
+            auto drop_assist = [&](bool lockout) {
+              id(oq_dhw_assist_level) = 0;
+              id(oq_dhw_assist_eng_ms) = 0;
+              id(oq_dhw_assist_step_ms) = 0;
+              id(oq_dhw_assist_on_since_ms) = 0;
+              if (lockout) id(oq_dhw_assist_lockout_until_ms) = now_ms_a + LOCKOUT_MS;
+            };
+
+            if (!assist_context) {
+              drop_assist(false);
+              id(oq_dhw_top_rise_k_min) = NAN;
+            } else if (id(oq_dhw_assist_guard_active)) {
+              // Thermische grens geraakt: helemaal terug en op slot. Terugstappen
+              // heeft hier weinig zin -- we zitten al aan de limiet van wat de
+              // waterkring kwijt kan.
+              if (id(oq_dhw_assist_level) > 0) drop_assist(true);
+            } else {
+              int assist_cap = (int) lroundf(id(oq_dhw_assist_max_level).state);
+              if (assist_cap < 1) assist_cap = 1;
+              if (assist_cap > 10) assist_cap = 10;
+
+              // "Lead haalt het niet": hij wordt om zijn volle toegestane niveau
+              // gevraagd én de tanktop stijgt te traag.
+              const int base_level = (int) roundf(id(oq_dhw_hp_level).state);
+              const bool saturated = (id(oq_dhw_hp_level_request) >= base_level);
+              const float rise = id(oq_dhw_top_rise_k_min);
+              const float min_rise = id(oq_dhw_assist_min_rise_k_min).state;
+              const bool too_slow = !isnan(rise) && (rise < min_rise);
+              const bool short_of_it = saturated && too_slow;
+
+              if (id(oq_dhw_assist_level) == 0) {
+                const bool locked_out =
+                    (id(oq_dhw_assist_lockout_until_ms) != 0) &&
+                    (now_ms_a < id(oq_dhw_assist_lockout_until_ms));
+                if (short_of_it && !locked_out) id(oq_dhw_assist_eng_ms) += dt_ms_a;
+                else id(oq_dhw_assist_eng_ms) = 0;
+                if (id(oq_dhw_assist_eng_ms) >= ENGAGE_MS) {
+                  id(oq_dhw_assist_level) = 1;
+                  id(oq_dhw_assist_on_since_ms) = now_ms_a;
+                  id(oq_dhw_assist_step_ms) = 0;
+                  id(oq_dhw_assist_eng_ms) = 0;
+                }
+              } else {
+                const uint32_t on_elapsed = (now_ms_a >= id(oq_dhw_assist_on_since_ms))
+                    ? (now_ms_a - id(oq_dhw_assist_on_since_ms)) : 0;
+                id(oq_dhw_assist_step_ms) += dt_ms_a;
+                if (short_of_it) {
+                  if (id(oq_dhw_assist_level) < assist_cap &&
+                      id(oq_dhw_assist_step_ms) >= STEP_MS) {
+                    id(oq_dhw_assist_level) += 1;
+                    id(oq_dhw_assist_step_ms) = 0;
+                  }
+                } else if (id(oq_dhw_assist_step_ms) >= STEP_MS) {
+                  // Tank loopt weer goed op: stap terug, en pas eruit op level 1
+                  // nadat de minimale draaitijd voorbij is.
+                  if (id(oq_dhw_assist_level) > 1) {
+                    id(oq_dhw_assist_level) -= 1;
+                    id(oq_dhw_assist_step_ms) = 0;
+                  } else if (on_elapsed >= MINON_MS) {
+                    drop_assist(true);
+                  }
+                }
+              }
+            }
+          }
+          #else
+          id(oq_dhw_assist_level) = 0;
+          #endif
 
           id(oq_dhw_state_code) = (int) out.state;
           id(oq_dhw_fault_code) = (int) out.fault;
