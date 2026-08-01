@@ -96,6 +96,8 @@ oq_thermal_request_control: !include
     hc_secondary_4_way_valve_id: "${secondary_hp_id}_4_way_valve"
     hc_secondary_excluded_level_a_id: "${secondary_hp_id}_excluded_level_a"
     hc_secondary_excluded_level_b_id: "${secondary_hp_id}_excluded_level_b"
+    hc_secondary_ot_fault_active_id: "${secondary_hp_id}_ot_fault_active"
+    hc_secondary_freq_limited_id: "${secondary_hp_id}_freq_limited"
     hc_dual_tuning_internal: "${hc_dual_tuning_internal}"
     hc_hp2_diag_internal: "${hc_hp2_diag_internal}"
     hc_runtime_reset_button_name: "${hc_runtime_reset_button_name}"
