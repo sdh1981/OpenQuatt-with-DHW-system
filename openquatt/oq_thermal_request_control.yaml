@@ -52,6 +52,22 @@
 # INTERNAL STATE
 # ----------------------------
 globals:
+  # Vastgezette lead-HP voor de lopende single-DHW-cyclus. 0 = geen cyclus actief.
+  # Zonder deze lock wordt de lead elke regellus opnieuw uit de draaiurentellers
+  # afgeleid; die tellers lopen tijdens het draaien naar elkaar toe, waardoor de
+  # DHW-vraag middenin een cyclus naar de andere unit verhuist. Dat kost een
+  # extra start/stop-paar -- juist wat wear-leveling zou moeten voorkomen.
+  - id: oq_dhw_single_lead_hp
+    type: int
+    restore_value: false
+    initial_value: '0'
+
+  # Starttijd van de huidige single-DHW-fase, voor de terugval naar duo.
+  - id: oq_dhw_single_started_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
   # Explicit pre-actuator thermal request interface.
   - id: oq_request_mode_code
     type: int
@@ -614,6 +630,30 @@ text_sensor:
       return std::string("HP1");
       #endif
 
+  # Welke unit de lopende single-DHW-cyclus draait. Anders dan "Runtime lead HP"
+  # hierboven verandert deze niet zodra de draaiurentellers elkaar passeren: hij
+  # ligt vast voor de hele cyclus. Wijkt hij af van de runtime-lead, dan is dat
+  # de bedoeling -- de lock of een storing/freq-limit heeft dan voorrang gekregen.
+  - platform: template
+    id: oq_dhw_single_lead_text
+    name: "DHW single HP lead"
+    icon: mdi:numeric-1-circle-outline
+    update_interval: 10s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      #if OQ_TOPOLOGY_DUO
+      if (!id(oq_dhw_single_hp_mode).state) return std::string("Uit - duo DHW");
+      switch (id(oq_dhw_single_lead_hp)) {
+        case 1: return std::string("HP1");
+        case 2: return std::string("HP2");
+        default: return std::string("Geen cyclus actief");
+      }
+      #else
+      return std::string("HP1");
+      #endif
+
   - platform: template
     id: oq_heating_debug_state
     name: "Heating Debug State"
@@ -1086,10 +1126,55 @@ interval:
             // Avoids the COP-poor "both HPs at level 1" state at low DHW level.
             const bool dhw_single_mode = id(oq_dhw_single_hp_mode).state;
             if (dhw_single_mode && id(oq_dhw_hp_request_active)) {
+              // Gezondheid per unit. Harde storing = expliciete failure-bits;
+              // freq-limited = de unit knijpt zichzelf af (hoge/lage druk of
+              // ambient) en is al gedebounced met delayed_on 90s.
+              const bool hp1_fault   = id(hp1_ot_fault_active).state;
+              const bool hp2_fault   = id(${hc_secondary_ot_fault_active_id}).state;
+              const bool hp1_limited = id(hp1_freq_limited).state;
+              const bool hp2_limited = id(${hc_secondary_freq_limited_id}).state;
+
+              // Lead kiezen en vastzetten voor de duur van deze DHW-cyclus.
+              // De lock wordt vrijgegeven in de else-tak hieronder, die elke
+              // cyclus wordt doorlopen tijdens DHW_PREPARE (daar staat nog geen
+              // hp-request open) -- dus ook na een abrupte moduswissel.
+              int lead = id(oq_dhw_single_lead_hp);
+
+              // Een harde storing op de vastgezette unit breekt de lock. Blijven
+              // hangen op een zieke compressor is erger dan de extra wissel die
+              // de lock juist voorkomt. Een freq-limit doet dat bewust NIET:
+              // bij DHW-temperaturen knijpen beide units regelmatig af, en
+              // daarop wisselen zou het geflipper terugbrengen.
+              if (lead == 1 && hp1_fault && !hp2_fault) lead = 0;
+              if (lead == 2 && hp2_fault && !hp1_fault) lead = 0;
+
+              if (lead == 0) {
+                if      (hp1_fault   != hp2_fault)   lead = hp1_fault   ? 2 : 1;
+                else if (hp1_limited != hp2_limited) lead = hp1_limited ? 2 : 1;
+                else                                 lead = lead_is_hp1 ? 1 : 2;
+                id(oq_dhw_single_started_ms) = now_ms;
+              }
+              id(oq_dhw_single_lead_hp) = lead;
+
+              // Terugval naar duo als één unit het niet bijbeent. 0 = uit.
+              const int fallback_min = std::max(0,
+                  (int) roundf(id(oq_dhw_single_fallback_min).state));
+              bool use_duo = false;
+              if (fallback_min > 0 && id(oq_dhw_single_started_ms) != 0 &&
+                  now_ms >= id(oq_dhw_single_started_ms)) {
+                use_duo = (now_ms - id(oq_dhw_single_started_ms)) >=
+                          (uint32_t) fallback_min * 60000UL;
+              }
+
               const int level_bump = std::max(0, std::min(3,
                   (int) roundf(id(oq_dhw_single_hp_level_bump).state)));
               const int boosted = std::max(1, std::min(10, dhw_level + level_bump));
-              if (lead_is_hp1) {
+              if (use_duo) {
+                hp1_req = dhw_level;
+                hp2_req = dhw_level;
+                request_owner_hp = 3;
+                request_reason = "dhw_single_fallback_duo";
+              } else if (lead == 1) {
                 hp1_req = boosted;
                 hp2_req = 0;
                 request_owner_hp = 1;
@@ -1101,6 +1186,8 @@ interval:
                 request_reason = "dhw_single_hp2";
               }
             } else {
+              id(oq_dhw_single_lead_hp) = 0;
+              id(oq_dhw_single_started_ms) = 0;
               hp1_req = id(oq_dhw_hp_request_active) ? dhw_level : 0;
               hp2_req = id(oq_dhw_hp_request_active) ? dhw_level : 0;
               request_owner_hp = (hp1_req > 0 || hp2_req > 0) ? 3 : 0;

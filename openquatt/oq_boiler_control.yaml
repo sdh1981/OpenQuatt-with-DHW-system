@@ -1182,6 +1182,26 @@ number:
     web_server:
       sorting_group_id: oq_boiler
 
+  # Terugval naar duo als de enkele HP het niet bijbeent. Gemeten vanaf het begin
+  # van de single-DHW-fase. 0 = uit (altijd single blijven).
+  # Default 45 min ligt ruim onder de 75 min waarop de DHW-regeling de HP-fase
+  # sowieso afkapt, dus er blijft tijd over waarin twee units kunnen inhalen.
+  - platform: template
+    id: oq_dhw_single_fallback_min
+    name: "DHW single HP fallback to duo"
+    icon: mdi:call-split
+    unit_of_measurement: "min"
+    min_value: 0
+    max_value: 90
+    step: 5
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 45
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
   # Tank water volume in litres — used for thermal capacity in #4 standby-loss
   # tracker and #6 time-to-ready estimator. Default 220 L (Inventum Maxtank).
   # Change this if you have a different tank.
