@@ -536,6 +536,60 @@ views:
                 name: DHW flow max (l/h)
       - type: grid
         cards:
+          - type: heading
+            icon: mdi:rocket-launch
+            heading: DHW snelboost
+            heading_style: title
+          - type: tile
+            entity: switch.openquatt_dhw_boost_now
+            name: Snelboost nu
+            icon: mdi:rocket-launch
+            features:
+              - type: toggle
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: sensor.openquatt_dhw_second_hp_assist_status
+                name: Boost / assist status
+              - entity: number.openquatt_dhw_boost_now_target
+                name: Snelboost doel tanktop (degC)
+              - entity: number.openquatt_dhw_boost_now_hp_stop
+                name: Snelboost HP stop tanktop (degC)
+      - type: grid
+        cards:
+          - type: heading
+            icon: mdi:stairs-up
+            heading: DHW single HP en tweede-HP assist
+            heading_style: title
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: switch.openquatt_dhw_single_hp_mode
+                name: Single HP mode
+              - entity: sensor.openquatt_dhw_single_hp_lead
+                name: Actieve HP (vastgezet per cyclus)
+              - entity: number.openquatt_dhw_single_hp_level_bump
+                name: Single HP level bump
+              - entity: number.openquatt_dhw_soft_start_step_time
+                name: Zachte aanloop per stap (min)
+              - entity: switch.openquatt_dhw_second_hp_assist
+                name: Tweede HP assist
+              - entity: number.openquatt_dhw_assist_max_level
+                name: Assist max niveau
+              - entity: number.openquatt_dhw_assist_min_tank_rise
+                name: Assist min tankstijging (K/min)
+              - entity: number.openquatt_dhw_assist_tank_bottom_stop
+                name: Assist stop tankbodem (degC)
+              - entity: number.openquatt_dhw_assist_max_discharge_temp
+                name: Assist max persgas (degC)
+              - entity: number.openquatt_dhw_assist_max_water_out
+                name: Assist max water uit (degC)
+              - entity: number.openquatt_dhw_assist_water_release_temp
+                name: Assist vrijgave water uit (degC)
+              - entity: number.openquatt_dhw_legionella_hp_top_ceiling
+                name: Legionella HP plafond tanktop (degC)
+      - type: grid
+        cards:
           - type: vertical-stack
             cards:
               - type: heading
