@@ -1119,7 +1119,11 @@ interval:
             // request to the runtime-lead HP only, with an optional level
             // bump to compensate for the lost capacity of the second HP.
             // Avoids the COP-poor "both HPs at level 1" state at low DHW level.
-            const bool dhw_single_mode = id(oq_dhw_single_hp_mode).state;
+            // Tijdens een handmatige snelboost draaien beide units, ook als
+            // single-HP mode aan staat. Je vraagt daar juist om capaciteit; één
+            // compressor inzetten zou het doel van de knop tenietdoen.
+            const bool dhw_single_mode =
+                id(oq_dhw_single_hp_mode).state && !id(oq_dhw_max_boost_active);
             if (dhw_single_mode && id(oq_dhw_hp_request_active)) {
               // Gezondheid per unit. Harde storing = expliciete failure-bits;
               // freq-limited = de unit knijpt zichzelf af (hoge/lage druk of

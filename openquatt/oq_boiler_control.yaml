@@ -93,6 +93,19 @@ globals:
     restore_value: false
     initial_value: '0'
 
+  # ----- Handmatige snelboost -----
+  # Actief = de lopende cyclus is een snelboost (HP1 + HP2 + element).
+  - id: oq_dhw_max_boost_active
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  # Door de bewaking gezette thermische grens: persgas of water-uit te hoog.
+  # Haalt tijdens een snelboost de HP's eruit; het element gaat door.
+  - id: oq_dhw_hp_thermal_limit
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
   # ----- Zachte aanloop van de DHW-compressor -----
   # Bovengrens die bij het starten van de HP-fase op 1 begint en per stap
   # oploopt, zodat de compressor niet ineens op zijn volle niveau wordt gezet.
@@ -457,6 +470,26 @@ switch:
     turn_on_action: []
     turn_off_action: []
     entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  # Handmatige snelboost: HP1 + HP2 + het 3 kW element tegelijk, voor als er
+  # snel weer warm water moet zijn (meerdere douches achter elkaar).
+  #
+  # Anders dan de gewone cyclus begint deze meteen in de boost-fase, dus met
+  # het element erbij vanaf het eerste moment. De HP's gaan er eerder uit dan
+  # het element klaar is -- zie de grenzen hieronder.
+  #
+  # Negeert het DHW-tijdvenster, net als de legionella-force: dit is een
+  # expliciete opdracht. Schakelt zichzelf uit zodra de boost klaar is.
+  - platform: template
+    id: oq_dhw_boost_now
+    name: "DHW boost now"
+    icon: mdi:rocket-launch
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action: []
+    turn_off_action: []
     web_server:
       sorting_group_id: oq_boiler
 
@@ -1353,6 +1386,44 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 57
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  # Snelboost: doeltemperatuur voor het element. Hoger dan de gewone boost (56)
+  # zodat er na meerdere tappingen echt buffer in de tank zit.
+  - platform: template
+    id: oq_dhw_max_boost_target_c
+    name: "DHW boost now target"
+    icon: mdi:rocket-launch-outline
+    unit_of_measurement: "°C"
+    min_value: 50
+    max_value: 65
+    step: 0.5
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 60
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  # Snelboost: tanktop waarboven BEIDE HP's eruit gaan. Het element maakt de
+  # resterende graden naar het doel hierboven alleen af. Bewust lager dan dat
+  # doel: met een element dat dezelfde tank opstookt loopt de condensatiedruk
+  # van de HP's daarboven te ver op -- zelfde reden als het legionella-plafond.
+  - platform: template
+    id: oq_dhw_max_boost_hp_stop_top_c
+    name: "DHW boost now HP stop"
+    icon: mdi:thermometer-chevron-up
+    unit_of_measurement: "°C"
+    min_value: 45
+    max_value: 60
+    step: 0.5
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 55
     entity_category: config
     web_server:
       sorting_group_id: oq_boiler
@@ -2313,6 +2384,18 @@ text_sensor:
       sorting_group_id: oq_boiler
     lambda: |-
       #if OQ_TOPOLOGY_DUO
+      // Snelboost heeft een eigen verloop en negeert de assist-logica.
+      if (id(oq_dhw_max_boost_active)) {
+        if (id(oq_dhw_hp_thermal_limit)) {
+          return std::string("Snelboost - HP's eruit op temperatuur, element gaat door");
+        }
+        const float t = id(dhw_tank_top_input).state;
+        const float hs = id(oq_dhw_max_boost_hp_stop_top_c).state;
+        if (!isnan(t) && !isnan(hs) && t >= hs) {
+          return std::string("Snelboost - element maakt af, HP's uit");
+        }
+        return std::string("Snelboost - beide HP's + element");
+      }
       if (!id(oq_dhw_assist_enable).state) return std::string("Uit");
       if (!id(oq_dhw_single_hp_mode).state) return std::string("Niet van toepassing - duo DHW");
       if (id(oq_dhw_state_code) == 4) return std::string("Uit tijdens legionella");
@@ -2496,6 +2579,8 @@ interval:
           cfg.start_top_c = id(oq_dhw_start_top_c).state;
           cfg.hp_stop_top_c = id(oq_dhw_hp_stop_top_c).state;
           cfg.boost_target_c = id(oq_dhw_boost_target_c).state;
+          cfg.max_boost_target_c = id(oq_dhw_max_boost_target_c).state;
+          cfg.max_boost_hp_stop_top_c = id(oq_dhw_max_boost_hp_stop_top_c).state;
           cfg.legionella_target_c = id(oq_dhw_legionella_target_c).state;
           cfg.legionella_hp_stop_top_c = id(oq_dhw_legionella_hp_stop_top_c).state;
           cfg.legionella_hp_top_ceiling_c = id(oq_dhw_legionella_hp_top_ceiling_c).state;
@@ -2624,6 +2709,10 @@ interval:
               !isnan(id(dhw_tariff_ha).state) &&
               (id(dhw_tariff_ha).state <= id(oq_dhw_solar_tariff_threshold).state);
           in.solar_boost_request = solar_boost_ha || solar_boost_auto_tariff;
+          in.max_boost_request = id(oq_dhw_boost_now).state;
+          // Bewaking uit de vorige tick (2s oud); voor een thermische grens ruim
+          // snel genoeg. Zie het assist-blok verderop waar hij wordt gezet.
+          in.hp_thermal_limit_active = id(oq_dhw_hp_thermal_limit);
           // Handmatige force: lokale schakelaar OF de HA-proxy.
           // Bewust een OR en geen prioriteit. Met de oude ternary maakte het
           // enkele bestaan van de HA-entiteit de lokale schakelaar dood -- ook
@@ -3281,6 +3370,27 @@ interval:
             const bool still_hot =
                 above(dis1, dis_max_c - 5.0f) || above(dis2, dis_max_c - 5.0f) ||
                 above(wout, wout_max_c - 2.0f);
+            // Snelboost heeft een eigen bewaking: daar draaien BEIDE units, dus
+            // telt de heetste van de twee water-uittemperaturen mee -- niet
+            // alleen die van de assisterende unit zoals bij de single-assist.
+            // Voedt in.hp_thermal_limit_active bij de volgende tick.
+            {
+              const float w1 = id(hp1_water_out_temp).state;
+              const float w2 = id(${heatpump_outlet_temp_id}).state;
+              const bool boost_over =
+                  dis_over || above(w1, wout_max_c) || above(w2, wout_max_c);
+              const bool boost_still_hot =
+                  above(dis1, dis_max_c - 5.0f) || above(dis2, dis_max_c - 5.0f) ||
+                  above(w1, wout_max_c - 2.0f) || above(w2, wout_max_c - 2.0f);
+              if (boost_over) {
+                id(oq_dhw_hp_thermal_limit) = true;
+              } else if (id(oq_dhw_hp_thermal_limit) && !boost_still_hot) {
+                // Vrijgeven zodat een volgende boost niet meteen geblokkeerd
+                // start. Binnen dezelfde boost komen de HP's niet meer terug.
+                id(oq_dhw_hp_thermal_limit) = false;
+              }
+            }
+
             if (trip) {
               id(oq_dhw_assist_guard_active) = true;
               // Onthouden of dit puur de watergrens was. Alleen dan geldt de
@@ -3413,6 +3523,18 @@ interval:
 
           id(oq_dhw_state_code) = (int) out.state;
           id(oq_dhw_fault_code) = (int) out.fault;
+
+          // Snelboost-vlag komt uit de controller zelf, niet uit de schakelaar.
+          // Anders zou het aanzetten van de knop midden in een gewone boost die
+          // cyclus half omzetten: duo-inzet zonder de bijbehorende grenzen.
+          const bool max_boost_now = controller.max_boost_active();
+          id(oq_dhw_max_boost_active) = max_boost_now;
+          // Knop dooft zodra de boost voorbij is, zodat hij niet blijft staan
+          // en meteen een volgende cyclus forceert.
+          if (!max_boost_now && id(oq_dhw_boost_now).state &&
+              out.state == oq_dhw::State::IDLE_CV) {
+            id(oq_dhw_boost_now).turn_off();
+          }
 
           if (out.state_changed) {
             id(oq_dhw_state_text).publish_state(oq_dhw::state_name(out.state));
