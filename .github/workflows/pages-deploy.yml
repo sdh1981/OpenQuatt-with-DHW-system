@@ -1,20 +1,16 @@
 name: Pages Deploy
 
+# Automatische triggers uitgezet in deze fork.
+#
+# Deze workflow publiceert de upstream GitHub Pages-site met web installer.
+# Dat werkt hier niet: GitHub Pages staat niet aan op deze repo en er zijn geen
+# releases, terwijl de workflow daar de firmware-binaries uit haalt. Gevolg was
+# een falende run -- en dus een mail -- bij elke wijziging in docs/.
+#
+# Bewust niet verwijderd: wil je de site alsnog, zet dan Pages aan, maak een
+# release met *.firmware.factory.bin, en zet de push/release-triggers terug.
+# Handmatig starten kan altijd via workflow_dispatch.
 on:
-  push:
-    branches: [main]
-    paths:
-      - "README.md"
-      - "docs/**"
-      - "scripts/dev.py"
-      - "scripts/build_pages_docs.py"
-      - "scripts/prepare_pages_site.sh"
-      - ".github/workflows/pages-deploy.yml"
-  release:
-    types: [published]
-  workflow_run:
-    workflows: ["Release Build"]
-    types: [completed]
   workflow_dispatch:
 
 permissions:
