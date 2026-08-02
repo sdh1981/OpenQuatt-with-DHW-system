@@ -42,6 +42,11 @@ struct Config {
   // tussen top en bottom van de tank is geïnstalleerd.
   bool  legionella_use_coil_circulation = true;
   float boost_target_c = 56.0f;
+  // Handmatige snelboost. Hogere doeltemperatuur voor het element, terwijl de
+  // HP's er al eerder uit gaan -- boven die tanktop loopt de condensatiedruk
+  // te ver op als er ook nog een element in dezelfde tank staat te stoken.
+  float max_boost_target_c = 60.0f;
+  float max_boost_hp_stop_top_c = 55.0f;
   float legionella_target_c = 68.0f;  // Inventum boiler vereiste: 68°C
   float legionella_hp_stop_top_c = 53.0f;  // HP handover temp during legionella (element finishes the rest)
   // Harde bovengrens op tank_top tijdens de legionella HP-fase. De handover
@@ -106,6 +111,12 @@ struct Inputs {
   bool start_inhibit = false;
 
   bool solar_boost_request = false;
+  // Handmatige snelboost: HP1 + HP2 + element tegelijk, voor snel herstel van
+  // de tank. Anders dan solar_boost_request draaien de HP's hier altijd mee.
+  bool max_boost_request = false;
+  // Door de YAML-laag bewaakte thermische grens (persgas / water-uit). Zolang
+  // die staat mogen de HP's niet meedraaien in de boost; het element gaat door.
+  bool hp_thermal_limit_active = false;
   bool legionella_force_request = false;
 
   // Set to true once the persistent legionella timestamp has been seeded from
@@ -177,6 +188,10 @@ class Controller {
     }
   }
 
+  // Loopt de huidige cyclus als handmatige snelboost? De YAML-laag gebruikt dit
+  // om beide HP's in te zetten en om de juiste bewaking te kiezen.
+  bool max_boost_active() const { return active_max_boost_; }
+
   bool legionella_last_done_valid() const {
     return legionella_last_done_ms_ != 0;
   }
@@ -223,9 +238,20 @@ class Controller {
           legionella_hold_start_ms_ = 0;
           valve_retry_count_ = 0;
           transition_(State::DHW_PREPARE, in.now_ms);
+        } else if (should_start_max_boost_(in, cfg)) {
+          // Handmatige snelboost gaat vóór de gewone cyclus: die zou op de
+          // HP-fase beginnen en het element pas aan het eind inzetten.
+          active_legionella_ = false;
+          active_solar_boost_ = false;
+          active_max_boost_ = true;
+          hp_phase_done_ = false;
+          legionella_hold_start_ms_ = 0;
+          valve_retry_count_ = 0;
+          transition_(State::DHW_PREPARE, in.now_ms);
         } else if (should_start_regular_dhw_(in, cfg)) {
           active_legionella_ = false;
           active_solar_boost_ = false;
+          active_max_boost_ = false;
           hp_phase_done_ = false;
           legionella_hold_start_ms_ = 0;
           valve_retry_count_ = 0;
@@ -244,6 +270,11 @@ class Controller {
         if (valve_ready_(in, cfg)) {
           if (active_legionella_) {
             transition_(State::LEGIONELLA, in.now_ms);
+          } else if (active_max_boost_) {
+            // Bij de snelboost draaien de HP's altijd mee -- geen koude-bodem
+            // voorwaarde zoals bij de solar boost. Dat is juist het punt.
+            boost_hp_assist_active_ = true;
+            transition_(State::DHW_BOOST, in.now_ms);
           } else if (active_solar_boost_) {
             if (cfg.boost_hp_assist_enable &&
                 plausible_temp_(in.tank_bottom_c, cfg) &&
@@ -292,15 +323,27 @@ class Controller {
         break;
       }
 
-      case State::DHW_BOOST:
-        // Stop HP assist when top reaches the assist-stop threshold (default 52°C).
-        // Element continues alone to boost_target_c (56°C).
+      case State::DHW_BOOST: {
+        // Bij de snelboost geldt een eigen, hogere HP-grens (default 55 C) en
+        // een hogere doeltemperatuur voor het element (default 60 C). De HP's
+        // gaan er dus eerder uit dan het element klaar is -- boven die tanktop
+        // loopt de condensatiedruk te ver op met een element in dezelfde tank.
+        const float hp_stop_top_c = active_max_boost_ ? cfg.max_boost_hp_stop_top_c
+                                                      : cfg.boost_hp_assist_stop_top_c;
+        const float target_top_c = active_max_boost_ ? cfg.max_boost_target_c
+                                                     : cfg.boost_target_c;
         if (boost_hp_assist_active_ &&
             plausible_temp_(in.tank_top_c, cfg) &&
-            in.tank_top_c >= cfg.boost_hp_assist_stop_top_c) {
+            in.tank_top_c >= hp_stop_top_c) {
           boost_hp_assist_active_ = false;
         }
-        if (in.tank_top_c >= cfg.boost_target_c) {
+        // Door de YAML bewaakte persgas-/water-uit grens: HP's eruit, element
+        // maakt de rest af. Bewust niet terugkeerbaar binnen dezelfde boost --
+        // opnieuw opstarten in een al hete tank levert alleen nieuwe drukpieken.
+        if (boost_hp_assist_active_ && in.hp_thermal_limit_active) {
+          boost_hp_assist_active_ = false;
+        }
+        if (in.tank_top_c >= target_top_c) {
           cycle_end_ms_ = in.now_ms;
           transition_(State::IDLE_CV, in.now_ms);
           reset_cycle_flags_();
@@ -308,6 +351,7 @@ class Controller {
           latch_fault_(Fault::TIMEOUT, in.now_ms);
         }
         break;
+      }
 
       case State::LEGIONELLA:
         handle_legionella_(in, cfg);
@@ -351,7 +395,9 @@ class Controller {
     }
 
     const bool valve_confirms_boiler = valve_is_boiler_(in);
-    const float element_target_c = (state_ == State::LEGIONELLA) ? cfg.legionella_target_c : cfg.boost_target_c;
+    const float element_target_c =
+        (state_ == State::LEGIONELLA) ? cfg.legionella_target_c
+        : (active_max_boost_ ? cfg.max_boost_target_c : cfg.boost_target_c);
     const bool element_state_allowed = (state_ == State::DHW_BOOST || state_ == State::LEGIONELLA);
 
     // Element control: if klep wordt teruggezet naar CV tijdens element-only
@@ -420,6 +466,7 @@ class Controller {
   uint8_t valve_retry_count_ = 0;
   bool active_legionella_ = false;
   bool active_solar_boost_ = false;
+  bool active_max_boost_ = false;
   bool hp_phase_done_ = false;
   bool fault_latched_ = false;
   bool boost_hp_assist_active_ = false;
@@ -470,6 +517,15 @@ class Controller {
         (in.now_ms - cycle_end_ms_) < cfg.min_cycle_rest_ms)
       return false;
     return plausible_temp_(in.tank_top_c, cfg) && (in.tank_top_c < cfg.start_top_c);
+  }
+
+  // Handmatige snelboost. Zelfde blokkades als de andere starts, en alleen
+  // zinvol als de tank nog onder het snelboost-doel zit.
+  bool should_start_max_boost_(const Inputs &in, const Config &cfg) const {
+    return !fault_latched_ && !in.lockout_active && !in.hp_fault_active &&
+           in.max_boost_request &&
+           plausible_temp_(in.tank_top_c, cfg) &&
+           (in.tank_top_c < cfg.max_boost_target_c);
   }
 
   bool should_start_solar_boost_(const Inputs &in, const Config &cfg) const {
@@ -611,6 +667,7 @@ class Controller {
   void reset_cycle_flags_() {
     active_legionella_ = false;
     active_solar_boost_ = false;
+    active_max_boost_ = false;
     hp_phase_done_ = false;
     boost_hp_assist_active_ = false;
     legionella_hold_start_ms_ = 0;
