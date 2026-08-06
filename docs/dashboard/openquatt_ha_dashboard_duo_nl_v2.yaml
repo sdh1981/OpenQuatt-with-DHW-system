@@ -410,12 +410,26 @@ views:
     - type: entities
       show_header_toggle: false
       entities:
+      - entity: sensor.openquatt_dhw_boost_reden
+        name: Boost reden
       - entity: sensor.openquatt_dhw_second_hp_assist_status
         name: Boost / assist status
       - entity: number.openquatt_dhw_boost_now_target
         name: Snelboost doel tanktop (degC)
       - entity: number.openquatt_dhw_boost_now_hp_stop
         name: Snelboost HP stop tanktop (degC)
+      - type: section
+        label: Automatische boost (solar / tarief / PV)
+      - entity: switch.openquatt_dhw_auto_boost_enable
+        name: Automatische boost toestaan
+      - entity: switch.openquatt_dhw_solar_boost_auto
+        name: Trigger - goedkoop tarief
+      - entity: switch.openquatt_dhw_pv_self_consumption_enable
+        name: Trigger - PV-export
+      - entity: number.openquatt_dhw_pv_boost_export_threshold
+        name: PV-export drempel boost (W)
+      - entity: binary_sensor.openquatt_ext_dhw_solar_boost
+        name: Trigger - HA-proxy
   - type: grid
     cards:
     - type: heading

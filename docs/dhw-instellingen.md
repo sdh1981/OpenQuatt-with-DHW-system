@@ -133,6 +133,39 @@ Voorbeelden:
 
 ## Solar boost
 
+### DHW auto boost enable
+
+- Entity: `switch.openquatt_dhw_auto_boost_enable`
+- Standaard: **uit**
+
+Hoofdschakelaar boven alle boost-triggers die uit zichzelf starten:
+
+| Trigger | Entity | Wanneer |
+| --- | --- | --- |
+| HA-proxy | `binary_sensor.openquatt_ext_dhw_solar_boost` | zodra jouw HA-template aan gaat |
+| Goedkoop tarief | `switch.openquatt_dhw_solar_boost_auto` | tarief ≤ drempel |
+| PV-export | `switch.openquatt_dhw_pv_self_consumption_enable` | netto export > drempel |
+
+Staat deze schakelaar uit, dan komt er alleen nog een boost op expliciet commando — de snelboost-knop of `switch.openquatt_dhw_source_solar_boost` — of als natraject van een gewone HP-fase.
+
+Standaard uit, en met opzet: alle drie de triggers pieken 's middags. Veel PV op het net betekent tegelijk hoge eigen export én een laag day-ahead tarief, waardoor het 3 kW element er ongevraagd doorheen ging.
+
+### DHW boost reden
+
+- Entity: `sensor.openquatt_dhw_boost_reden`
+
+Diagnose: waarom draait de lopende boost? De toestand heet in alle gevallen `DHW_BOOST`, dus zonder deze sensor is een automatische boost niet van een handmatige te onderscheiden. Waarden: `Handmatige snelboost`, `Natraject na HP-fase - element maakt af`, `Solar boost - bron-schakelaar (handmatig)`, `Solar boost - HA-proxy`, `Solar boost - goedkoop tarief`, `Solar boost - PV-export`, `Geen boost actief`.
+
+De reden wordt gelatcht bij de start van de boost, zodat hij niet verspringt als de trigger onderweg wegvalt (wolk voor de zon, tarief dat een uur later omhoog gaat).
+
+### DHW PV boost export threshold
+
+- Entity: `number.openquatt_dhw_pv_boost_export_threshold`
+- Standaard: **2700 W**
+- Bereik: 1000–6000 W (stap 50)
+
+Netto export waarboven de PV-gedreven boost het element inschakelt. Bewust een andere drempel dan `number.openquatt_dhw_pv_export_threshold` (1500 W): die stuurt de geleidelijke setpoint-shift en mag laag staan, terwijl deze het hele 3 kW element aanzet en dus pas zin heeft als de export dat echt dekt.
+
 ### DHW solar boost auto
 
 - Entity: `switch.openquatt_dhw_solar_boost_auto`
@@ -152,7 +185,7 @@ Het stroomtarief waaronder een automatische solar-boost wordt gestart. Stel dit 
 - **0,02**: tot 2 cent/kWh (typisch dalmoment bij dynamisch tarief)
 - **0,08**: bij elke prijs onder 8 cent/kWh
 
-Vereist dat "DHW solar boost auto" aan staat en dat een stroomtarief-entiteit gekoppeld is aan `${ha_electricity_tariff_entity_id}`.
+Vereist dat "DHW auto boost enable" én "DHW solar boost auto" aan staan, en dat een stroomtarief-entiteit gekoppeld is aan `${ha_electricity_tariff_entity_id}`.
 
 ## Flowbewaking
 
