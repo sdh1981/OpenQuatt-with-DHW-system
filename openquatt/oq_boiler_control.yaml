@@ -106,6 +106,33 @@ globals:
     restore_value: false
     initial_value: 'false'
 
+  # ----- Boost-diagnose -----
+  # Waarom draait er een boost? Zonder dit is een automatische boost niet te
+  # onderscheiden van een handmatige, en dat kostte een middag uitzoekwerk.
+  #   0  = geen boost
+  #   1  = handmatige snelboost (knop "DHW boost now")
+  #   2  = natraject na de HP-fase (element maakt de laatste graden af)
+  #   11 = solar boost - bron-schakelaar (handmatig)
+  #   12 = solar boost - HA-proxy
+  #   13 = solar boost - goedkoop tarief
+  #   14 = solar boost - PV-export
+  - id: oq_dhw_boost_reason_code
+    type: int
+    restore_value: false
+    initial_value: '0'
+  # Welke solar-trigger staat op dit moment aan (zelfde 1..4 als de 11..14
+  # hierboven). Wordt elke tick opnieuw bepaald.
+  - id: oq_dhw_solar_boost_src
+    type: int
+    restore_value: false
+    initial_value: '0'
+  # Gelatchte variant: vastgezet op het moment dat de solar boost begon, zodat
+  # de reden niet halverwege verspringt als de trigger onderweg wegvalt.
+  - id: oq_dhw_solar_boost_src_latched
+    type: int
+    restore_value: false
+    initial_value: '0'
+
   # ----- Zachte aanloop van de DHW-compressor -----
   # Bovengrens die bij het starten van de HP-fase op 1 begint en per stap
   # oploopt, zodat de compressor niet ineens op zijn volle niveau wordt gezet.
@@ -490,6 +517,26 @@ switch:
     restore_mode: RESTORE_DEFAULT_OFF
     turn_on_action: []
     turn_off_action: []
+    web_server:
+      sorting_group_id: oq_boiler
+
+  # Hoofdschakelaar voor de AUTOMATISCHE boost-triggers: de HA-proxy, het
+  # goedkoop-tarief-venster en PV-export. Staat hij uit, dan komt er alleen nog
+  # een boost op expliciet commando (snelboost-knop of de bron-schakelaar) of
+  # als natraject van een gewone HP-fase.
+  #
+  # Default uit. Deze drie triggers pieken alle drie 's middags -- veel PV op
+  # het net betekent tegelijk hoge eigen export en een laag day-ahead tarief --
+  # waardoor het 3 kW element er ongevraagd doorheen ging.
+  - platform: template
+    id: oq_dhw_auto_boost_enable
+    name: "DHW auto boost enable"
+    icon: mdi:robot
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action: []
+    turn_off_action: []
+    entity_category: config
     web_server:
       sorting_group_id: oq_boiler
 
@@ -1138,6 +1185,25 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 1500
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
+  # Aparte drempel voor de PV-gedreven boost. Bewust niet dezelfde als hierboven:
+  # die stuurt de geleidelijke setpoint-shift en mag laag staan, terwijl de boost
+  # het hele 3 kW element inschakelt en dus pas zin heeft als de export dat echt
+  # dekt. Stond eerder hardcoded op 2700 W in de lambda.
+  - platform: template
+    id: oq_dhw_pv_boost_export_w
+    name: "DHW PV boost export threshold"
+    icon: mdi:solar-power
+    unit_of_measurement: "W"
+    min_value: 1000
+    max_value: 6000
+    step: 50
+    optimistic: true
+    restore_value: true
+    initial_value: 2700
     entity_category: config
     web_server:
       sorting_group_id: oq_boiler
@@ -2373,6 +2439,28 @@ text_sensor:
           return std::string("Geen blokkade actief");
       }
 
+  # Waarom draait er een boost? Zonder dit is een automatische boost niet van
+  # een handmatige te onderscheiden -- de state heet in beide gevallen DHW_BOOST.
+  - platform: template
+    id: oq_dhw_boost_reason_text
+    name: "DHW boost reden"
+    icon: mdi:help-rhombus-outline
+    update_interval: 10s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      switch (id(oq_dhw_boost_reason_code)) {
+        case 1:  return std::string("Handmatige snelboost");
+        case 2:  return std::string("Natraject na HP-fase - element maakt af");
+        case 10: return std::string("Solar boost - bron onbekend");
+        case 11: return std::string("Solar boost - bron-schakelaar (handmatig)");
+        case 12: return std::string("Solar boost - HA-proxy");
+        case 13: return std::string("Solar boost - goedkoop tarief");
+        case 14: return std::string("Solar boost - PV-export");
+        default: return std::string("Geen boost actief");
+      }
+
   # v0.40: legionella deferral status (smart + tariff-aware)
   - platform: template
     id: oq_dhw_assist_status_text
@@ -2701,14 +2789,32 @@ interval:
 
           in.start_inhibit = window_inhibit || expensive_inhibit;
 
+          // Hoofdschakelaar voor alles wat een boost uit zichzelf start. De
+          // bron-schakelaar valt er bewust buiten: dat is jouw eigen commando,
+          // net als de snelboost-knop en de legionella-force.
+          const bool auto_boost_enabled = id(oq_dhw_auto_boost_enable).state;
+
+          // Bron-schakelaar en HA-proxy zijn een OR, geen ternary. Met de oude
+          // ternary maakte het enkele bestaan van de HA-entiteit de lokale
+          // schakelaar dood -- ook als die HA-entiteit gewoon 'off' stond.
+          // Zelfde val als bij de legionella-force.
+          const bool solar_boost_manual = id(oq_dhw_src_solar_boost).state;
           const bool solar_boost_ha =
-              id(dhw_solar_boost_ha).has_state() ? id(dhw_solar_boost_ha).state : id(oq_dhw_src_solar_boost).state;
+              auto_boost_enabled &&
+              id(dhw_solar_boost_ha).has_state() && id(dhw_solar_boost_ha).state;
           const bool solar_boost_auto_tariff =
+              auto_boost_enabled &&
               id(oq_dhw_solar_boost_auto).state &&
               id(dhw_tariff_ha).has_state() &&
               !isnan(id(dhw_tariff_ha).state) &&
               (id(dhw_tariff_ha).state <= id(oq_dhw_solar_tariff_threshold).state);
-          in.solar_boost_request = solar_boost_ha || solar_boost_auto_tariff;
+          // Volgorde bepaalt welke reden je in de diagnose ziet als er meerdere
+          // triggers tegelijk staan: handmatig wint, dan HA, dan tarief.
+          if (solar_boost_manual)          id(oq_dhw_solar_boost_src) = 1;
+          else if (solar_boost_ha)         id(oq_dhw_solar_boost_src) = 2;
+          else if (solar_boost_auto_tariff) id(oq_dhw_solar_boost_src) = 3;
+          else                              id(oq_dhw_solar_boost_src) = 0;
+          in.solar_boost_request = (id(oq_dhw_solar_boost_src) != 0);
           in.max_boost_request = id(oq_dhw_boost_now).state;
           // Bewaking uit de vorige tick (2s oud); voor een thermische grens ruim
           // snel genoeg. Zie het assist-blok verderop waar hij wordt gezet.
@@ -3101,14 +3207,21 @@ interval:
 
           // ----- #2 PV-driven solar boost: also force solar boost element when
           // grid is exporting hard enough to cover the element load. -----
-          if (id(oq_dhw_pv_boost_dynamic_enable).state &&
+          // Valt onder dezelfde hoofdschakelaar als de andere automatische
+          // triggers, en gebruikt nu de instelbare drempel in plaats van de
+          // hardcoded 2700 W die hier stond.
+          if (auto_boost_enabled &&
+              id(oq_dhw_pv_boost_dynamic_enable).state &&
               id(grid_net_power_ha).has_state() &&
               !isnan(id(grid_net_power_ha).state)) {
             const float grid_net = id(grid_net_power_ha).state;
             const float export_w = (grid_net < 0.0f) ? -grid_net : 0.0f;
             // Element ≈ 3 kW; only force boost when export safely covers it.
-            if (export_w > 2700.0f) {
+            const float boost_export_w =
+                clampf_dhw(id(oq_dhw_pv_boost_export_w).state, 1000.0f, 6000.0f);
+            if (export_w > boost_export_w) {
               in.solar_boost_request = true;
+              if (id(oq_dhw_solar_boost_src) == 0) id(oq_dhw_solar_boost_src) = 4;
             }
           }
 
@@ -3534,6 +3647,33 @@ interval:
           if (!max_boost_now && id(oq_dhw_boost_now).state &&
               out.state == oq_dhw::State::IDLE_CV) {
             id(oq_dhw_boost_now).turn_off();
+          }
+
+          // ----- Boost-reden vastleggen -----
+          // De solar-trigger wordt gelatcht bij het begin van de boost. Zonder
+          // die latch verspringt de reden zodra de trigger wegvalt (wolk voor
+          // de zon, tarief dat een uur later omhoog gaat) terwijl de boost
+          // gewoon doorloopt.
+          const bool solar_boost_now = controller.solar_boost_active();
+          if (solar_boost_now) {
+            if (id(oq_dhw_solar_boost_src_latched) == 0) {
+              id(oq_dhw_solar_boost_src_latched) = id(oq_dhw_solar_boost_src);
+            }
+          } else {
+            id(oq_dhw_solar_boost_src_latched) = 0;
+          }
+
+          if (out.state != oq_dhw::State::DHW_BOOST) {
+            id(oq_dhw_boost_reason_code) = 0;
+          } else if (max_boost_now) {
+            id(oq_dhw_boost_reason_code) = 1;
+          } else if (solar_boost_now) {
+            const int src = id(oq_dhw_solar_boost_src_latched);
+            id(oq_dhw_boost_reason_code) = (src > 0) ? (10 + src) : 10;
+          } else {
+            // Enige overgebleven route: de HP-fase stopte en het element maakt
+            // de laatste graden naar boost_target_c af.
+            id(oq_dhw_boost_reason_code) = 2;
           }
 
           if (out.state_changed) {

@@ -192,6 +192,11 @@ class Controller {
   // om beide HP's in te zetten en om de juiste bewaking te kiezen.
   bool max_boost_active() const { return active_max_boost_; }
 
+  // Loopt de huidige cyclus als solar boost (element vanuit idle, aangevraagd
+  // door de bron-schakelaar, de HA-proxy, het tarief of PV-export)? De
+  // YAML-laag gebruikt dit om de boost-reden te kunnen benoemen.
+  bool solar_boost_active() const { return active_solar_boost_; }
+
   bool legionella_last_done_valid() const {
     return legionella_last_done_ms_ != 0;
   }
@@ -234,6 +239,7 @@ class Controller {
         if (should_start_legionella_(in, cfg)) {
           active_legionella_ = true;
           active_solar_boost_ = false;
+          active_max_boost_ = false;
           hp_phase_done_ = false;
           legionella_hold_start_ms_ = 0;
           valve_retry_count_ = 0;
@@ -259,6 +265,7 @@ class Controller {
         } else if (should_start_solar_boost_(in, cfg)) {
           active_legionella_ = false;
           active_solar_boost_ = true;
+          active_max_boost_ = false;
           hp_phase_done_ = true;
           legionella_hold_start_ms_ = 0;
           valve_retry_count_ = 0;
@@ -660,6 +667,11 @@ class Controller {
     transition_(State::FAULT, now_ms);
     active_legionella_ = false;
     active_solar_boost_ = false;
+    // Zonder deze reset blijft de snelboost-vlag staan tot de gebruiker de
+    // fout wist. Dat houdt single-HP DHW uitgeschakeld en zou bij een andere
+    // volgorde in IDLE_CV een gewone cyclus als snelboost laten starten.
+    active_max_boost_ = false;
+    boost_hp_assist_active_ = false;
     hp_phase_done_ = false;
     legionella_hold_start_ms_ = 0;
   }
