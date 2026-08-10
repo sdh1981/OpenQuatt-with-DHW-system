@@ -146,7 +146,9 @@ De totale shift wordt geclamped op `[30, hp_stop_top_c − 1 K]` zodat het syste
 
 **Hoe:**
 1. `switch.openquatt_dhw_single_hp_mode` AAN
-2. `number.openquatt_dhw_single_hp_level_bump` zet hoeveel levels de lead HP omhoog mag (default 1, range 0-3)
+2. `number.openquatt_dhw_single_hp_level_bump` zet hoeveel levels de lead HP omhoog mag (default **0** sinds v0.51.1, was 1; range 0-3)
+
+> De bump telt bij het ingestelde `DHW HP level` op, niet bij een gemeten tekort. Met `DHW HP level` = 2 en bump 2 draait de lead op 4 zonder dat er iets om die capaciteit heeft gevraagd. De tweede-HP assist doet dat werk wél op meting — die komt pas als de tanktop aantoonbaar te traag stijgt. Wil je de lead structureel hoger, zet dan `DHW HP level` hoger; dan staat in één getal wat er echt gevraagd wordt.
 
 **Voorbeeld scenario:**
 - `oq_dhw_hp_level` = 3
