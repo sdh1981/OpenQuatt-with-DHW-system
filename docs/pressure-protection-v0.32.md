@@ -26,11 +26,26 @@ Voor elke HP (HP1 en in Duo ook HP2) leest OpenQuatt elke 5 seconden de condenso
 | Tier | Drukbereik | Level cap | Wat gebeurt |
 |---|---|---|---|
 | 0 (OK) | < soft_bar | 10 (= geen cap) | Normaal operatie |
-| 1 (soft) | soft..hard | 10 - reduce | Level wordt verlaagd, druk zakt |
+| 1 (soft) | soft..hard | ladder, zie onder | Level wordt stapsgewijs verlaagd, druk zakt |
 | 2 (hard) | hard..hps | 0 (= stop) | Compressor stopt |
 | 3 (HPS-mirror) | >= hps | 0 (= stop) | OpenQuatt mirror van hardware HPS |
 
 De `level cap` komt terecht in het `level_cap` veld van `apply_level` in de thermal actuator. Daarmee wordt het pressure-cap gecombineerd met silent-cap en day-cap (de strengste wint).
+
+### De zachte trap (gewijzigd in v0.52)
+
+Tot v0.51 was de zachte cap `10 - reduce`, dus **9** met de default. Die bond nooit — levels boven 6 komen in de praktijk niet voor. De zachte trap deed daarmee niets en de eerste echte ingreep was de harde trap: een volledige stop.
+
+Sinds v0.52 is het een ladder die terugregelt vanaf het niveau dat de unit werkelijk draait:
+
+1. **Bij binnenkomst** eenmalig vastzetten op `laatst toegepast niveau − reduce`, ondergrens 1. Eenmalig, want zou hij elke ronde opnieuw vanaf "huidig" rekenen, dan loopt hij binnen een halve minuut naar 1.
+2. **Daarna** per `Pressure soft cap step time` (default 120 s) nog een level eraf, maar alleen zolang de druk nog stijgt.
+3. **Bij een harde trip of HPS-mirror** blijft de ladder gelatcht — dat niveau was aantoonbaar te hoog.
+4. **Loslaten** alleen bij terugval naar tier 0.
+
+### Hysterese (nieuw in v0.52)
+
+Deze module had, anders dan de aanvoerbeveiliging, helemaal geen hysterese. Daardoor flappert de tier op de drempel en zou de ladder hierboven telkens opnieuw beginnen. `Pressure release hysteresis` (default 1,5 bar) sluit dat gat: eenmaal gecapt moet de druk zover onder `soft_bar` zakken voor de cap loslaat.
 
 ### Edge-getriggerde event-telling
 
@@ -58,7 +73,9 @@ Een trage EMA (τ ≈ 1h, met snelle-rise-langzame-decay) houdt de "typische pie
 | `Pressure soft cap` | 38,0 bar | 30-42 | Drempel voor level-reductie |
 | `Pressure hard cap` | 40,0 bar | 35-43 | Drempel voor stop |
 | `Pressure HPS mirror` | 41,0 bar | 38-45 | OpenQuatt-mirror HPS trip |
-| `Pressure soft cap reduce levels` | 1 | 1-4 | Hoeveel levels verlagen bij soft tier |
+| `Pressure soft cap reduce levels` | 1 | 1-4 | Eerste stap van de ladder, onder het draaiende niveau |
+| `Pressure soft cap step time` | 120 s | 0-600 | Tijd per vervolgstap; 0 = alleen de eerste stap |
+| `Pressure release hysteresis` | 1,5 bar | 0,5-5 | Drukdaling nodig voor cap-release |
 
 ## Diagnose-entiteiten
 
