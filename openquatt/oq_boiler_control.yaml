@@ -132,6 +132,19 @@ globals:
     type: int
     restore_value: false
     initial_value: '0'
+  # Spiegel van controller.boost_timeout_count(), zodat we de overgang kunnen
+  # loggen. De controller zelf blijft afhankelijkheidsvrij en logt niet.
+  - id: oq_dhw_boost_timeouts_seen
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+  # Geschat thermisch HP-vermogen tijdens DHW, in watt. Gevoed door de
+  # DHW-lus en gelezen door beide ETA-sensoren.
+  - id: oq_dhw_hp_power_th_w
+    type: float
+    restore_value: false
+    initial_value: '0.0'
 
   # ----- Zachte aanloop van de DHW-compressor -----
   # Bovengrens die bij het starten van de HP-fase op 1 begint en per stap
@@ -2058,29 +2071,11 @@ sensor:
       const float volume_l = id(oq_dhw_tank_volume_l).state;
       const float tank_wh_per_k = (volume_l > 0.0f ? volume_l : 220.0f) * 1.16f;
 
-      // Net heating power: estimate from the HP perf_map at the actual DHW
-      // level + supply target, plus 3 kW element when boost is on, minus
-      // standby loss (UA × ΔT_ambient).
-      float p_in = 0.0f;
-      if (id(oq_dhw_hp_request_active)) {
-        const int dhw_level = id(oq_dhw_hp_level_request);
-        const float Tamb = id(outside_temp_selected).state;
-        const float Tsup = id(oq_dhw_hp_target_flow_c).state;
-        float p_per_hp = NAN;
-        if (!isnan(Tamb) && !isnan(Tsup) && dhw_level > 0) {
-          p_per_hp = oq_perf::interp_power_th_w(dhw_level, Tamb, Tsup);
-        }
-        if (!isnan(p_per_hp) && p_per_hp > 0.0f) {
-          p_in += p_per_hp;
-          #if OQ_TOPOLOGY_DUO
-          // Duo: both HPs are requested at the same DHW level.
-          p_in += p_per_hp;
-          #endif
-        } else {
-          // Conservative fallback when perf_map cannot interpolate (e.g. NaN cell).
-          p_in += 3000.0f;
-        }
-      }
+      // Net heating power: het thermische HP-vermogen komt uit de DHW-lus, die
+      // weet welke units er werkelijk draaien en op welk niveau. Dit stond hier
+      // eerder als "beide HPs op hetzelfde DHW-level", wat sinds single-HP mode
+      // ruwweg een factor twee te hoog uitkwam.
+      float p_in = id(oq_dhw_hp_power_th_w);
       if (id(boiler_relay).state) p_in += 3000.0f;
       const float ua = id(oq_dhw_ua_tank_wpk);
       const float Tamb_room = 20.0f;
@@ -2088,6 +2083,41 @@ sensor:
       if (p_in <= 50.0f) return NAN;
       const float hours = (gap * tank_wh_per_k) / p_in;
       return hours * 60.0f;
+
+  # Geschat thermisch HP-vermogen tijdens DHW. Voedt beide ETA-sensoren en laat
+  # zien wat single-HP mode, de bump, de zachte aanloop en de assist samen
+  # opleveren. 0 = geen HP-vraag.
+  - platform: template
+    id: oq_dhw_hp_power_th_sensor
+    name: "DHW HP thermisch vermogen"
+    icon: mdi:heat-wave
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 30s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      return id(oq_dhw_hp_power_th_w);
+
+  # Hoe vaak een boost zijn maximale looptijd raakte zonder het doel te halen.
+  # Sinds v0.53 geen gelatchte storing meer, dus dit is het enige spoor. Loopt
+  # hij op, dan is het boost-doel te hoog voor wat het element in die tijd kan
+  # maken -- of de tank begon te koud.
+  - platform: template
+    id: oq_dhw_boost_timeouts_sensor
+    name: "DHW boost timeouts"
+    icon: mdi:timer-alert-outline
+    state_class: total_increasing
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      return (float) id(oq_dhw_boost_timeouts_seen);
 
   # Legionella ETA (minutes remaining until the current run completes).
   # Returns NAN when no legionella run is active.
@@ -2167,16 +2197,10 @@ sensor:
         const float gap1 = hp_top_stop - top;
         const float wh_needed = gap1 * tank_wh_per_k;
 
-        float p_hp = 0.0f;
-        const int dhw_level = id(oq_dhw_hp_level_request);
-        const float Tamb = id(outside_temp_selected).state;
-        const float Tsup = id(oq_dhw_hp_target_flow_c).state;
-        if (!isnan(Tamb) && !isnan(Tsup) && dhw_level > 0) {
-          p_hp = oq_perf::interp_power_th_w(dhw_level, Tamb, Tsup);
-          #if OQ_TOPOLOGY_DUO
-          if (!isnan(p_hp) && p_hp > 0.0f) p_hp *= 2.0f;
-          #endif
-        }
+        // Zelfde bron als de time-to-ready sensor: de DHW-lus weet welke units
+        // draaien. De onvoorwaardelijke verdubbeling die hier stond klopte niet
+        // meer sinds single-HP mode ook tijdens legionella geldt.
+        float p_hp = id(oq_dhw_hp_power_th_w);
         if (isnan(p_hp) || p_hp <= 0.0f) p_hp = 3000.0f;  // conservative fallback
 
         const float p_net = net_power_w(p_hp + element_w, top);
@@ -3641,6 +3665,52 @@ interval:
           id(oq_dhw_assist_level) = 0;
           #endif
 
+          // ===========================================================
+          // Geschat thermisch HP-vermogen tijdens DHW.
+          //
+          // Beide ETA-sensoren rekenden hard met twee compressors op hetzelfde
+          // niveau ("Duo: both HPs are requested at the same DHW level"). Sinds
+          // single-HP mode klopt dat niet meer: dan draait er een lead op
+          // dhw_level + bump en hooguit een assist op zijn eigen, lagere niveau.
+          // De schatting was daardoor ruwweg twee keer te hoog en de resterende
+          // tijd navenant te kort.
+          //
+          // Hier een keer berekenen in plaats van in beide lambdas: hier staan
+          // de bump, de zachte aanloop en het assist-niveau toch al in scope.
+          // ===========================================================
+          {
+            float p_th = 0.0f;
+            const float t_amb = id(outside_temp_selected).state;
+            const float t_sup = id(oq_dhw_hp_target_flow_c).state;
+            if (id(oq_dhw_hp_request_active) && !isnan(t_amb) && !isnan(t_sup)) {
+              auto p_at = [&](int lvl)->float {
+                if (lvl <= 0) return 0.0f;
+                const float p = oq_perf::interp_power_th_w(lvl, t_amb, t_sup);
+                // Zelfde conservatieve terugval als voorheen wanneer de
+                // perf_map niet kan interpoleren.
+                return (isnan(p) || p <= 0.0f) ? 3000.0f : p;
+              };
+              const int base_lvl = id(oq_dhw_hp_level_request);
+              #if OQ_TOPOLOGY_DUO
+              if (id(oq_dhw_single_hp_mode).state && !id(oq_dhw_max_boost_active)) {
+                // Zelfde rekensom als de dispatch in oq_thermal_request_control:
+                // bump erbij, daarna de zachte aanloop eroverheen.
+                const int bump = std::max(0, std::min(3,
+                    (int) roundf(id(oq_dhw_single_hp_level_bump).state)));
+                int lead = std::max(1, std::min(10, base_lvl + bump));
+                const int ss_cap = id(oq_dhw_softstart_cap);
+                if (ss_cap > 0 && lead > ss_cap) lead = ss_cap;
+                p_th = p_at(lead) + p_at(id(oq_dhw_assist_level));
+              } else {
+                p_th = 2.0f * p_at(base_lvl);
+              }
+              #else
+              p_th = p_at(base_lvl);
+              #endif
+            }
+            id(oq_dhw_hp_power_th_w) = p_th;
+          }
+
           id(oq_dhw_state_code) = (int) out.state;
           id(oq_dhw_fault_code) = (int) out.fault;
 
@@ -3681,6 +3751,20 @@ interval:
             // Enige overgebleven route: de HP-fase stopte en het element maakt
             // de laatste graden naar boost_target_c af.
             id(oq_dhw_boost_reason_code) = 2;
+          }
+
+          // Boost-timeout: de controller telt, wij loggen. Sinds v0.53 levert
+          // een boost die zijn doel niet haalt geen gelatchte FAULT meer op,
+          // dus zonder deze regel zou het geruisloos gebeuren.
+          {
+            const uint32_t bt = controller.boost_timeout_count();
+            if (bt != id(oq_dhw_boost_timeouts_seen)) {
+              id(oq_dhw_boost_timeouts_seen) = bt;
+              ESP_LOGW("oq_dhw",
+                       "Boost haalde zijn doel niet binnen de maximale looptijd "
+                       "(%u keer totaal) — terug naar idle, geen storing.",
+                       (unsigned) bt);
+            }
           }
 
           if (out.state_changed) {

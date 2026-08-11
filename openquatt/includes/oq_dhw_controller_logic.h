@@ -197,6 +197,12 @@ class Controller {
   // YAML-laag gebruikt dit om de boost-reden te kunnen benoemen.
   bool solar_boost_active() const { return active_solar_boost_; }
 
+  // Hoe vaak een boost zijn maximale looptijd raakte zonder het doel te halen.
+  // Sinds v0.53 levert dat geen gelatchte FAULT meer op, dus deze teller is het
+  // enige spoor. Loopt hij op, dan is boost_target_c te hoog voor wat het
+  // element in boost_max_runtime_ms kan maken.
+  uint32_t boost_timeout_count() const { return boost_timeouts_; }
+
   bool legionella_last_done_valid() const {
     return legionella_last_done_ms_ != 0;
   }
@@ -274,6 +280,13 @@ class Controller {
         break;
 
       case State::DHW_PREPARE:
+        // Knop uit terwijl we nog op de klep wachten: meteen stoppen. Anders
+        // begint de snelboost alsnog zodra de klep omstaat.
+        if (active_max_boost_ && !in.max_boost_request) {
+          transition_(State::IDLE_CV, in.now_ms);
+          reset_cycle_flags_();
+          break;
+        }
         if (valve_ready_(in, cfg)) {
           if (active_legionella_) {
             transition_(State::LEGIONELLA, in.now_ms);
@@ -331,6 +344,16 @@ class Controller {
       }
 
       case State::DHW_BOOST: {
+        // Snelboost afbreken. max_boost_request werd alleen in IDLE_CV gelezen,
+        // waardoor een eenmaal gestarte snelboost niet meer te stoppen was: hij
+        // liep door tot het doel of tot de 90-minuten-timeout. De knop uitzetten
+        // is een expliciete opdracht en hoort dus ook tijdens de boost te gelden.
+        if (active_max_boost_ && !in.max_boost_request) {
+          cycle_end_ms_ = in.now_ms;
+          transition_(State::IDLE_CV, in.now_ms);
+          reset_cycle_flags_();
+          break;
+        }
         // Bij de snelboost geldt een eigen, hogere HP-grens (default 55 C) en
         // een hogere doeltemperatuur voor het element (default 60 C). De HP's
         // gaan er dus eerder uit dan het element klaar is -- boven die tanktop
@@ -355,7 +378,18 @@ class Controller {
           transition_(State::IDLE_CV, in.now_ms);
           reset_cycle_flags_();
         } else if (elapsed_in_state_(in.now_ms) >= cfg.boost_max_runtime_ms) {
-          latch_fault_(Fault::TIMEOUT, in.now_ms);
+          // Geen gelatchte FAULT meer. Een boost die zijn doel niet haalt is
+          // geen hardwarestoring maar een tank die te koud begon of een element
+          // dat te klein is voor de laatste graden. De oude fout moest met de
+          // hand gewist worden en blokkeerde intussen OOK de gewone DHW-cyclus,
+          // dus een mislukte boost liet je zonder warm water zitten.
+          // FAULT blijft voor klep, flow en sensoren.
+          // De teller is de diagnose; loggen doet de YAML-laag, zodat dit
+          // bestand afhankelijkheidsvrij blijft (alleen cmath en cstdint).
+          ++boost_timeouts_;
+          cycle_end_ms_ = in.now_ms;
+          transition_(State::IDLE_CV, in.now_ms);
+          reset_cycle_flags_();
         }
         break;
       }
@@ -474,6 +508,7 @@ class Controller {
   bool active_legionella_ = false;
   bool active_solar_boost_ = false;
   bool active_max_boost_ = false;
+  uint32_t boost_timeouts_ = 0;
   bool hp_phase_done_ = false;
   bool fault_latched_ = false;
   bool boost_hp_assist_active_ = false;
