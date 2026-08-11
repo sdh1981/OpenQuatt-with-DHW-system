@@ -3752,6 +3752,16 @@ views:
                 name: Aanvoer - cap HP1
               - entity: sensor.openquatt_supply_temp_hp2_level_cap
                 name: Aanvoer - cap HP2
+              - entity: sensor.openquatt_discharge_hp1_level_cap
+                name: Persgas - cap HP1
+              - entity: sensor.openquatt_discharge_hp2_level_cap
+                name: Persgas - cap HP2
+              - type: section
+                label: Persgas piek sinds reset
+              - entity: sensor.openquatt_discharge_hp1_peak
+                name: Persgas piek HP1
+              - entity: sensor.openquatt_discharge_hp2_peak
+                name: Persgas piek HP2
               - type: section
                 label: Hoe vaak vandaag
               - entity: sensor.openquatt_pressure_soft_events_24h
@@ -3762,6 +3772,10 @@ views:
                 name: Aanvoer - zachte trap 24h
               - entity: sensor.openquatt_supply_temp_hard_events_24h
                 name: Aanvoer - harde trap 24h
+              - entity: sensor.openquatt_discharge_soft_events_24h
+                name: Persgas - zachte trap 24h
+              - entity: sensor.openquatt_discharge_hard_events_24h
+                name: Persgas - harde trap 24h
               - type: section
                 label: Afstelling
               - entity: switch.openquatt_pressure_protection_enable
@@ -3774,6 +3788,14 @@ views:
                 name: Aanvoerbeveiliging aan
               - entity: number.openquatt_supply_temp_soft_cap_step_time
                 name: Aanvoer - tijd per stap (s)
+              - entity: switch.openquatt_discharge_protection_enable
+                name: Persgasbeveiliging aan
+              - entity: number.openquatt_discharge_soft_cap
+                name: Persgas - zachte grens (degC)
+              - entity: number.openquatt_discharge_hard_cap
+                name: Persgas - harde grens (degC)
+              - entity: number.openquatt_discharge_soft_cap_step_time
+                name: Persgas - tijd per stap (s)
       - type: grid
         cards:
           - type: heading

@@ -77,6 +77,9 @@ web_server:
     - id: oq_supply_temp_protection
       name: "Supply Temp Protection"
       sorting_weight: 178
+    - id: oq_discharge_protection
+      name: "Discharge Protection"
+      sorting_weight: 179
     - id: oq_service_cal
       name: "Service - Sensor Calibration"
       sorting_weight: 160

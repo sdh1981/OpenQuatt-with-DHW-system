@@ -298,6 +298,15 @@ interval:
                 : id(oq_supply_temp_max_level_hp2);
             if (supply_temp_cap < cap) cap = supply_temp_cap;
 
+            // v0.52 discharge-protection: per-HP cap op persgastemperatuur.
+            // Derde bron in dezelfde min()-keten. Voor R32 is dit de scherpste
+            // vroege indicator: de condensordruk loopt pas op als de warmte er
+            // al is, persgas ziet het meteen.
+            const int discharge_cap = is_hp1
+                ? id(oq_discharge_max_level_hp1)
+                : id(oq_discharge_max_level_hp2);
+            if (discharge_cap < cap) cap = discharge_cap;
+
             if (applied > cap) applied = cap;
             applied = pick_allowed_capped(applied, is_hp1, cap);
 
