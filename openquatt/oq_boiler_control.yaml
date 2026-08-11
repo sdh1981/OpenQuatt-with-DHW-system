@@ -360,6 +360,106 @@ globals:
     restore_value: false
     initial_value: '0'
 
+  # ----- Tapdetectie -----
+  # Loopt er nu water uit de tank? Gemeten aan de daalsnelheid van de tanktop
+  # terwijl er niet verwarmd wordt. Standby-verlies is ordes trager (~0,02 K/min
+  # bij een goede tank), dus een echte tapping is goed te onderscheiden.
+  #
+  # De detectie zat eerder verstopt in de usage-learning: de trigger stond
+  # binnen `if (oq_dhw_adaptive_usage_enable)`. Met die schakelaar uit -- de
+  # default -- werd oq_dhw_last_tap_event_ms nooit gezet, en dacht de
+  # standby-loss-lerer dus altijd dat het rustig was geweest. Een douche midden
+  # in een meetvenster ging daardoor als tankverlies de UA-schatting in.
+  - id: oq_dhw_tap_active
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: oq_dhw_tap_prev_c
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: oq_dhw_tap_prev_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  # Gemeten daalsnelheid in K/min (negatief = koelt af). Diagnose.
+  - id: oq_dhw_tap_rate_k_min
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  # Tanktop en tijdstip bij het begin van de lopende tapping, om achteraf de
+  # onttrokken energie te kunnen schatten.
+  - id: oq_dhw_tap_start_c
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: oq_dhw_tap_start_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  # Hoe lang de daalsnelheid alweer rustig is; pas na de rustperiode los.
+  - id: oq_dhw_tap_calm_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: oq_dhw_last_tap_wh
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_dhw_taps_today
+    type: int
+    restore_value: true
+    initial_value: '0'
+
+  # ----- DHW-energie en cyclusrendement -----
+  # Elektrisch erin en thermisch eruit, geintegreerd over de lopende cyclus.
+  # Beide in Wh. Het thermische deel komt uit hpX_heat_power (flow x deltaT, dus
+  # gemeten) plus het element; het elektrische uit hpX_power_input plus datzelfde
+  # element. Het element telt in beide even zwaar -- dat is precies waarom een
+  # cyclus met veel elementinzet zichtbaar naar COP 1 zakt.
+  - id: oq_dhw_cycle_wh_in
+    type: float
+    restore_value: false
+    initial_value: '0.0'
+  - id: oq_dhw_cycle_wh_out
+    type: float
+    restore_value: false
+    initial_value: '0.0'
+  - id: oq_dhw_energy_prev_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: oq_dhw_cycle_energy_running
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: oq_dhw_last_cycle_wh_in
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_dhw_last_cycle_wh_out
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_dhw_last_cycle_cop
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  - id: oq_dhw_day_wh_in
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_dhw_day_wh_out
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  # Dag-van-het-jaar waarop de dagtellers lopen; wisselt die, dan resetten ze.
+  # Geldt ook voor de tappingteller hierboven.
+  - id: oq_dhw_energy_day_of_year
+    type: int
+    restore_value: true
+    initial_value: '0'
+
   # #3 Adaptive shift (°C) on start_top derived from upcoming usage pattern.
   - id: oq_dhw_adaptive_shift_c
     type: float
@@ -682,6 +782,22 @@ switch:
     restore_mode: RESTORE_DEFAULT_OFF
     turn_on_action: []
     turn_off_action: []
+    web_server:
+      sorting_group_id: oq_boiler
+
+  # Tapdetectie. Staat los van de usage-learning hieronder: die gebruikt de
+  # tappingen om een uurpatroon te leren, maar de detectie zelf is ook nodig
+  # voor de standby-loss-lerer, die tappingen juist moet uitsluiten.
+  # Default aan -- hij stuurt niets aan, hij observeert alleen.
+  - platform: template
+    id: oq_dhw_tap_detect_enable
+    name: "DHW tapdetectie"
+    icon: mdi:shower-head
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    turn_on_action: []
+    turn_off_action: []
+    entity_category: config
     web_server:
       sorting_group_id: oq_boiler
 
@@ -1565,6 +1681,25 @@ number:
     web_server:
       sorting_group_id: oq_boiler
 
+  # Daalsnelheid van de tanktop waarboven we van een tapping spreken. Standby-
+  # verlies zit rond 0,02 K/min bij een goede tank, een douche haalt makkelijk
+  # 1 K/min. 0,4 ligt daar ruim tussenin en vangt ook kleine tappingen zoals
+  # een handwasbeurt niet ten onrechte af als verlies.
+  - platform: template
+    id: oq_dhw_tap_rate_threshold
+    name: "DHW tapdetectie drempel"
+    icon: mdi:speedometer-slow
+    unit_of_measurement: "K/min"
+    min_value: 0.1
+    max_value: 3.0
+    step: 0.1
+    optimistic: true
+    restore_value: true
+    initial_value: 0.4
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_boiler
+
   # Tank water volume in litres — used for thermal capacity in #4 standby-loss
   # tracker and #6 time-to-ready estimator. Default 220 L (Inventum Maxtank).
   # Change this if you have a different tank.
@@ -2084,6 +2219,130 @@ sensor:
       const float hours = (gap * tank_wh_per_k) / p_in;
       return hours * 60.0f;
 
+  # ----- DHW-rendement -----
+  # Wat de laatste voltooide cyclus heeft gekost en opgeleverd. Een cyclus telt
+  # pas mee vanaf 50 Wh; daaronder is het een afgebroken start.
+  - platform: template
+    id: oq_dhw_last_cycle_wh_in_sensor
+    name: "DHW cyclus energie in"
+    icon: mdi:flash
+    unit_of_measurement: "Wh"
+    device_class: energy
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 30s
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      const float v = id(oq_dhw_last_cycle_wh_in);
+      return (v > 0.0f) ? v : NAN;
+
+  - platform: template
+    id: oq_dhw_last_cycle_wh_out_sensor
+    name: "DHW cyclus energie uit"
+    icon: mdi:radiator
+    unit_of_measurement: "Wh"
+    device_class: energy
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 30s
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      const float v = id(oq_dhw_last_cycle_wh_out);
+      return (v > 0.0f) ? v : NAN;
+
+  # Het getal waar het om gaat: thermisch eruit gedeeld door elektrisch erin,
+  # over een hele cyclus. Hiermee zijn single-HP mode, het niveau, de bump en de
+  # assist-drempels voor het eerst tegen elkaar af te wegen op meting in plaats
+  # van op gevoel.
+  - platform: template
+    id: oq_dhw_last_cycle_cop_sensor
+    name: "DHW cyclus COP"
+    icon: mdi:gauge
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 30s
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      return id(oq_dhw_last_cycle_cop);
+
+  - platform: template
+    id: oq_dhw_day_cop_sensor
+    name: "DHW COP vandaag"
+    icon: mdi:gauge-low
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 60s
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      const float wi = id(oq_dhw_day_wh_in);
+      if (wi < 50.0f) return NAN;
+      return id(oq_dhw_day_wh_out) / wi;
+
+  - platform: template
+    id: oq_dhw_day_wh_in_sensor
+    name: "DHW energie vandaag"
+    icon: mdi:counter
+    unit_of_measurement: "Wh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      return id(oq_dhw_day_wh_in);
+
+  # ----- Tapdetectie -----
+  - platform: template
+    id: oq_dhw_tap_rate_sensor
+    name: "DHW tanktop daalsnelheid"
+    icon: mdi:speedometer-slow
+    unit_of_measurement: "K/min"
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 30s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      return id(oq_dhw_tap_rate_k_min);
+
+  - platform: template
+    id: oq_dhw_taps_today_sensor
+    name: "DHW tappingen vandaag"
+    icon: mdi:shower-head
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 60s
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      return (float) id(oq_dhw_taps_today);
+
+  # Ruwe schatting van de energie die er bij de laatste tapping uit ging.
+  # Stratificatie maakt dit een ondergrens: de tanktop koelt minder af dan de
+  # gemiddelde tankinhoud, dus de werkelijke onttrekking ligt hoger.
+  - platform: template
+    id: oq_dhw_last_tap_wh_sensor
+    name: "DHW laatste tapping energie"
+    icon: mdi:water-minus
+    unit_of_measurement: "Wh"
+    device_class: energy
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      const float v = id(oq_dhw_last_tap_wh);
+      return (v > 0.0f) ? v : NAN;
+
   # Geschat thermisch HP-vermogen tijdens DHW. Voedt beide ETA-sensoren en laat
   # zien wat single-HP mode, de bump, de zachte aanloop en de assist samen
   # opleveren. 0 = geen HP-vraag.
@@ -2312,6 +2571,16 @@ binary_sensor:
     internal: true
     web_server:
       sorting_group_id: oq_boiler
+
+  - platform: template
+    id: oq_dhw_tap_active_sensor
+    name: "DHW tapping actief"
+    icon: mdi:shower-head
+    device_class: moisture
+    web_server:
+      sorting_group_id: oq_boiler
+    lambda: |-
+      return id(oq_dhw_tap_active);
 
   - platform: template
     id: oq_dhw_tariff_negative
@@ -3751,6 +4020,166 @@ interval:
             // Enige overgebleven route: de HP-fase stopte en het element maakt
             // de laatste graden naar boost_target_c af.
             id(oq_dhw_boost_reason_code) = 2;
+          }
+
+          // ===========================================================
+          // DHW-energie en cyclusrendement
+          //
+          // Thermisch eruit komt uit hpX_heat_power: die rekent flow x deltaT
+          // over de watermeting en geldt ook in werkmodus 3 (Hot water). Dat is
+          // dus gemeten, niet geschat uit de perf_map. Elektrisch erin komt uit
+          // hpX_power_input.
+          //
+          // Het 3 kW element telt in beide even zwaar. Het zet zijn stroom
+          // vrijwel volledig om in tankwarmte, dus het duwt de cyclus-COP
+          // richting 1 -- en dat is precies wat je wilt zien als het element
+          // veel werk doet.
+          //
+          // hp2 wordt hier rechtstreeks aangeroepen in plaats van via een
+          // substitutie-var; binnen OQ_TOPOLOGY_DUO is secondary_hp_id altijd
+          // "hp2". Zelfde aanpak als de beveiligingsmodules.
+          // ===========================================================
+          {
+            const uint32_t e_now = (uint32_t) millis();
+            uint32_t e_dt = 0;
+            if (id(oq_dhw_energy_prev_ms) != 0 && e_now > id(oq_dhw_energy_prev_ms)) {
+              e_dt = e_now - id(oq_dhw_energy_prev_ms);
+              // Gat na reboot of OTA niet als draaitijd meetellen.
+              if (e_dt > 30000UL) e_dt = 0;
+            }
+            id(oq_dhw_energy_prev_ms) = e_now;
+
+            const bool cycle_running = (out.state != oq_dhw::State::IDLE_CV);
+
+            if (cycle_running && !id(oq_dhw_cycle_energy_running)) {
+              id(oq_dhw_cycle_wh_in) = 0.0f;
+              id(oq_dhw_cycle_wh_out) = 0.0f;
+            }
+
+            if (cycle_running && e_dt > 0) {
+              const float hours = (float) e_dt / 3600000.0f;
+              float p_el = 0.0f;
+              float p_th = 0.0f;
+              if (id(oq_dhw_hp_request_active)) {
+                const float e1 = id(hp1_power_input).state;
+                const float t1 = id(hp1_heat_power).state;
+                if (!isnan(e1) && e1 > 0.0f) p_el += e1;
+                if (!isnan(t1) && t1 > 0.0f) p_th += t1;
+                #if OQ_TOPOLOGY_DUO
+                const float e2 = id(hp2_power_input).state;
+                const float t2 = id(hp2_heat_power).state;
+                if (!isnan(e2) && e2 > 0.0f) p_el += e2;
+                if (!isnan(t2) && t2 > 0.0f) p_th += t2;
+                #endif
+              }
+              if (id(boiler_relay).state) {
+                p_el += 3000.0f;
+                p_th += 3000.0f;
+              }
+              id(oq_dhw_cycle_wh_in) += p_el * hours;
+              id(oq_dhw_cycle_wh_out) += p_th * hours;
+              id(oq_dhw_day_wh_in) += p_el * hours;
+              id(oq_dhw_day_wh_out) += p_th * hours;
+            }
+
+            if (!cycle_running && id(oq_dhw_cycle_energy_running)) {
+              const float wi = id(oq_dhw_cycle_wh_in);
+              const float wo = id(oq_dhw_cycle_wh_out);
+              // Onder 50 Wh valt er niets zinnigs over te zeggen: een start die
+              // meteen weer afbrak, of een klep die kort omging.
+              if (wi >= 50.0f) {
+                id(oq_dhw_last_cycle_wh_in) = wi;
+                id(oq_dhw_last_cycle_wh_out) = wo;
+                id(oq_dhw_last_cycle_cop) = wo / wi;
+                ESP_LOGI("oq_dhw", "Cyclus klaar: %.0f Wh in, %.0f Wh uit, COP %.2f",
+                         wi, wo, wo / wi);
+              }
+            }
+            id(oq_dhw_cycle_energy_running) = cycle_running;
+
+            // Dagrollover voor de dagtellers en de tappingteller.
+            auto e_clk = id(oq_time).now();
+            if (e_clk.is_valid()) {
+              const int doy = (int) e_clk.day_of_year;
+              if (id(oq_dhw_energy_day_of_year) != doy) {
+                id(oq_dhw_energy_day_of_year) = doy;
+                id(oq_dhw_day_wh_in) = 0.0f;
+                id(oq_dhw_day_wh_out) = 0.0f;
+                id(oq_dhw_taps_today) = 0;
+              }
+            }
+          }
+
+          // ===========================================================
+          // Tapdetectie
+          //
+          // Er wordt getapt als de tanktop hard daalt terwijl er niet verwarmd
+          // wordt. Standby-verlies zit rond 0,02 K/min bij een goede tank, een
+          // douche haalt makkelijk 1 K/min -- ruim te scheiden.
+          //
+          // Dit stond eerder binnen de usage-learning en werkte dus alleen als
+          // die schakelaar aan stond. Nu een eigen signaal, want de
+          // standby-loss-lerer heeft het net zo hard nodig: die moet tappingen
+          // juist uitsluiten van zijn meetvensters. Met usage-learning uit --
+          // de default -- ging een douche daar tot nu toe als tankverlies in.
+          // ===========================================================
+          {
+            const uint32_t t_now = (uint32_t) millis();
+            const float top_now = id(dhw_tank_top_input).state;
+            const bool heating = id(oq_dhw_hp_request_active) || id(boiler_relay).state;
+
+            if (!id(oq_dhw_tap_detect_enable).state || heating || isnan(top_now)) {
+              // Tijdens verwarmen zegt de tanktop niets over tappen.
+              id(oq_dhw_tap_active) = false;
+              id(oq_dhw_tap_calm_ms) = 0;
+              id(oq_dhw_tap_prev_c) = NAN;
+              id(oq_dhw_tap_rate_k_min) = NAN;
+            } else if (isnan(id(oq_dhw_tap_prev_c)) || id(oq_dhw_tap_prev_ms) == 0) {
+              id(oq_dhw_tap_prev_c) = top_now;
+              id(oq_dhw_tap_prev_ms) = t_now;
+            } else if (t_now > id(oq_dhw_tap_prev_ms) &&
+                       (t_now - id(oq_dhw_tap_prev_ms)) >= 60000UL) {
+              const uint32_t win_ms = t_now - id(oq_dhw_tap_prev_ms);
+              const float dt_min = (float) win_ms / 60000.0f;
+              const float prev_c = id(oq_dhw_tap_prev_c);
+              const float rate = (top_now - prev_c) / dt_min;
+              id(oq_dhw_tap_rate_k_min) = rate;
+              id(oq_dhw_tap_prev_c) = top_now;
+              id(oq_dhw_tap_prev_ms) = t_now;
+
+              const float thr = id(oq_dhw_tap_rate_threshold).state;
+              if (rate <= -thr) {
+                if (!id(oq_dhw_tap_active)) {
+                  id(oq_dhw_tap_active) = true;
+                  // Beginwaarde is de meting VOOR de daling, niet die erna.
+                  id(oq_dhw_tap_start_c) = prev_c;
+                  id(oq_dhw_tap_start_ms) = t_now;
+                  id(oq_dhw_taps_today) += 1;
+                  ESP_LOGI("oq_dhw", "Tapping gedetecteerd (%.2f K/min).", rate);
+                }
+                id(oq_dhw_tap_calm_ms) = 0;
+                // Ook de bestaande standby-loss-lerer leest deze; die slaat
+                // meetvensters over tot een uur na de laatste tapping.
+                id(oq_dhw_last_tap_event_ms) = t_now;
+              } else if (id(oq_dhw_tap_active)) {
+                // Pas na twee rustige minuten loslaten, zodat een korte pauze
+                // tussen twee kranen niet als twee tappingen telt.
+                id(oq_dhw_tap_calm_ms) += win_ms;
+                if (id(oq_dhw_tap_calm_ms) >= 120000UL) {
+                  id(oq_dhw_tap_active) = false;
+                  id(oq_dhw_tap_calm_ms) = 0;
+                  const float start_c = id(oq_dhw_tap_start_c);
+                  if (!isnan(start_c) && start_c > top_now) {
+                    // Ruwe schatting: de tankinhoud die deze graden kwijtraakte.
+                    // Stratificatie maakt dit een ondergrens, geen exacte meting.
+                    const float vol_l = id(oq_dhw_tank_volume_l).state;
+                    const float wh_per_k = (vol_l > 0.0f ? vol_l : 220.0f) * 1.16f;
+                    id(oq_dhw_last_tap_wh) = (start_c - top_now) * wh_per_k;
+                  }
+                  id(oq_dhw_tap_start_c) = NAN;
+                }
+              }
+            }
           }
 
           // Boost-timeout: de controller telt, wij loggen. Sinds v0.53 levert
