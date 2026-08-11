@@ -1,0 +1,495 @@
+# ==============================================================================
+# OpenQuatt - Discharge Gas Temperature Protection (per-HP, v0.52)
+# ==============================================================================
+#
+# Doel:
+#   Per-HP begrenzing van het compressorniveau op basis van de gemeten
+#   persgastemperatuur. Voor R32 is persgas de scherpste vroege indicator van
+#   een compressor die te hard werkt -- scherper dan condensordruk, omdat de
+#   druk pas oploopt als de warmte er al is.
+#
+#   Tot v0.52 was er alleen `DHW assist max discharge temp` (90 °C), en die
+#   beslist uitsluitend of de TWEEDE unit mag bijschakelen. Voor de unit die
+#   al draait was er geen enkele terugregeling op persgas. Dit bestand sluit
+#   dat gat.
+#
+# De drie trappen samen:
+#   90 °C   tweede unit mag niet bijschakelen   (assist-guard, oq_boiler_control)
+#   98 °C   draaiende unit knijpt af            (dit bestand, zachte trap)
+#  105 °C   draaiende unit stopt                (dit bestand, harde trap)
+#  110 °C   eigen beveiliging van de ODU        (fabrikant)
+#
+#   OpenQuatt grijpt dus aantoonbaar eerder in dan de ODU; die blijft het
+#   vangnet.
+#
+# Tier-gedrag per HP:
+#   - < soft_c (98):        geen actie
+#   - soft_c..hard_c:       zachte trap -- ladder vanaf het DRAAIENDE niveau
+#   - >= hard_c (105):      cap op 0, compressor stopt
+#   - Hysterese: eenmaal gecapt moet de persgastemperatuur release_c onder
+#     soft_c zakken voor de cap loslaat.
+#
+# Zachte trap: identiek aan oq_supply_temp_protection.yaml. Bij binnenkomst
+# eenmalig latchen op `laatst toegepast niveau - reduce`, daarna per
+# soft_step_s nog een level eraf zolang de temperatuur nog stijgt. Bij een
+# harde trip blijft de ladder gelatcht.
+#
+# Uitgang:
+#   - oq_discharge_max_level_hp1 / hp2 -- derde bron in de min()-keten van
+#     thermal_actuator, naast druk en aanvoertemperatuur.
+# ==============================================================================
+
+globals:
+  - id: oq_discharge_max_level_hp1
+    type: int
+    restore_value: false
+    initial_value: '10'
+  - id: oq_discharge_max_level_hp2
+    type: int
+    restore_value: false
+    initial_value: '10'
+
+  # Hysterese-state (sticky cap die genoeg daling nodig heeft om los te laten).
+  - id: oq_discharge_hp1_cap_active
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: oq_discharge_hp2_cap_active
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+  # Zachte-trap ladder per HP. cap = de gelatchte bovengrens (10 = geen cap),
+  # next_ms = wanneer de volgende stap mag, prev_val = de meetwaarde bij die
+  # stap zodat we kunnen zien of terugregelen nog helpt. prev_val hoeft geen
+  # NaN-startwaarde: hij wordt altijd geschreven wanneer de ladder latcht.
+  - id: oq_discharge_soft_cap_hp1
+    type: int
+    restore_value: false
+    initial_value: '10'
+  - id: oq_discharge_soft_cap_hp2
+    type: int
+    restore_value: false
+    initial_value: '10'
+  - id: oq_discharge_soft_next_ms_hp1
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: oq_discharge_soft_next_ms_hp2
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: oq_discharge_soft_prev_val_hp1
+    type: float
+    restore_value: false
+    initial_value: '0.0'
+  - id: oq_discharge_soft_prev_val_hp2
+    type: float
+    restore_value: false
+    initial_value: '0.0'
+
+  # Event-tellers.
+  - id: oq_discharge_soft_events_24h
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: oq_discharge_hard_events_24h
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: oq_discharge_soft_events_total
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: oq_discharge_hard_events_total
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: oq_discharge_events_window_start_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+  # Hoogste gemeten persgastemperatuur per HP sinds de laatste reset. Trend
+  # voor slijtage en vervuiling; een stijgende piek bij gelijke omstandigheden
+  # wijst op minder koeling van de compressor.
+  - id: oq_discharge_peak_hp1
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: oq_discharge_peak_hp2
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+
+  - id: oq_discharge_hp1_prev_tier
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: oq_discharge_hp2_prev_tier
+    type: int
+    restore_value: false
+    initial_value: '0'
+
+switch:
+  - platform: template
+    id: oq_discharge_protection_enable
+    name: "Discharge protection enable"
+    icon: mdi:thermometer-high
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    turn_on_action: []
+    turn_off_action: []
+    web_server:
+      sorting_group_id: oq_discharge_protection
+
+number:
+  # Zachte grens -- hieronder gebeurt er niets.
+  - platform: template
+    id: oq_discharge_soft_c
+    name: "Discharge soft cap"
+    icon: mdi:thermometer-chevron-up
+    unit_of_measurement: "°C"
+    min_value: 80.0
+    max_value: 105.0
+    step: 1.0
+    optimistic: true
+    restore_value: true
+    initial_value: 98.0
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_discharge_protection
+
+  # Harde grens -- hierboven stopt de compressor. Bewust onder de 110 °C waar
+  # de ODU-firmware zelf ingrijpt, zodat OpenQuatt eerst aan de beurt is.
+  - platform: template
+    id: oq_discharge_hard_c
+    name: "Discharge hard cap"
+    icon: mdi:thermometer-alert
+    unit_of_measurement: "°C"
+    min_value: 90.0
+    max_value: 112.0
+    step: 1.0
+    optimistic: true
+    restore_value: true
+    initial_value: 105.0
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_discharge_protection
+
+  # Hysterese: pas loslaten als de persgastemperatuur zover onder de zachte
+  # grens zakt. Zonder dit flappert de tier en begint de ladder telkens opnieuw.
+  - platform: template
+    id: oq_discharge_release_c
+    name: "Discharge release hysteresis"
+    icon: mdi:waveform
+    unit_of_measurement: "K"
+    min_value: 1.0
+    max_value: 15.0
+    step: 1.0
+    optimistic: true
+    restore_value: true
+    initial_value: 5.0
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_discharge_protection
+
+  # Eerste stapgrootte van de zachte trap: hoeveel levels onder het draaiende
+  # niveau de ladder begint.
+  - platform: template
+    id: oq_discharge_reduce_levels
+    name: "Discharge soft cap reduce levels"
+    icon: mdi:stairs-down
+    min_value: 1
+    max_value: 4
+    step: 1
+    optimistic: true
+    restore_value: true
+    initial_value: 1
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_discharge_protection
+
+  # Tijd tussen de vervolgstappen. Alleen van toepassing zolang de
+  # persgastemperatuur nog stijgt. 0 = alleen de eerste, gelatchte stap.
+  - platform: template
+    id: oq_discharge_soft_step_s
+    name: "Discharge soft cap step time"
+    icon: mdi:timer-outline
+    unit_of_measurement: "s"
+    min_value: 0
+    max_value: 600
+    step: 10
+    optimistic: true
+    restore_value: true
+    initial_value: 120
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_discharge_protection
+
+button:
+  - platform: template
+    id: oq_discharge_reset_counters_button
+    name: "Discharge reset event counters"
+    icon: mdi:restart
+    web_server:
+      sorting_group_id: oq_discharge_protection
+    on_press:
+      - lambda: |-
+          id(oq_discharge_soft_events_24h) = 0;
+          id(oq_discharge_hard_events_24h) = 0;
+          id(oq_discharge_soft_events_total) = 0;
+          id(oq_discharge_hard_events_total) = 0;
+          id(oq_discharge_peak_hp1) = 0.0f;
+          id(oq_discharge_peak_hp2) = 0.0f;
+          ESP_LOGI("oq_discharge", "Discharge event counters and peaks reset.");
+
+sensor:
+  - platform: template
+    id: oq_discharge_max_level_hp1_sensor
+    name: "Discharge HP1 level cap"
+    icon: mdi:stairs
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 10s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_discharge_protection
+    lambda: |-
+      return (float) id(oq_discharge_max_level_hp1);
+
+  - platform: template
+    id: oq_discharge_max_level_hp2_sensor
+    name: "Discharge HP2 level cap"
+    icon: mdi:stairs
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 10s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_discharge_protection
+    lambda: |-
+      #if OQ_TOPOLOGY_DUO
+      return (float) id(oq_discharge_max_level_hp2);
+      #else
+      return NAN;
+      #endif
+
+  - platform: template
+    id: oq_discharge_peak_hp1_sensor
+    name: "Discharge HP1 peak"
+    icon: mdi:thermometer-high
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 30s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_discharge_protection
+    lambda: |-
+      const float p = id(oq_discharge_peak_hp1);
+      return (p > 0.0f) ? p : NAN;
+
+  - platform: template
+    id: oq_discharge_peak_hp2_sensor
+    name: "Discharge HP2 peak"
+    icon: mdi:thermometer-high
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 30s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_discharge_protection
+    lambda: |-
+      #if OQ_TOPOLOGY_DUO
+      const float p = id(oq_discharge_peak_hp2);
+      return (p > 0.0f) ? p : NAN;
+      #else
+      return NAN;
+      #endif
+
+  - platform: template
+    id: oq_discharge_soft_events_24h_sensor
+    name: "Discharge soft events 24h"
+    icon: mdi:counter
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_discharge_protection
+    lambda: |-
+      return (float) id(oq_discharge_soft_events_24h);
+
+  - platform: template
+    id: oq_discharge_hard_events_24h_sensor
+    name: "Discharge hard events 24h"
+    icon: mdi:counter
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_discharge_protection
+    lambda: |-
+      return (float) id(oq_discharge_hard_events_24h);
+
+binary_sensor:
+  - platform: template
+    id: oq_discharge_soft_warning_sensor
+    name: "Discharge soft cap active"
+    icon: mdi:thermometer-chevron-up
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_discharge_protection
+    lambda: |-
+      return (id(oq_discharge_max_level_hp1) < 10) ||
+             (id(oq_discharge_max_level_hp2) < 10);
+
+  - platform: template
+    id: oq_discharge_hard_warning_sensor
+    name: "Discharge hard cap active"
+    icon: mdi:thermometer-alert
+    device_class: problem
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_discharge_protection
+    lambda: |-
+      return (id(oq_discharge_max_level_hp1) == 0) ||
+             (id(oq_discharge_max_level_hp2) == 0);
+
+interval:
+  - interval: 5s
+    startup_delay: 14000ms
+    then:
+      - lambda: |-
+          const uint32_t now_ms = (uint32_t) millis();
+
+          const bool enabled = id(oq_discharge_protection_enable).state;
+          const float soft_c = id(oq_discharge_soft_c).state;
+          const float hard_c = id(oq_discharge_hard_c).state;
+          const float release_c = id(oq_discharge_release_c).state;
+          int reduce = (int) roundf(id(oq_discharge_reduce_levels).state);
+          if (reduce < 1) reduce = 1;
+          if (reduce > 4) reduce = 4;
+
+          const uint32_t soft_step_ms =
+              (uint32_t) (fmaxf(0.0f, id(oq_discharge_soft_step_s).state) * 1000.0f);
+
+          // Een ontbrekende of onzinnige meting mag nooit tot ingrijpen leiden;
+          // die kant op fout gaan zou de compressor stilzetten op een sensor die
+          // toevallig even niets teruggeeft.
+          auto classify = [&](float t_c, bool prev_cap_active)->int {
+            if (isnan(t_c) || t_c <= 0.0f) return 0;
+            if (t_c >= hard_c) return 2;
+            if (t_c >= soft_c) return 1;
+            if (prev_cap_active && t_c > (soft_c - release_c)) return 1;
+            return 0;
+          };
+
+          // Zachte trap: ladder die terugregelt vanaf het DRAAIENDE niveau.
+          // Eenmalig latchen bij binnenkomst voorkomt de ratel die je krijgt als
+          // je elke ronde opnieuw vanaf "huidig" rekent -- deze lus draait elke
+          // 5 seconden.
+          auto soft_ladder = [&](float value, int last_applied, int &cap,
+                                 uint32_t &next_ms, float &prev_val)->int {
+            if (cap >= 10) {
+              int start = (last_applied > 0 ? last_applied : 10) - reduce;
+              if (start < 1) start = 1;
+              cap = start;
+              next_ms = now_ms + soft_step_ms;
+              prev_val = value;
+              return cap;
+            }
+            // Tekenvergelijking is rollover-veilig (millis wrapt na ~49 dagen).
+            if (soft_step_ms > 0 && (int32_t)(now_ms - next_ms) >= 0) {
+              const bool still_rising =
+                  !isnan(value) && !isnan(prev_val) && (value > prev_val);
+              if (still_rising && cap > 1) cap -= 1;
+              next_ms = now_ms + soft_step_ms;
+              prev_val = value;
+            }
+            return cap;
+          };
+
+          auto resolve_cap = [&](int tier, float value, int last_applied, int &cap,
+                                 uint32_t &next_ms, float &prev_val)->int {
+            if (!enabled) { cap = 10; return 10; }
+            if (tier >= 2) return 0;
+            if (tier == 1) return soft_ladder(value, last_applied, cap, next_ms, prev_val);
+            cap = 10;
+            return 10;
+          };
+
+          // ----- HP1 -----
+          const float d1_c = id(hp1_gas_discharge_temp).has_state()
+              ? id(hp1_gas_discharge_temp).state : NAN;
+          const int tier1 = classify(d1_c, id(oq_discharge_hp1_cap_active));
+          id(oq_discharge_max_level_hp1) = resolve_cap(
+              tier1, d1_c, id(hp1_last_applied_level),
+              id(oq_discharge_soft_cap_hp1), id(oq_discharge_soft_next_ms_hp1),
+              id(oq_discharge_soft_prev_val_hp1));
+          id(oq_discharge_hp1_cap_active) = (tier1 > 0);
+
+          if (!isnan(d1_c) && d1_c > id(oq_discharge_peak_hp1)) {
+            id(oq_discharge_peak_hp1) = d1_c;
+          }
+
+          const int prev_tier1 = id(oq_discharge_hp1_prev_tier);
+          if (tier1 > prev_tier1) {
+            if (tier1 == 2) {
+              id(oq_discharge_hard_events_24h) += 1;
+              id(oq_discharge_hard_events_total) += 1;
+              ESP_LOGW("oq_discharge", "HP1 hard cap at %.1f °C — forcing level 0.", d1_c);
+            } else if (tier1 == 1) {
+              id(oq_discharge_soft_events_24h) += 1;
+              id(oq_discharge_soft_events_total) += 1;
+              ESP_LOGI("oq_discharge", "HP1 soft cap at %.1f °C — reducing level.", d1_c);
+            }
+          }
+          id(oq_discharge_hp1_prev_tier) = tier1;
+
+          // ----- HP2 -----
+          #if OQ_TOPOLOGY_DUO
+          const float d2_c = id(hp2_gas_discharge_temp).has_state()
+              ? id(hp2_gas_discharge_temp).state : NAN;
+          const int tier2 = classify(d2_c, id(oq_discharge_hp2_cap_active));
+          id(oq_discharge_max_level_hp2) = resolve_cap(
+              tier2, d2_c, id(hp2_last_applied_level),
+              id(oq_discharge_soft_cap_hp2), id(oq_discharge_soft_next_ms_hp2),
+              id(oq_discharge_soft_prev_val_hp2));
+          id(oq_discharge_hp2_cap_active) = (tier2 > 0);
+
+          if (!isnan(d2_c) && d2_c > id(oq_discharge_peak_hp2)) {
+            id(oq_discharge_peak_hp2) = d2_c;
+          }
+
+          const int prev_tier2 = id(oq_discharge_hp2_prev_tier);
+          if (tier2 > prev_tier2) {
+            if (tier2 == 2) {
+              id(oq_discharge_hard_events_24h) += 1;
+              id(oq_discharge_hard_events_total) += 1;
+              ESP_LOGW("oq_discharge", "HP2 hard cap at %.1f °C — forcing level 0.", d2_c);
+            } else if (tier2 == 1) {
+              id(oq_discharge_soft_events_24h) += 1;
+              id(oq_discharge_soft_events_total) += 1;
+              ESP_LOGI("oq_discharge", "HP2 soft cap at %.1f °C — reducing level.", d2_c);
+            }
+          }
+          id(oq_discharge_hp2_prev_tier) = tier2;
+          #else
+          id(oq_discharge_max_level_hp2) = 10;
+          #endif
+
+          // ----- 24-uursvenster -----
+          if (id(oq_discharge_events_window_start_ms) == 0) {
+            id(oq_discharge_events_window_start_ms) = now_ms;
+          }
+          if ((uint32_t)(now_ms - id(oq_discharge_events_window_start_ms)) >= 86400000UL) {
+            id(oq_discharge_soft_events_24h) = 0;
+            id(oq_discharge_hard_events_24h) = 0;
+            id(oq_discharge_events_window_start_ms) = now_ms;
+          }
