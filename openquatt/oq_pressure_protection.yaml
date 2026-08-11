@@ -9,9 +9,20 @@
 #
 # Tier behaviour:
 #   - Below soft_bar (default 38 bar): no action, normal operation
-#   - soft_bar..hard_bar: cap level at max_lvl - 1, log soft event
+#   - soft_bar..hard_bar: zachte trap — ladder vanaf het DRAAIENDE niveau
 #   - hard_bar..hps_bar: cap level at 0, log hard event (compressor stops)
 #   - hps_bar (default 41 bar) is an OpenQuatt safety mirror of the HP HPS
+#
+# Zachte trap (v0.52):
+#   De cap werd berekend als `10 - soft_cap_reduce` = 9 en bond dus nooit —
+#   levels boven 6 komen in de praktijk niet voor. De eerste echte ingreep was
+#   daarmee de harde trap: een volledige stop. Nu latcht de ladder bij
+#   binnenkomst op `laatst toegepast niveau - reduce` en stapt daarna per
+#   soft_step_s verder terug, maar alleen zolang de druk nog stijgt.
+#
+#   Deze module had ook geen hysterese, anders dan supply_temp. Zonder die
+#   hysterese flappert de tier op de grens en begint de ladder telkens opnieuw.
+#   release_bar sluit dat gat.
 #
 # Output:
 #   - oq_pressure_max_level_hp1 / hp2 (int) — per-HP cap consumed by the
@@ -33,6 +44,46 @@ globals:
     type: int
     restore_value: false
     initial_value: '10'
+
+  # Hysterese-state: eenmaal gecapt moet de druk release_bar onder de zachte
+  # grens zakken voor de cap loslaat.
+  - id: oq_pressure_hp1_cap_active
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: oq_pressure_hp2_cap_active
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+  # Zachte-trap ladder per HP. cap = de gelatchte bovengrens (10 = geen cap),
+  # next_ms = wanneer de volgende stap mag, prev_val = de druk bij die stap
+  # zodat we kunnen zien of terugregelen nog helpt. prev_val hoeft geen
+  # NaN-startwaarde: hij wordt altijd geschreven wanneer de ladder latcht.
+  - id: oq_pressure_soft_cap_hp1
+    type: int
+    restore_value: false
+    initial_value: '10'
+  - id: oq_pressure_soft_cap_hp2
+    type: int
+    restore_value: false
+    initial_value: '10'
+  - id: oq_pressure_soft_next_ms_hp1
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: oq_pressure_soft_next_ms_hp2
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: oq_pressure_soft_prev_val_hp1
+    type: float
+    restore_value: false
+    initial_value: '0.0'
+  - id: oq_pressure_soft_prev_val_hp2
+    type: float
+    restore_value: false
+    initial_value: '0.0'
 
   # Peak condenser pressure EMA per HP — trend for fouling / aging.
   - id: oq_pressure_peak_ema_hp1
@@ -153,7 +204,8 @@ number:
     web_server:
       sorting_group_id: oq_pressure_protection
 
-  # Soft-cap level reduction (how many levels below current cap).
+  # Eerste stapgrootte van de zachte trap: hoeveel levels onder het draaiende
+  # niveau de ladder begint.
   - platform: template
     id: oq_pressure_soft_cap_reduce
     name: "Pressure soft cap reduce levels"
@@ -164,6 +216,41 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 1
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_pressure_protection
+
+  # Hysterese: pas loslaten als de druk zover onder de zachte grens zakt.
+  # Zonder dit flappert de tier op de grens en begint de ladder telkens opnieuw.
+  - platform: template
+    id: oq_pressure_release_bar
+    name: "Pressure release hysteresis"
+    icon: mdi:waveform
+    unit_of_measurement: "bar"
+    min_value: 0.5
+    max_value: 5.0
+    step: 0.5
+    optimistic: true
+    restore_value: true
+    initial_value: 1.5
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_pressure_protection
+
+  # Tijd tussen de vervolgstappen van de zachte trap. Alleen van toepassing
+  # zolang de druk nog stijgt. 0 = geen vervolgstappen, dan blijft de ladder op
+  # zijn eerste, gelatchte waarde staan.
+  - platform: template
+    id: oq_pressure_soft_step_s
+    name: "Pressure soft cap step time"
+    icon: mdi:timer-outline
+    unit_of_measurement: "s"
+    min_value: 0
+    max_value: 600
+    step: 10
+    optimistic: true
+    restore_value: true
+    initial_value: 120
     entity_category: config
     web_server:
       sorting_group_id: oq_pressure_protection
@@ -371,36 +458,72 @@ interval:
           //   tier 1 = soft (between soft and hard)
           //   tier 2 = hard (between hard and HPS)
           //   tier 3 = HPS-mirror (>= hps_bar)
-          auto classify = [&](float bar)->int {
+          const float release_bar = id(oq_pressure_release_bar).state;
+          const uint32_t soft_step_ms =
+              (uint32_t) (fmaxf(0.0f, id(oq_pressure_soft_step_s).state) * 1000.0f);
+
+          auto classify = [&](float bar, bool prev_cap_active)->int {
             if (isnan(bar) || bar <= 0.0f) return 0;
             if (bar >= hps_bar) return 3;
             if (bar >= hard_bar) return 2;
             if (bar >= soft_bar) return 1;
+            // Onder de zachte grens, maar nog gecapt: vasthouden tot release_bar
+            // eronder. Zonder deze hysterese flappert de tier op de grens en
+            // begint de ladder hieronder telkens opnieuw.
+            if (prev_cap_active && bar > (soft_bar - release_bar)) return 1;
             return 0;
           };
 
-          auto apply_cap = [&](int tier)->int {
-            // Returns the level cap (10 = no cap, 0 = stop).
-            if (!enabled) return 10;
-            switch (tier) {
-              case 3:  // HPS-mirror — force stop, OpenQuatt mirrors HP HPS
-              case 2:  // hard — force stop
-                return 0;
-              case 1: { // soft — cap at max - reduce, never below 1
-                int cap = 10 - soft_reduce;
-                if (cap < 1) cap = 1;
-                return cap;
-              }
-              default:
-                return 10;
+          // Zachte trap: ladder die terugregelt vanaf het DRAAIENDE niveau.
+          // De oude berekening (10 - reduce = 9) bond nooit; zie de kop van dit
+          // bestand. Eenmalig latchen bij binnenkomst voorkomt de ratel die je
+          // krijgt als je elke ronde opnieuw vanaf "huidig" rekent.
+          auto soft_ladder = [&](float value, int last_applied, int &cap,
+                                 uint32_t &next_ms, float &prev_val)->int {
+            if (cap >= 10) {
+              // Binnenkomst. Draait de unit (nog) niet, dan is er niets om vanaf
+              // terug te regelen en begint de ladder onder het maximum.
+              int start = (last_applied > 0 ? last_applied : 10) - soft_reduce;
+              if (start < 1) start = 1;
+              cap = start;
+              next_ms = now_ms + soft_step_ms;
+              prev_val = value;
+              return cap;
             }
+            // Vervolgstappen alleen zolang het nog niet helpt. Tekenvergelijking
+            // is rollover-veilig (millis wrapt na ~49 dagen).
+            if (soft_step_ms > 0 && (int32_t)(now_ms - next_ms) >= 0) {
+              const bool still_rising =
+                  !isnan(value) && !isnan(prev_val) && (value > prev_val);
+              if (still_rising && cap > 1) cap -= 1;
+              next_ms = now_ms + soft_step_ms;
+              prev_val = value;
+            }
+            return cap;
+          };
+
+          // Bij een harde trip of HPS-mirror blijft de ladder bewust gelatcht:
+          // dat niveau was aantoonbaar te hoog, dus daar wil je bij terugkeer
+          // naar de zachte trap niet opnieuw vanaf beginnen. Alleen tier 0 zet
+          // hem vrij, en die wordt door de hysterese al tegengehouden.
+          auto resolve_cap = [&](int tier, float value, int last_applied, int &cap,
+                                 uint32_t &next_ms, float &prev_val)->int {
+            if (!enabled) { cap = 10; return 10; }
+            if (tier >= 2) return 0;     // hard / HPS-mirror → stop
+            if (tier == 1) return soft_ladder(value, last_applied, cap, next_ms, prev_val);
+            cap = 10;
+            return 10;
           };
 
           // ----- HP1 -----
           const float p1_bar = id(hp1_condenser_pressure).has_state()
               ? id(hp1_condenser_pressure).state : NAN;
-          const int tier1 = classify(p1_bar);
-          id(oq_pressure_max_level_hp1) = apply_cap(tier1);
+          const int tier1 = classify(p1_bar, id(oq_pressure_hp1_cap_active));
+          id(oq_pressure_max_level_hp1) = resolve_cap(
+              tier1, p1_bar, id(hp1_last_applied_level),
+              id(oq_pressure_soft_cap_hp1), id(oq_pressure_soft_next_ms_hp1),
+              id(oq_pressure_soft_prev_val_hp1));
+          id(oq_pressure_hp1_cap_active) = (tier1 > 0);
 
           // Peak EMA — tracks the running maximum slowly.
           if (!isnan(p1_bar) && p1_bar > 0.0f) {
@@ -437,8 +560,12 @@ interval:
           #if OQ_TOPOLOGY_DUO
           const float p2_bar = id(hp2_condenser_pressure).has_state()
               ? id(hp2_condenser_pressure).state : NAN;
-          const int tier2 = classify(p2_bar);
-          id(oq_pressure_max_level_hp2) = apply_cap(tier2);
+          const int tier2 = classify(p2_bar, id(oq_pressure_hp2_cap_active));
+          id(oq_pressure_max_level_hp2) = resolve_cap(
+              tier2, p2_bar, id(hp2_last_applied_level),
+              id(oq_pressure_soft_cap_hp2), id(oq_pressure_soft_next_ms_hp2),
+              id(oq_pressure_soft_prev_val_hp2));
+          id(oq_pressure_hp2_cap_active) = (tier2 > 0);
 
           if (!isnan(p2_bar) && p2_bar > 0.0f) {
             const float tau_s = 3600.0f;

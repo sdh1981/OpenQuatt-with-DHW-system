@@ -3736,6 +3736,47 @@ views:
       - type: grid
         cards:
           - type: heading
+            icon: mdi:stairs-down
+            heading: Compressorbegrenzing
+            heading_style: title
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - type: section
+                label: Actieve cap (10 = geen begrenzing)
+              - entity: sensor.openquatt_pressure_hp1_level_cap
+                name: Druk - cap HP1
+              - entity: sensor.openquatt_pressure_hp2_level_cap
+                name: Druk - cap HP2
+              - entity: sensor.openquatt_supply_temp_hp1_level_cap
+                name: Aanvoer - cap HP1
+              - entity: sensor.openquatt_supply_temp_hp2_level_cap
+                name: Aanvoer - cap HP2
+              - type: section
+                label: Hoe vaak vandaag
+              - entity: sensor.openquatt_pressure_soft_events_24h
+                name: Druk - zachte trap 24h
+              - entity: sensor.openquatt_pressure_hard_events_24h
+                name: Druk - harde trap 24h
+              - entity: sensor.openquatt_supply_temp_soft_events_24h
+                name: Aanvoer - zachte trap 24h
+              - entity: sensor.openquatt_supply_temp_hard_events_24h
+                name: Aanvoer - harde trap 24h
+              - type: section
+                label: Afstelling
+              - entity: switch.openquatt_pressure_protection_enable
+                name: Drukbeveiliging aan
+              - entity: number.openquatt_pressure_soft_cap_step_time
+                name: Druk - tijd per stap (s)
+              - entity: number.openquatt_pressure_release_hysteresis
+                name: Druk - hysterese (bar)
+              - entity: switch.openquatt_supply_temp_protection_enable
+                name: Aanvoerbeveiliging aan
+              - entity: number.openquatt_supply_temp_soft_cap_step_time
+                name: Aanvoer - tijd per stap (s)
+      - type: grid
+        cards:
+          - type: heading
             icon: mdi:tag-text
             heading: Versie informatie
             heading_style: title

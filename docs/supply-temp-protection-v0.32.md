@@ -19,10 +19,23 @@ Voor elke HP, gebaseerd op `hpX_water_out_temp`:
 | Tier | Drempel | Level cap | Wat gebeurt |
 |---|---|---|---|
 | 0 (OK) | < soft_c | 10 (geen cap) | Normaal bedrijf |
-| 1 (soft) | soft_c..hard_c | 10 - reduce | Niveau wordt verlaagd |
+| 1 (soft) | soft_c..hard_c | ladder, zie onder | Niveau wordt stapsgewijs verlaagd |
 | 2 (hard) | >= hard_c | 0 (stop) | Compressor stopt direct |
 
 Met defaults: soft_c = **55 °C**, hard_c = **58 °C**, reduce = **1 level**.
+
+## De zachte trap (gewijzigd in v0.52)
+
+Tot v0.51 werd de zachte cap berekend als `10 - reduce`, dus **9** met de default. Die cap bond nooit: levels boven 6 komen in de praktijk niet voor en DHW draait op 2 tot 5. De zachte trap deed daarmee niets, en de eerste echte ingreep was de harde trap — een volledige stop.
+
+Sinds v0.52 is het een ladder die terugregelt vanaf het niveau dat de unit **werkelijk draait**:
+
+1. **Bij binnenkomst** wordt de cap eenmalig vastgezet op `laatst toegepast niveau − reduce`, met 1 als ondergrens. Eenmalig, want zou hij elke ronde opnieuw vanaf "huidig" rekenen, dan loopt hij binnen een halve minuut naar 1 — de module draait elke 5 seconden.
+2. **Daarna** gaat er per `soft cap step time` (default 120 s) nog een level af, maar **alleen zolang de temperatuur nog stijgt**. Werkt de eerste stap, dan blijft de ladder staan op het niveau waar het stabiliseert.
+3. **Bij een harde trip** blijft de ladder gelatcht. Dat niveau was aantoonbaar te hoog, dus bij terugkeer naar de zachte trap begint hij niet opnieuw bovenaan.
+4. **Loslaten** gebeurt alleen bij een terugval naar tier 0, en die wordt door de hysterese hieronder al tegengehouden.
+
+Zet je `soft cap step time` op 0, dan blijft het bij de eerste, gelatchte stap.
 
 ## Hysterese
 
@@ -51,7 +64,8 @@ Plus de level-exclusies. De strengste wint dus.
 | `Supply temp soft cap` | 55,0 °C | 40-65 | Drempel voor level-reductie |
 | `Supply temp hard cap` | 58,0 °C | 50-70 | Drempel voor stop |
 | `Supply temp release hysteresis` | 2,0 K | 0,5-5 | Drop nodig voor cap-release |
-| `Supply temp soft cap reduce levels` | 1 | 1-4 | Hoeveel levels verlagen bij soft |
+| `Supply temp soft cap reduce levels` | 1 | 1-4 | Eerste stap van de ladder, onder het draaiende niveau |
+| `Supply temp soft cap step time` | 120 s | 0-600 | Tijd per vervolgstap; 0 = alleen de eerste stap |
 
 ## Diagnose-entiteiten
 

@@ -11,9 +11,25 @@
 #
 # Tier behaviour (per HP):
 #   - Below soft_c (default 55 °C): no action
-#   - soft_c..hard_c (55..58): cap level at current - reduce_levels (default 1)
+#   - soft_c..hard_c (55..58): zachte trap — ladder die terugregelt vanaf het
+#     DRAAIENDE niveau (zie hieronder)
 #   - hard_c..max_c (58..62): cap level at 0 (stop)
 #   - Hysteresis: once capped, must drop release_c below soft_c to lift
+#
+# Zachte trap (v0.52):
+#   De cap werd berekend als `10 - reduce_levels` = 9. Die bond nooit: levels
+#   boven 6 komen in de praktijk niet voor en DHW draait op 2..5. De zachte trap
+#   deed dus niets en de eerste echte ingreep was de harde trap — een volledige
+#   stop. Nu:
+#     1. Bij binnenkomst eenmalig latchen op `laatst toegepast niveau - reduce`.
+#        Eenmalig, want zou de cap elke ronde opnieuw vanaf "huidig" rekenen,
+#        dan loopt hij binnen een halve minuut naar 1 (ratel).
+#     2. Daarna elke soft_step_s nog een level eraf, maar ALLEEN zolang de
+#        meetwaarde nog stijgt. Werkt de eerste stap, dan blijft hij staan op
+#        het niveau waar de temperatuur stabiliseert.
+#     3. Bij een harde trip blijft de ladder bewust gelatcht: het niveau waarop
+#        hij hard ging is aantoonbaar te hoog om bij terugkeer opnieuw vanaf te
+#        beginnen. Pas een terugval naar tier 0 zet de ladder vrij.
 #
 # Output:
 #   - oq_supply_temp_max_level_hp1 / hp2 — consumed by thermal_actuator
@@ -65,6 +81,36 @@ globals:
     type: uint32_t
     restore_value: false
     initial_value: '0'
+
+  # Zachte-trap ladder per HP. cap = de gelatchte bovengrens (10 = geen cap),
+  # next_ms = wanneer de volgende stap mag, prev_val = de meetwaarde bij die
+  # stap zodat we kunnen zien of terugregelen nog helpt.
+  # prev_val hoeft geen NaN-startwaarde: hij wordt altijd geschreven op het
+  # moment dat de ladder latcht, en pas daarna gelezen.
+  - id: oq_supply_temp_soft_cap_hp1
+    type: int
+    restore_value: false
+    initial_value: '10'
+  - id: oq_supply_temp_soft_cap_hp2
+    type: int
+    restore_value: false
+    initial_value: '10'
+  - id: oq_supply_temp_soft_next_ms_hp1
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: oq_supply_temp_soft_next_ms_hp2
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: oq_supply_temp_soft_prev_val_hp1
+    type: float
+    restore_value: false
+    initial_value: '0.0'
+  - id: oq_supply_temp_soft_prev_val_hp2
+    type: float
+    restore_value: false
+    initial_value: '0.0'
 
   - id: oq_supply_temp_hp1_prev_tier
     type: int
@@ -141,7 +187,8 @@ number:
     web_server:
       sorting_group_id: oq_supply_temp_protection
 
-  # Soft-cap level reduction (how many levels below current cap).
+  # Eerste stapgrootte van de zachte trap: hoeveel levels onder het draaiende
+  # niveau de ladder begint.
   - platform: template
     id: oq_supply_temp_reduce_levels
     name: "Supply temp soft cap reduce levels"
@@ -152,6 +199,24 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 1
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_supply_temp_protection
+
+  # Tijd tussen de vervolgstappen van de zachte trap. Alleen van toepassing
+  # zolang de aanvoertemperatuur nog stijgt. 0 = geen vervolgstappen, dan blijft
+  # de ladder op zijn eerste, gelatchte waarde staan.
+  - platform: template
+    id: oq_supply_temp_soft_step_s
+    name: "Supply temp soft cap step time"
+    icon: mdi:timer-outline
+    unit_of_measurement: "s"
+    min_value: 0
+    max_value: 600
+    step: 10
+    optimistic: true
+    restore_value: true
+    initial_value: 120
     entity_category: config
     web_server:
       sorting_group_id: oq_supply_temp_protection
@@ -323,24 +388,58 @@ interval:
             return 0;
           };
 
-          auto apply_cap = [&](int tier)->int {
-            if (!enabled) return 10;
-            switch (tier) {
-              case 2: return 0;            // hard → stop
-              case 1: {                    // soft → reduce
-                int cap = 10 - reduce;
-                if (cap < 1) cap = 1;
-                return cap;
-              }
-              default: return 10;
+          const uint32_t soft_step_ms =
+              (uint32_t) (fmaxf(0.0f, id(oq_supply_temp_soft_step_s).state) * 1000.0f);
+
+          // Zachte trap: ladder die terugregelt vanaf het DRAAIENDE niveau.
+          // De oude berekening (10 - reduce = 9) bond nooit; zie de kop van dit
+          // bestand. Eenmalig latchen bij binnenkomst voorkomt de ratel die je
+          // krijgt als je elke ronde opnieuw vanaf "huidig" rekent.
+          auto soft_ladder = [&](float value, int last_applied, int &cap,
+                                 uint32_t &next_ms, float &prev_val)->int {
+            if (cap >= 10) {
+              // Binnenkomst. Draait de unit (nog) niet, dan is er niets om vanaf
+              // terug te regelen en begint de ladder onder het maximum.
+              int start = (last_applied > 0 ? last_applied : 10) - reduce;
+              if (start < 1) start = 1;
+              cap = start;
+              next_ms = now_ms + soft_step_ms;
+              prev_val = value;
+              return cap;
             }
+            // Vervolgstappen alleen zolang het nog niet helpt. Tekenvergelijking
+            // is rollover-veilig (millis wrapt na ~49 dagen).
+            if (soft_step_ms > 0 && (int32_t)(now_ms - next_ms) >= 0) {
+              const bool still_rising =
+                  !isnan(value) && !isnan(prev_val) && (value > prev_val);
+              if (still_rising && cap > 1) cap -= 1;
+              next_ms = now_ms + soft_step_ms;
+              prev_val = value;
+            }
+            return cap;
+          };
+
+          // Bij een harde trip blijft de ladder bewust gelatcht: dat niveau was
+          // aantoonbaar te hoog, dus daar wil je bij terugkeer naar de zachte
+          // trap niet opnieuw vanaf beginnen. Alleen tier 0 zet hem vrij, en die
+          // wordt door de hysterese in classify() al tegengehouden.
+          auto resolve_cap = [&](int tier, float value, int last_applied, int &cap,
+                                 uint32_t &next_ms, float &prev_val)->int {
+            if (!enabled) { cap = 10; return 10; }
+            if (tier >= 2) return 0;     // hard → stop
+            if (tier == 1) return soft_ladder(value, last_applied, cap, next_ms, prev_val);
+            cap = 10;
+            return 10;
           };
 
           // ----- HP1 -----
           const float hp1_out_c = id(hp1_water_out_temp).has_state()
               ? id(hp1_water_out_temp).state : NAN;
           const int tier1 = classify(hp1_out_c, id(oq_supply_temp_hp1_cap_active));
-          id(oq_supply_temp_max_level_hp1) = apply_cap(tier1);
+          id(oq_supply_temp_max_level_hp1) = resolve_cap(
+              tier1, hp1_out_c, id(hp1_last_applied_level),
+              id(oq_supply_temp_soft_cap_hp1), id(oq_supply_temp_soft_next_ms_hp1),
+              id(oq_supply_temp_soft_prev_val_hp1));
           id(oq_supply_temp_hp1_cap_active) = (tier1 > 0);
 
           // Edge-detect events (rising-edge counted only).
@@ -363,7 +462,10 @@ interval:
           const float hp2_out_c = id(hp2_water_out_temp).has_state()
               ? id(hp2_water_out_temp).state : NAN;
           const int tier2 = classify(hp2_out_c, id(oq_supply_temp_hp2_cap_active));
-          id(oq_supply_temp_max_level_hp2) = apply_cap(tier2);
+          id(oq_supply_temp_max_level_hp2) = resolve_cap(
+              tier2, hp2_out_c, id(hp2_last_applied_level),
+              id(oq_supply_temp_soft_cap_hp2), id(oq_supply_temp_soft_next_ms_hp2),
+              id(oq_supply_temp_soft_prev_val_hp2));
           id(oq_supply_temp_hp2_cap_active) = (tier2 > 0);
 
           const int prev_tier2 = id(oq_supply_temp_hp2_prev_tier);
