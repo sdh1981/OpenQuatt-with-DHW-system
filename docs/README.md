@@ -44,6 +44,7 @@ Cooling en DHW worden beschreven in:
 - [Power House](power-house.md): aparte uitleg van huismodel, comfortlogica, rise/fall time, laaglastgedrag en Duo-keuze.
 - [Power House thermisch model v0.32](power-house-thermisch-model-v0.32.md): UA-leerroutine, zonnewinst-correctie, voorspellend voorconditioneren, frost-zone derating en effectieve aanvoertemperatuur voor de perf_map.
 - [Power House smart features v0.32](power-house-smart-features-v0.32.md): dynamisch tarief, PV-zelfconsumptie, window-open detectie, adaptieve Kp en SCOP/health/heat-up tracking.
+- [DHW-rendement en tapdetectie v0.54](dhw-rendement-en-tapdetectie-v0.54.md): cyclus-COP uit gemeten warmte en elektrisch verbruik, plus tapdetectie op de daalsnelheid van de tanktop.
 - [DHW smart features v0.32](dhw-smart-features-v0.32.md): tariff-aware DHW, PV-zelfconsumptie DHW, adaptive usage pattern learning, tank standby-loss tracker, smart legionella deferral en time-to-ready.
 - [Pressure protection v0.32](pressure-protection-v0.32.md): R32 drukbeveiliging per HP — soft/hard caps, HPS-mirror, peak EMA en fouling-trend monitoring.
 - [Supply temp protection v0.32](supply-temp-protection-v0.32.md): per-HP watertemperatuur cap — soft/hard caps op uittredetemperatuur, hysterese, complementair aan systeem-brede `max_water_temp_limit_c`.

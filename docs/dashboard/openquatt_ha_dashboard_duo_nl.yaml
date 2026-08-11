@@ -576,6 +576,43 @@ views:
       - type: grid
         cards:
           - type: heading
+            icon: mdi:gauge
+            heading: DHW rendement en tappingen
+            heading_style: title
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - type: section
+                label: Laatste voltooide cyclus
+              - entity: sensor.openquatt_dhw_cyclus_cop
+                name: Cyclus COP
+              - entity: sensor.openquatt_dhw_cyclus_energie_in
+                name: Elektrisch erin (Wh)
+              - entity: sensor.openquatt_dhw_cyclus_energie_uit
+                name: Warmte eruit (Wh)
+              - type: section
+                label: Vandaag
+              - entity: sensor.openquatt_dhw_cop_vandaag
+                name: COP vandaag
+              - entity: sensor.openquatt_dhw_energie_vandaag
+                name: Elektrisch vandaag (Wh)
+              - type: section
+                label: Tappingen
+              - entity: binary_sensor.openquatt_dhw_tapping_actief
+                name: Er wordt getapt
+              - entity: sensor.openquatt_dhw_tappingen_vandaag
+                name: Tappingen vandaag
+              - entity: sensor.openquatt_dhw_laatste_tapping_energie
+                name: Laatste tapping (Wh)
+              - entity: sensor.openquatt_dhw_tanktop_daalsnelheid
+                name: Daalsnelheid tanktop (K/min)
+              - entity: switch.openquatt_dhw_tapdetectie
+                name: Tapdetectie aan
+              - entity: number.openquatt_dhw_tapdetectie_drempel
+                name: Drempel (K/min)
+      - type: grid
+        cards:
+          - type: heading
             icon: mdi:stairs-up
             heading: DHW single HP en tweede-HP assist
             heading_style: title
