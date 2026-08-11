@@ -414,6 +414,10 @@ views:
         name: Boost reden
       - entity: sensor.openquatt_dhw_second_hp_assist_status
         name: Boost / assist status
+      - entity: sensor.openquatt_dhw_hp_thermisch_vermogen
+        name: HP thermisch vermogen (W)
+      - entity: sensor.openquatt_dhw_boost_timeouts
+        name: Boost timeouts
       - entity: number.openquatt_dhw_boost_now_target
         name: Snelboost doel tanktop (degC)
       - entity: number.openquatt_dhw_boost_now_hp_stop
