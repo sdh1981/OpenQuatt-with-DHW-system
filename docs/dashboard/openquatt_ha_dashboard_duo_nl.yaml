@@ -3771,6 +3771,29 @@ views:
       - type: grid
         cards:
           - type: heading
+            icon: mdi:file-compare
+            heading: Instellingen-vangnet
+            heading_style: title
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: binary_sensor.openquatt_instellingen_gewijzigd
+                name: Afgeweken van vastlegging
+              - entity: sensor.openquatt_instellingen_afwijking
+                name: Wat er afwijkt
+              - entity: sensor.openquatt_instellingen_afwijkingen
+                name: Aantal afwijkingen
+              - entity: sensor.openquatt_instellingen_vastgelegd
+                name: Aantal vastgelegd
+              - type: section
+                label: Bediening
+              - entity: button.openquatt_instellingen_vastleggen
+                name: Vastleggen als ijkpunt
+              - entity: button.openquatt_instellingen_herstellen
+                name: Herstellen naar vastlegging
+      - type: grid
+        cards:
+          - type: heading
             icon: mdi:restart
             heading: Compressor cycling
             heading_style: title
