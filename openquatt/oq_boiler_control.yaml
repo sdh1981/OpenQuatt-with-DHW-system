@@ -411,7 +411,11 @@ globals:
     restore_value: true
     initial_value: '0'
 
-  # ----- DHW-energie en cyclusrendement -----
+  # ----- DHW cyclusrendement -----
+  # Bewust alleen PER CYCLUS. Etmaal- en lifetime-totalen voor DHW-energie en
+  # -COP staan al in oq_smart_diagnostics.yaml; die zijn hier niet nog eens
+  # opgebouwd. Wat daar ontbrak was de COP van de laatste voltooide cyclus.
+  #
   # Elektrisch erin en thermisch eruit, geintegreerd over de lopende cyclus.
   # Beide in Wh. Het thermische deel komt uit hpX_heat_power (flow x deltaT, dus
   # gemeten) plus het element; het elektrische uit hpX_power_input plus datzelfde
@@ -445,16 +449,6 @@ globals:
     type: float
     restore_value: true
     initial_value: 'NAN'
-  - id: oq_dhw_day_wh_in
-    type: float
-    restore_value: true
-    initial_value: '0.0'
-  - id: oq_dhw_day_wh_out
-    type: float
-    restore_value: true
-    initial_value: '0.0'
-  # Dag-van-het-jaar waarop de dagtellers lopen; wisselt die, dan resetten ze.
-  # Geldt ook voor de tappingteller hierboven.
   - id: oq_dhw_energy_day_of_year
     type: int
     restore_value: true
@@ -2268,35 +2262,6 @@ sensor:
     lambda: |-
       return id(oq_dhw_last_cycle_cop);
 
-  - platform: template
-    id: oq_dhw_day_cop_sensor
-    name: "DHW COP vandaag"
-    icon: mdi:gauge-low
-    state_class: measurement
-    accuracy_decimals: 2
-    update_interval: 60s
-    web_server:
-      sorting_group_id: oq_boiler
-    lambda: |-
-      const float wi = id(oq_dhw_day_wh_in);
-      if (wi < 50.0f) return NAN;
-      return id(oq_dhw_day_wh_out) / wi;
-
-  - platform: template
-    id: oq_dhw_day_wh_in_sensor
-    name: "DHW energie vandaag"
-    icon: mdi:counter
-    unit_of_measurement: "Wh"
-    device_class: energy
-    state_class: total_increasing
-    accuracy_decimals: 0
-    update_interval: 60s
-    entity_category: diagnostic
-    web_server:
-      sorting_group_id: oq_boiler
-    lambda: |-
-      return id(oq_dhw_day_wh_in);
-
   # ----- Tapdetectie -----
   - platform: template
     id: oq_dhw_tap_rate_sensor
@@ -4078,8 +4043,6 @@ interval:
               }
               id(oq_dhw_cycle_wh_in) += p_el * hours;
               id(oq_dhw_cycle_wh_out) += p_th * hours;
-              id(oq_dhw_day_wh_in) += p_el * hours;
-              id(oq_dhw_day_wh_out) += p_th * hours;
             }
 
             if (!cycle_running && id(oq_dhw_cycle_energy_running)) {
@@ -4097,14 +4060,14 @@ interval:
             }
             id(oq_dhw_cycle_energy_running) = cycle_running;
 
-            // Dagrollover voor de dagtellers en de tappingteller.
+            // Dagrollover voor de tappingteller. De dag-energietellers zijn
+            // vervallen: oq_smart_diagnostics.yaml houdt DHW-energie en -COP
+            // al over 24 uur en lifetime bij.
             auto e_clk = id(oq_time).now();
             if (e_clk.is_valid()) {
               const int doy = (int) e_clk.day_of_year;
               if (id(oq_dhw_energy_day_of_year) != doy) {
                 id(oq_dhw_energy_day_of_year) = doy;
-                id(oq_dhw_day_wh_in) = 0.0f;
-                id(oq_dhw_day_wh_out) = 0.0f;
                 id(oq_dhw_taps_today) = 0;
               }
             }

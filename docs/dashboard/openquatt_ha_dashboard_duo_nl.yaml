@@ -591,12 +591,6 @@ views:
               - entity: sensor.openquatt_dhw_cyclus_energie_uit
                 name: Warmte eruit (Wh)
               - type: section
-                label: Vandaag
-              - entity: sensor.openquatt_dhw_cop_vandaag
-                name: COP vandaag
-              - entity: sensor.openquatt_dhw_energie_vandaag
-                name: Elektrisch vandaag (Wh)
-              - type: section
                 label: Tappingen
               - entity: binary_sensor.openquatt_dhw_tapping_actief
                 name: Er wordt getapt
