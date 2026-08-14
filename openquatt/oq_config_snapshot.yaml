@@ -97,13 +97,20 @@ interval:
     then:
       - lambda: |-
           // In scope: config-entiteiten uit de DHW-keten en de drie
-          // beveiligingsmodules. Op prefix in plaats van een handmatige lijst,
-          // zodat nieuwe instellingen vanzelf meelopen.
-          auto in_scope = [](const std::string &oid) -> bool {
-            return oid.rfind("dhw_", 0) == 0 ||
-                   oid.rfind("pressure_", 0) == 0 ||
-                   oid.rfind("supply_temp_", 0) == 0 ||
-                   oid.rfind("discharge_", 0) == 0;
+          // beveiligingsmodules. Op naamprefix in plaats van een handmatige
+          // lijst, zodat nieuwe instellingen vanzelf meelopen.
+          //
+          // Op get_name() en niet op object_id: ESPHome 2026.7 heeft
+          // get_object_id() vervangen door buffer-varianten om heap te sparen.
+          // StringRef vergelijken kost geen enkele allocatie; we lezen nooit
+          // voorbij size(), dus de niet-null-getermineerde view is veilig.
+          auto in_scope = [](const esphome::StringRef &nm) -> bool {
+            auto pre = [&](const char *p) {
+              const size_t n = strlen(p);
+              return nm.size() >= n && strncmp(nm.c_str(), p, n) == 0;
+            };
+            return pre("DHW ") || pre("Pressure ") ||
+                   pre("Supply temp ") || pre("Discharge ");
           };
 
           const bool taking = id(oq_cfg_snap_request);
@@ -124,8 +131,8 @@ interval:
           // ----- Numbers -----
           for (auto *num : App.get_numbers()) {
             if (num->get_entity_category() != esphome::EntityCategory::ENTITY_CATEGORY_CONFIG) continue;
-            const std::string oid = num->get_object_id();
-            if (!in_scope(oid)) continue;
+            const esphome::StringRef nm = num->get_name();
+            if (!in_scope(nm)) continue;
             const uint32_t h = num->get_object_id_hash();
             const float v = num->state;
 
@@ -152,8 +159,8 @@ interval:
           // ----- Switches ----- (opgeslagen als 0.0 / 1.0 in dezelfde tabel)
           for (auto *sw : App.get_switches()) {
             if (sw->get_entity_category() != esphome::EntityCategory::ENTITY_CATEGORY_CONFIG) continue;
-            const std::string oid = sw->get_object_id();
-            if (!in_scope(oid)) continue;
+            const esphome::StringRef nm = sw->get_name();
+            if (!in_scope(nm)) continue;
             const uint32_t h = sw->get_object_id_hash();
             const float v = sw->state ? 1.0f : 0.0f;
 
@@ -247,11 +254,13 @@ text_sensor:
       if (id(oq_cfg_snap_count) <= 0) return std::string("Nog niets vastgelegd");
       if (id(oq_cfg_drift_count) <= 0) return std::string("Gelijk aan de vastlegging");
 
-      auto in_scope = [](const std::string &oid) -> bool {
-        return oid.rfind("dhw_", 0) == 0 ||
-               oid.rfind("pressure_", 0) == 0 ||
-               oid.rfind("supply_temp_", 0) == 0 ||
-               oid.rfind("discharge_", 0) == 0;
+      auto in_scope = [](const esphome::StringRef &nm) -> bool {
+        auto pre = [&](const char *p) {
+          const size_t n = strlen(p);
+          return nm.size() >= n && strncmp(nm.c_str(), p, n) == 0;
+        };
+        return pre("DHW ") || pre("Pressure ") ||
+               pre("Supply temp ") || pre("Discharge ");
       };
       auto find_slot = [](uint32_t h) -> int {
         for (int i = 0; i < id(oq_cfg_snap_count); i++) {
@@ -267,28 +276,29 @@ text_sensor:
       for (auto *num : App.get_numbers()) {
         if (shown >= 4) break;
         if (num->get_entity_category() != esphome::EntityCategory::ENTITY_CATEGORY_CONFIG) continue;
-        const std::string oid = num->get_object_id();
-        if (!in_scope(oid)) continue;
+        const esphome::StringRef nm = num->get_name();
+        if (!in_scope(nm)) continue;
         const int slot = find_slot(num->get_object_id_hash());
         if (slot < 0) continue;
         const float saved = id(oq_cfg_snap_value)[slot];
         if (isnan(saved) || isnan(num->state) || fabsf(saved - num->state) <= 0.0001f) continue;
-        snprintf(buf, sizeof(buf), "%s%s: %g -> %g", out.empty() ? "" : ", ",
-                 oid.c_str(), saved, num->state);
+        snprintf(buf, sizeof(buf), "%s%.*s: %g -> %g", out.empty() ? "" : ", ",
+                 (int) nm.size(), nm.c_str(), saved, num->state);
         out += buf;
         shown++;
       }
       for (auto *sw : App.get_switches()) {
         if (shown >= 4) break;
         if (sw->get_entity_category() != esphome::EntityCategory::ENTITY_CATEGORY_CONFIG) continue;
-        const std::string oid = sw->get_object_id();
-        if (!in_scope(oid)) continue;
+        const esphome::StringRef nm = sw->get_name();
+        if (!in_scope(nm)) continue;
         const int slot = find_slot(sw->get_object_id_hash());
         if (slot < 0) continue;
         const bool saved = id(oq_cfg_snap_value)[slot] >= 0.5f;
         if (saved == sw->state) continue;
-        snprintf(buf, sizeof(buf), "%s%s: %s -> %s", out.empty() ? "" : ", ",
-                 oid.c_str(), saved ? "aan" : "uit", sw->state ? "aan" : "uit");
+        snprintf(buf, sizeof(buf), "%s%.*s: %s -> %s", out.empty() ? "" : ", ",
+                 (int) nm.size(), nm.c_str(), saved ? "aan" : "uit",
+                 sw->state ? "aan" : "uit");
         out += buf;
         shown++;
       }
