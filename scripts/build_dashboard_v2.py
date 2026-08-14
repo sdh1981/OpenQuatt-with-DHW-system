@@ -124,30 +124,94 @@ def when_not(card, eid, state):
     return card
 
 
+def graph(hours, *pairs, title=None):
+    """Verloop over tijd. Zonder grafieken is een warmtepompdashboard kaal:
+    de getallen zeggen wat het NU is, de lijn zegt waar het heen gaat."""
+    card = {'type': 'history-graph', 'hours_to_show': hours,
+            'entities': [ent(e, n) for e, n in pairs]}
+    if title:
+        card['title'] = title
+    return card
+
+
+def gauge(eid, name, vmin, vmax, severity=None):
+    card = {'type': 'gauge', 'entity': eid, 'name': name,
+            'min': vmin, 'max': vmax, 'needle': True}
+    if severity:
+        card['segments'] = severity
+    return card
+
+
+def note(text, *conditions):
+    """Markdown-kaart, eventueel met voorwaarden."""
+    card = {'type': 'markdown', 'content': text}
+    if conditions:
+        card['visibility'] = list(conditions)
+    return card
+
+
+def is_on(eid):
+    return {'condition': 'state', 'entity': eid, 'state': 'on'}
+
+
+def is_off(eid):
+    return {'condition': 'state', 'entity': eid, 'state': 'off'}
+
+
+def is_state(eid, state):
+    return {'condition': 'state', 'entity': eid, 'state': state}
+
+
+def badge(eid, name=None):
+    d = {'type': 'entity', 'entity': eid}
+    if name:
+        d['name'] = name
+    return d
+
+
 def grid(*cards):
     return {'type': 'grid', 'cards': [c for c in cards if c is not None]}
 
 
-def view(title, path, icon, *sections):
-    return {'title': title, 'path': path, 'icon': icon, 'type': 'sections',
-            'max_columns': 3, 'sections': list(sections)}
+def view(title, path, icon, *sections, badges=None):
+    v = {'title': title, 'path': path, 'icon': icon, 'type': 'sections',
+         'max_columns': 3}
+    if badges:
+        v['badges'] = badges
+    v['sections'] = list(sections)
+    return v
 
 
 # --------------------------------------------------------------------------
 # VIEW 1 — NU
 # --------------------------------------------------------------------------
+ALLES_RUSTIG = [
+    is_state('sensor.openquatt_dhw_fault', 'NONE'),
+    is_off('binary_sensor.openquatt_cycling_waarschuwing'),
+    is_off('binary_sensor.openquatt_instellingen_gewijzigd'),
+    is_off('binary_sensor.openquatt_pressure_soft_warning_active'),
+    is_off('binary_sensor.openquatt_supply_temp_soft_cap_active'),
+    is_off('binary_sensor.openquatt_discharge_soft_cap_active'),
+    is_off('binary_sensor.openquatt_lowflow_fault_active'),
+]
+
 V_NU = view(
     'Nu', 'nu', 'mdi:gauge',
     grid(
         head('mdi:alert-decagram', 'Aandacht'),
-        # Deze kaarten verschijnen alleen als er iets aan de hand is. Staat er
-        # niets, dan blijft de sectie leeg -- dat is het signaal "alles goed".
-        when(rows(('sensor.openquatt_dhw_fault', 'DHW-storing'),
-                  ('sensor.openquatt_dhw_state', 'DHW-toestand')),
-             'binary_sensor.openquatt_dhw_hp_request_active', 'on'),
+        # Alleen kaarten waarvan de conditie geldt. Is er niets, dan neemt de
+        # rustmelding hieronder de plek in -- een lege kolom leest namelijk als
+        # kapot, niet als "alles goed".
+        note('### Geen bijzonderheden\n\n'
+             'Geen storing, geen actieve begrenzing, geen cycling-incident, '
+             'instellingen ongewijzigd.', *ALLES_RUSTIG),
+        when_not(rows(('sensor.openquatt_dhw_fault', 'DHW-storing'),
+                      ('button.openquatt_dhw_clear_fault', 'Fout wissen')),
+                 'sensor.openquatt_dhw_fault', 'NONE'),
         when(rows(('sensor.openquatt_cycling_status', 'Cycling'),
                   ('sensor.openquatt_hp1_starts_2u', 'HP1 starts 2u'),
-                  ('sensor.openquatt_hp2_starts_2u', 'HP2 starts 2u')),
+                  ('sensor.openquatt_hp2_starts_2u', 'HP2 starts 2u'),
+                  ('button.openquatt_cycling_waarschuwing_bevestigen', 'Bevestigen')),
              'binary_sensor.openquatt_cycling_waarschuwing'),
         when(rows(('sensor.openquatt_instellingen_afwijking', 'Afgeweken'),
                   ('button.openquatt_instellingen_herstellen', 'Herstellen')),
@@ -172,28 +236,54 @@ V_NU = view(
              ('sensor.openquatt_room_setpoint_selected', 'Gewenst'),
              ('sensor.openquatt_water_supply_temp_selected', 'Aanvoer'),
              ('sensor.openquatt_outside_temperature_selected', 'Buiten')),
+        graph(24,
+              ('sensor.openquatt_room_temperature_selected', 'Kamer'),
+              ('sensor.openquatt_room_setpoint_selected', 'Gewenst'),
+              ('sensor.openquatt_water_supply_temp_selected', 'Aanvoer'),
+              ('sensor.openquatt_outside_temperature_selected', 'Buiten'),
+              title='Etmaal'),
     ),
     grid(
         head('mdi:heat-pump', 'Warmtepompen'),
+        # working_mode_label in plaats van het ruwe registergetal; "0" zegt niets.
         rows('HP1',
-             ('sensor.openquatt_hp1_working_mode', 'Modus'),
+             ('sensor.openquatt_hp1_working_mode_label', 'Modus'),
              ('sensor.openquatt_hp1_compressor_frequency', 'Frequentie'),
              ('sensor.openquatt_hp1_water_out_temperature', 'Water uit'),
              ('sensor.openquatt_hp1_power_input', 'Opgenomen'),
              ('sensor.openquatt_hp1_cop', 'COP'),
              'HP2',
-             ('sensor.openquatt_hp2_working_mode', 'Modus'),
+             ('sensor.openquatt_hp2_working_mode_label', 'Modus'),
              ('sensor.openquatt_hp2_compressor_frequency', 'Frequentie'),
              ('sensor.openquatt_hp2_water_out_temperature', 'Water uit'),
              ('sensor.openquatt_hp2_power_input', 'Opgenomen'),
              ('sensor.openquatt_hp2_cop', 'COP')),
+        graph(12,
+              ('sensor.openquatt_hp1_compressor_frequency', 'HP1'),
+              ('sensor.openquatt_hp2_compressor_frequency', 'HP2'),
+              title='Compressorfrequentie'),
     ),
     grid(
         head('mdi:flash', 'Vermogen nu'),
-        rows(('sensor.openquatt_total_power_input', 'Elektrisch'),
-             ('sensor.openquatt_total_heat_power', 'Warmte'),
+        gauge('sensor.openquatt_total_power_input', 'Elektrisch', 0, 4000,
+              severity=[{'from': 0, 'color': 'green'},
+                        {'from': 2500, 'color': 'yellow'},
+                        {'from': 3400, 'color': 'red'}]),
+        rows(('sensor.openquatt_total_heat_power', 'Warmte'),
              ('sensor.openquatt_flow_average_selected', 'Flow')),
+        graph(12,
+              ('sensor.openquatt_total_power_input', 'Elektrisch'),
+              ('sensor.openquatt_total_heat_power', 'Warmte'),
+              title='Vermogen'),
     ),
+    badges=[
+        badge('sensor.openquatt_control_mode_label', 'Modus'),
+        badge('sensor.openquatt_room_temperature_selected', 'Kamer'),
+        badge('sensor.openquatt_water_supply_temp_selected', 'Aanvoer'),
+        badge('sensor.openquatt_outside_temperature_selected', 'Buiten'),
+        badge('sensor.openquatt_total_power_input', 'Vermogen'),
+        badge('sensor.openquatt_dhw_tank_top', 'Tank'),
+    ],
 )
 
 # --------------------------------------------------------------------------
@@ -209,6 +299,14 @@ V_DHW = view(
              ('sensor.openquatt_dhw_estimated_time_to_ready', 'Klaar over'),
              ('binary_sensor.openquatt_dhw_hp_request_active', 'HP levert'),
              ('binary_sensor.openquatt_dhw_element_active', 'Element aan')),
+        gauge('sensor.openquatt_dhw_tank_top', 'Tank boven', 10, 70,
+              severity=[{'from': 10, 'color': 'red'},
+                        {'from': 42, 'color': 'yellow'},
+                        {'from': 48, 'color': 'green'}]),
+        graph(24,
+              ('sensor.openquatt_dhw_tank_top', 'Boven'),
+              ('sensor.openquatt_dhw_tank_bottom', 'Onder'),
+              title='Tankverloop'),
     ),
     grid(
         head('mdi:rocket-launch', 'Snelboost'),
@@ -236,6 +334,9 @@ V_DHW = view(
              ('sensor.openquatt_dhw_cop_lifetime', 'COP totaal'),
              ('sensor.openquatt_dhw_cycles_24h', 'Cycli 24 uur'),
              ('sensor.openquatt_dhw_gemiddelde_kwh_per_cyclus', 'Gemiddeld per cyclus')),
+        graph(168,
+              ('sensor.openquatt_dhw_cyclus_cop', 'Cyclus-COP'),
+              title='Rendement per cyclus, week'),
     ),
     grid(
         head('mdi:shower-head', 'Tappingen'),
@@ -252,6 +353,13 @@ V_DHW = view(
              ('sensor.openquatt_dhw_legionella_eta', 'ETA'),
              ('sensor.openquatt_dhw_legionella_elapsed', 'Verstreken')),
     ),
+    badges=[
+        badge('sensor.openquatt_dhw_state', 'Toestand'),
+        badge('sensor.openquatt_dhw_tank_top', 'Boven'),
+        badge('sensor.openquatt_dhw_tank_bottom', 'Onder'),
+        badge('sensor.openquatt_dhw_cyclus_cop', 'Cyclus-COP'),
+        badge('sensor.openquatt_dhw_tappingen_vandaag', 'Tappingen'),
+    ],
 )
 
 # --------------------------------------------------------------------------
@@ -266,12 +374,19 @@ V_HEAT = view(
              ('sensor.openquatt_water_supply_temp_selected', 'Aanvoer nu'),
              ('sensor.openquatt_room_temperature_selected', 'Kamer'),
              ('sensor.openquatt_room_setpoint_selected', 'Gewenst')),
+        graph(48,
+              ('sensor.openquatt_water_supply_temp_selected', 'Aanvoer'),
+              ('sensor.openquatt_outside_temperature_selected', 'Buiten'),
+              title='Aanvoer tegen buitentemperatuur'),
     ),
     grid(
         head('mdi:chart-bell-curve', 'Adaptive Heating'),
         rows(('sensor.openquatt_adaptive_supply_offset', 'Geleerde offset'),
              ('sensor.openquatt_adaptive_heating_status', 'Status'),
              ('button.openquatt_adaptive_reset_learned_offset', 'Offset wissen')),
+        graph(168,
+              ('sensor.openquatt_adaptive_supply_offset', 'Geleerde offset'),
+              title='Wat het model heeft geleerd'),
     ),
     grid(
         head('mdi:heat-pump-outline', 'Aanvraag per HP'),
@@ -293,6 +408,12 @@ V_HEAT = view(
              ('sensor.openquatt_hp2_flow', 'HP2'),
              ('select.openquatt_flow_control_mode', 'Flowregeling')),
     ),
+    badges=[
+        badge('select.openquatt_heating_control_mode', 'Strategie'),
+        badge('sensor.openquatt_water_supply_temp_selected', 'Aanvoer'),
+        badge('sensor.openquatt_adaptive_supply_offset', 'Offset'),
+        badge('sensor.openquatt_flow_average_selected', 'Flow'),
+    ],
 )
 
 # --------------------------------------------------------------------------
@@ -319,6 +440,11 @@ V_COOL = view(
              ('sensor.openquatt_cooling_dynamic_safety_margin', 'Dynamische marge'),
              ('sensor.openquatt_cooling_valid_room_count', 'Geldige ruimtes'),
              ('sensor.openquatt_cooling_room_count_selected', 'Ruimtes in gebruik')),
+        graph(24,
+              ('sensor.openquatt_cooling_dew_point_selected', 'Dauwpunt'),
+              ('sensor.openquatt_cooling_minimum_safe_supply_temp', 'Ondergrens aanvoer'),
+              ('sensor.openquatt_water_supply_temp_selected', 'Aanvoer'),
+              title='Hoe dicht zit de aanvoer op het dauwpunt'),
     ),
     grid(
         head('mdi:heat-pump-outline', 'Per HP'),
@@ -358,7 +484,15 @@ V_ENERGY = view(
              ('sensor.openquatt_scop_7d', 'SCOP 7 dagen'),
              ('sensor.openquatt_scop_30d', 'SCOP 30 dagen'),
              ('sensor.openquatt_scop_lifetime', 'SCOP totaal')),
+        graph(168,
+              ('sensor.openquatt_scop_24h', 'SCOP 24 uur'),
+              title='Rendement, week'),
     ),
+    badges=[
+        badge('sensor.openquatt_electrical_energy_daily', 'Vandaag'),
+        badge('sensor.openquatt_heatpump_cop_daily', 'COP'),
+        badge('sensor.openquatt_scop_24h', 'SCOP 24u'),
+    ],
 )
 
 # --------------------------------------------------------------------------
@@ -484,6 +618,10 @@ V_DIAG = view(
              ('sensor.openquatt_intern_geheugen_laagste_stand', 'Laagste stand'),
              ('sensor.openquatt_psram_vrij', 'PSRAM vrij'),
              ('sensor.openquatt_psram_totaal', 'PSRAM totaal')),
+        graph(168,
+              ('sensor.openquatt_intern_geheugen_vrij', 'Vrij'),
+              ('sensor.openquatt_intern_geheugen_laagste_stand', 'Laagste stand'),
+              title='Intern geheugen, week'),
     ),
     grid(
         head('mdi:tag-text', 'Systeem'),

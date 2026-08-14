@@ -27,6 +27,25 @@ views:
   icon: mdi:gauge
   type: sections
   max_columns: 3
+  badges:
+  - type: entity
+    entity: sensor.openquatt_control_mode_label
+    name: Modus
+  - type: entity
+    entity: sensor.openquatt_room_temperature_selected
+    name: Kamer
+  - type: entity
+    entity: sensor.openquatt_water_supply_temp_selected
+    name: Aanvoer
+  - type: entity
+    entity: sensor.openquatt_outside_temperature_selected
+    name: Buiten
+  - type: entity
+    entity: sensor.openquatt_total_power_input
+    name: Vermogen
+  - type: entity
+    entity: sensor.openquatt_dhw_tank_top
+    name: Tank
   sections:
   - type: grid
     cards:
@@ -34,17 +53,44 @@ views:
       icon: mdi:alert-decagram
       heading: Aandacht
       heading_style: title
+    - type: markdown
+      content: '### Geen bijzonderheden
+
+
+        Geen storing, geen actieve begrenzing, geen cycling-incident, instellingen ongewijzigd.'
+      visibility:
+      - condition: state
+        entity: sensor.openquatt_dhw_fault
+        state: NONE
+      - condition: state
+        entity: binary_sensor.openquatt_cycling_waarschuwing
+        state: 'off'
+      - condition: state
+        entity: binary_sensor.openquatt_instellingen_gewijzigd
+        state: 'off'
+      - condition: state
+        entity: binary_sensor.openquatt_pressure_soft_warning_active
+        state: 'off'
+      - condition: state
+        entity: binary_sensor.openquatt_supply_temp_soft_cap_active
+        state: 'off'
+      - condition: state
+        entity: binary_sensor.openquatt_discharge_soft_cap_active
+        state: 'off'
+      - condition: state
+        entity: binary_sensor.openquatt_lowflow_fault_active
+        state: 'off'
     - type: entities
       show_header_toggle: false
       entities:
       - entity: sensor.openquatt_dhw_fault
         name: DHW-storing
-      - entity: sensor.openquatt_dhw_state
-        name: DHW-toestand
+      - entity: button.openquatt_dhw_clear_fault
+        name: Fout wissen
       visibility:
       - condition: state
-        entity: binary_sensor.openquatt_dhw_hp_request_active
-        state: 'on'
+        entity: sensor.openquatt_dhw_fault
+        state_not: NONE
     - type: entities
       show_header_toggle: false
       entities:
@@ -54,6 +100,8 @@ views:
         name: HP1 starts 2u
       - entity: sensor.openquatt_hp2_starts_2u
         name: HP2 starts 2u
+      - entity: button.openquatt_cycling_waarschuwing_bevestigen
+        name: Bevestigen
       visibility:
       - condition: state
         entity: binary_sensor.openquatt_cycling_waarschuwing
@@ -136,6 +184,18 @@ views:
         name: Aanvoer
       - entity: sensor.openquatt_outside_temperature_selected
         name: Buiten
+    - type: history-graph
+      hours_to_show: 24
+      entities:
+      - entity: sensor.openquatt_room_temperature_selected
+        name: Kamer
+      - entity: sensor.openquatt_room_setpoint_selected
+        name: Gewenst
+      - entity: sensor.openquatt_water_supply_temp_selected
+        name: Aanvoer
+      - entity: sensor.openquatt_outside_temperature_selected
+        name: Buiten
+      title: Etmaal
   - type: grid
     cards:
     - type: heading
@@ -147,7 +207,7 @@ views:
       entities:
       - type: section
         label: HP1
-      - entity: sensor.openquatt_hp1_working_mode
+      - entity: sensor.openquatt_hp1_working_mode_label
         name: Modus
       - entity: sensor.openquatt_hp1_compressor_frequency
         name: Frequentie
@@ -159,7 +219,7 @@ views:
         name: COP
       - type: section
         label: HP2
-      - entity: sensor.openquatt_hp2_working_mode
+      - entity: sensor.openquatt_hp2_working_mode_label
         name: Modus
       - entity: sensor.openquatt_hp2_compressor_frequency
         name: Frequentie
@@ -169,26 +229,69 @@ views:
         name: Opgenomen
       - entity: sensor.openquatt_hp2_cop
         name: COP
+    - type: history-graph
+      hours_to_show: 12
+      entities:
+      - entity: sensor.openquatt_hp1_compressor_frequency
+        name: HP1
+      - entity: sensor.openquatt_hp2_compressor_frequency
+        name: HP2
+      title: Compressorfrequentie
   - type: grid
     cards:
     - type: heading
       icon: mdi:flash
       heading: Vermogen nu
       heading_style: title
+    - type: gauge
+      entity: sensor.openquatt_total_power_input
+      name: Elektrisch
+      min: 0
+      max: 4000
+      needle: true
+      segments:
+      - from: 0
+        color: green
+      - from: 2500
+        color: yellow
+      - from: 3400
+        color: red
     - type: entities
       show_header_toggle: false
+      entities:
+      - entity: sensor.openquatt_total_heat_power
+        name: Warmte
+      - entity: sensor.openquatt_flow_average_selected
+        name: Flow
+    - type: history-graph
+      hours_to_show: 12
       entities:
       - entity: sensor.openquatt_total_power_input
         name: Elektrisch
       - entity: sensor.openquatt_total_heat_power
         name: Warmte
-      - entity: sensor.openquatt_flow_average_selected
-        name: Flow
+      title: Vermogen
 - title: Warm water
   path: warm-water
   icon: mdi:water-boiler
   type: sections
   max_columns: 3
+  badges:
+  - type: entity
+    entity: sensor.openquatt_dhw_state
+    name: Toestand
+  - type: entity
+    entity: sensor.openquatt_dhw_tank_top
+    name: Boven
+  - type: entity
+    entity: sensor.openquatt_dhw_tank_bottom
+    name: Onder
+  - type: entity
+    entity: sensor.openquatt_dhw_cyclus_cop
+    name: Cyclus-COP
+  - type: entity
+    entity: sensor.openquatt_dhw_tappingen_vandaag
+    name: Tappingen
   sections:
   - type: grid
     cards:
@@ -213,6 +316,27 @@ views:
         name: HP levert
       - entity: binary_sensor.openquatt_dhw_element_active
         name: Element aan
+    - type: gauge
+      entity: sensor.openquatt_dhw_tank_top
+      name: Tank boven
+      min: 10
+      max: 70
+      needle: true
+      segments:
+      - from: 10
+        color: red
+      - from: 42
+        color: yellow
+      - from: 48
+        color: green
+    - type: history-graph
+      hours_to_show: 24
+      entities:
+      - entity: sensor.openquatt_dhw_tank_top
+        name: Boven
+      - entity: sensor.openquatt_dhw_tank_bottom
+        name: Onder
+      title: Tankverloop
   - type: grid
     cards:
     - type: heading
@@ -280,6 +404,12 @@ views:
         name: Cycli 24 uur
       - entity: sensor.openquatt_dhw_gemiddelde_kwh_per_cyclus
         name: Gemiddeld per cyclus
+    - type: history-graph
+      hours_to_show: 168
+      entities:
+      - entity: sensor.openquatt_dhw_cyclus_cop
+        name: Cyclus-COP
+      title: Rendement per cyclus, week
   - type: grid
     cards:
     - type: heading
@@ -321,6 +451,19 @@ views:
   icon: mdi:radiator
   type: sections
   max_columns: 3
+  badges:
+  - type: entity
+    entity: select.openquatt_heating_control_mode
+    name: Strategie
+  - type: entity
+    entity: sensor.openquatt_water_supply_temp_selected
+    name: Aanvoer
+  - type: entity
+    entity: sensor.openquatt_adaptive_supply_offset
+    name: Offset
+  - type: entity
+    entity: sensor.openquatt_flow_average_selected
+    name: Flow
   sections:
   - type: grid
     cards:
@@ -343,6 +486,14 @@ views:
         name: Kamer
       - entity: sensor.openquatt_room_setpoint_selected
         name: Gewenst
+    - type: history-graph
+      hours_to_show: 48
+      entities:
+      - entity: sensor.openquatt_water_supply_temp_selected
+        name: Aanvoer
+      - entity: sensor.openquatt_outside_temperature_selected
+        name: Buiten
+      title: Aanvoer tegen buitentemperatuur
   - type: grid
     cards:
     - type: heading
@@ -358,6 +509,12 @@ views:
         name: Status
       - entity: button.openquatt_adaptive_reset_learned_offset
         name: Offset wissen
+    - type: history-graph
+      hours_to_show: 168
+      entities:
+      - entity: sensor.openquatt_adaptive_supply_offset
+        name: Geleerde offset
+      title: Wat het model heeft geleerd
   - type: grid
     cards:
     - type: heading
@@ -458,6 +615,16 @@ views:
         name: Geldige ruimtes
       - entity: sensor.openquatt_cooling_room_count_selected
         name: Ruimtes in gebruik
+    - type: history-graph
+      hours_to_show: 24
+      entities:
+      - entity: sensor.openquatt_cooling_dew_point_selected
+        name: Dauwpunt
+      - entity: sensor.openquatt_cooling_minimum_safe_supply_temp
+        name: Ondergrens aanvoer
+      - entity: sensor.openquatt_water_supply_temp_selected
+        name: Aanvoer
+      title: Hoe dicht zit de aanvoer op het dauwpunt
   - type: grid
     cards:
     - type: heading
@@ -478,6 +645,16 @@ views:
   icon: mdi:lightning-bolt
   type: sections
   max_columns: 3
+  badges:
+  - type: entity
+    entity: sensor.openquatt_electrical_energy_daily
+    name: Vandaag
+  - type: entity
+    entity: sensor.openquatt_heatpump_cop_daily
+    name: COP
+  - type: entity
+    entity: sensor.openquatt_scop_24h
+    name: SCOP 24u
   sections:
   - type: grid
     cards:
@@ -540,6 +717,12 @@ views:
         name: SCOP 30 dagen
       - entity: sensor.openquatt_scop_lifetime
         name: SCOP totaal
+    - type: history-graph
+      hours_to_show: 168
+      entities:
+      - entity: sensor.openquatt_scop_24h
+        name: SCOP 24 uur
+      title: Rendement, week
 - title: Afstellen
   path: afstellen
   icon: mdi:tune
@@ -802,6 +985,14 @@ views:
         name: PSRAM vrij
       - entity: sensor.openquatt_psram_totaal
         name: PSRAM totaal
+    - type: history-graph
+      hours_to_show: 168
+      entities:
+      - entity: sensor.openquatt_intern_geheugen_vrij
+        name: Vrij
+      - entity: sensor.openquatt_intern_geheugen_laagste_stand
+        name: Laagste stand
+      title: Intern geheugen, week
   - type: grid
     cards:
     - type: heading
