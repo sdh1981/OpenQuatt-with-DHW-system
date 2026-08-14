@@ -1,0 +1,387 @@
+# ==============================================================================
+# OpenQuatt - Compressor cycling monitor (v0.58)
+# ==============================================================================
+#
+# Telt compressorstarts per HP uit de GEMETEN frequentie en waarschuwt bij te
+# veel starts of bij afwisselend pendelen tussen de units.
+#
+# De logica zit in openquatt/includes/oq_installation_monitoring.h en is
+# overgenomen van upstream. Dit bestand is de ESPHome-laag eromheen; de
+# alerteringslaag van upstream zat vol verwijzingen naar hun eigen entiteiten
+# en is hier opnieuw geschreven.
+#
+# Waarom starts uit de frequentie en niet uit het gecommandeerde niveau:
+# een unit kan zichzelf afschakelen op een interne beveiliging zonder dat
+# OpenQuatt daar iets van weet. De frequentie laat dat wel zien.
+#
+# De alternerende detectie is hier het interessantst. Die vuurt bij vier of
+# meer opeenvolgende starts binnen twee uur die steeds van unit wisselen --
+# HP1, HP2, HP1, HP2. Precies het geflipper waar de lead-lock in single-HP
+# DHW-mode en de minimale draaitijd van de assist voor gebouwd zijn. Zonder
+# deze meter is er geen manier om te zien of die maatregelen werken.
+# ==============================================================================
+
+globals:
+  # Gelatchte waarschuwing: blijft staan tot je hem bevestigt, zodat een
+  # incident 's nachts niet ongezien voorbijgaat.
+  - id: oq_cycling_alert_latched
+    type: bool
+    restore_value: true
+    initial_value: 'false'
+  - id: oq_cycling_alert_alternating
+    type: bool
+    restore_value: true
+    initial_value: 'false'
+  # Wandkloktijd van het eerste en laatste optreden binnen dit incident.
+  - id: oq_cycling_alert_first_epoch
+    type: uint32_t
+    restore_value: true
+    initial_value: '0'
+  - id: oq_cycling_alert_last_epoch
+    type: uint32_t
+    restore_value: true
+    initial_value: '0'
+  # Hoogste standen die tijdens het incident zijn gezien; die wil je kunnen
+  # aflezen nadat de tellers alweer gezakt zijn.
+  - id: oq_cycling_peak_hp1_2h
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: oq_cycling_peak_hp2_2h
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: oq_cycling_peak_hp1_72h
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: oq_cycling_peak_hp2_72h
+    type: int
+    restore_value: true
+    initial_value: '0'
+
+number:
+  # Startpunt 8, hoger dan upstream's 6. Daar telt alleen verwarmen mee; hier
+  # komt een DHW-cyclus bovenop die de compressor apart start, plus de assist
+  # die de tweede unit in- en uitschakelt. Zes per twee uur haal je op een
+  # tapdag zonder dat er iets mis is.
+  - platform: template
+    id: oq_cycling_limit_2h
+    name: "Cycling waarschuwing 2u"
+    icon: mdi:alert-decagram-outline
+    unit_of_measurement: "starts"
+    min_value: 1
+    max_value: 20
+    step: 1
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 8
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_hp_diagnostics
+
+  # 50 in plaats van upstream's 40, om dezelfde reden.
+  - platform: template
+    id: oq_cycling_limit_72h
+    name: "Cycling waarschuwing 72u"
+    icon: mdi:calendar-clock-outline
+    unit_of_measurement: "starts"
+    min_value: 1
+    max_value: 150
+    step: 1
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 50
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_hp_diagnostics
+
+button:
+  - platform: template
+    id: oq_cycling_ack
+    name: "Cycling waarschuwing bevestigen"
+    icon: mdi:check-decagram
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_hp_diagnostics
+    on_press:
+      - lambda: |-
+          id(oq_cycling_alert_latched) = false;
+          id(oq_cycling_alert_alternating) = false;
+          id(oq_cycling_alert_first_epoch) = 0;
+          id(oq_cycling_alert_last_epoch) = 0;
+          id(oq_cycling_peak_hp1_2h) = 0;
+          id(oq_cycling_peak_hp2_2h) = 0;
+          id(oq_cycling_peak_hp1_72h) = 0;
+          id(oq_cycling_peak_hp2_72h) = 0;
+          ESP_LOGI("oq_cycling", "Cycling-waarschuwing bevestigd en gewist.");
+
+interval:
+  # 5 s is ruim genoeg: de stopbevestiging in de header staat op 20 s, dus een
+  # start kan niet tussen twee metingen door wegvallen.
+  - interval: 5s
+    startup_delay: 20000ms
+    then:
+      - lambda: |-
+          const uint32_t now_ms = (uint32_t) millis();
+          auto &mon = oq_diagnostics::installation_monitor();
+
+          const float f1 = id(hp1_compressor_freq).has_state()
+              ? id(hp1_compressor_freq).state : NAN;
+          mon.observe_compressor_frequency(1, f1, now_ms);
+          #if OQ_TOPOLOGY_DUO
+          const float f2 = id(hp2_compressor_freq).has_state()
+              ? id(hp2_compressor_freq).state : NAN;
+          mon.observe_compressor_frequency(2, f2, now_ms);
+          #endif
+
+          const size_t lim_2h = (size_t) lroundf(id(oq_cycling_limit_2h).state);
+          const size_t lim_72h = (size_t) lroundf(id(oq_cycling_limit_72h).state);
+
+          const int s1_2h = (int) mon.start_count(1, now_ms,
+              oq_diagnostics::InstallationMonitor::kTwoHoursMs);
+          const int s1_72h = (int) mon.start_count(1, now_ms,
+              oq_diagnostics::InstallationMonitor::kSeventyTwoHoursMs);
+          int s2_2h = 0, s2_72h = 0;
+          #if OQ_TOPOLOGY_DUO
+          s2_2h = (int) mon.start_count(2, now_ms,
+              oq_diagnostics::InstallationMonitor::kTwoHoursMs);
+          s2_72h = (int) mon.start_count(2, now_ms,
+              oq_diagnostics::InstallationMonitor::kSeventyTwoHoursMs);
+          #endif
+
+          const bool over_2h = (s1_2h > (int) lim_2h) || (s2_2h > (int) lim_2h);
+          const bool over_72h = (s1_72h > (int) lim_72h) || (s2_72h > (int) lim_72h);
+          const bool alternating = mon.alternating_cycling_warning(now_ms, lim_2h);
+
+          if (!over_2h && !over_72h && !alternating) return;
+
+          // Vanaf hier staat er een incident open. Latchen, en de pieken
+          // bijhouden zodat je ze later nog kunt aflezen.
+          auto clk = id(oq_time).now();
+          const uint32_t epoch = clk.is_valid() ? (uint32_t) clk.timestamp : 0U;
+
+          if (!id(oq_cycling_alert_latched)) {
+            id(oq_cycling_alert_latched) = true;
+            id(oq_cycling_alert_first_epoch) = epoch;
+            ESP_LOGW("oq_cycling",
+                     "Cycling-waarschuwing: HP1 %d/2u %d/72u, HP2 %d/2u %d/72u%s",
+                     s1_2h, s1_72h, s2_2h, s2_72h,
+                     alternating ? " (afwisselend pendelen)" : "");
+          }
+          if (epoch > 0U) id(oq_cycling_alert_last_epoch) = epoch;
+          if (alternating) id(oq_cycling_alert_alternating) = true;
+
+          if (s1_2h > id(oq_cycling_peak_hp1_2h)) id(oq_cycling_peak_hp1_2h) = s1_2h;
+          if (s2_2h > id(oq_cycling_peak_hp2_2h)) id(oq_cycling_peak_hp2_2h) = s2_2h;
+          if (s1_72h > id(oq_cycling_peak_hp1_72h)) id(oq_cycling_peak_hp1_72h) = s1_72h;
+          if (s2_72h > id(oq_cycling_peak_hp2_72h)) id(oq_cycling_peak_hp2_72h) = s2_72h;
+
+sensor:
+  - platform: template
+    id: oq_cycling_hp1_2h
+    name: "HP1 starts 2u"
+    icon: mdi:restart
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_hp_diagnostics
+    lambda: |-
+      return (float) oq_diagnostics::installation_monitor().start_count(
+          1, (uint32_t) millis(), oq_diagnostics::InstallationMonitor::kTwoHoursMs);
+
+  - platform: template
+    id: oq_cycling_hp1_24h
+    name: "HP1 starts 24u"
+    icon: mdi:restart
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_hp_diagnostics
+    lambda: |-
+      return (float) oq_diagnostics::installation_monitor().start_count(
+          1, (uint32_t) millis(), oq_diagnostics::InstallationMonitor::kDayMs);
+
+  - platform: template
+    id: oq_cycling_hp1_72h
+    name: "HP1 starts 72u"
+    icon: mdi:restart
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_hp_diagnostics
+    lambda: |-
+      return (float) oq_diagnostics::installation_monitor().start_count(
+          1, (uint32_t) millis(), oq_diagnostics::InstallationMonitor::kSeventyTwoHoursMs);
+
+  # Minuten sinds de laatste start. Kort na een lange stilstand is dit het
+  # snelste teken dat er iets aan het pendelen is.
+  - platform: template
+    id: oq_cycling_hp1_last_start
+    name: "HP1 laatste start"
+    icon: mdi:timer-outline
+    unit_of_measurement: "min"
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_hp_diagnostics
+    lambda: |-
+      return oq_diagnostics::installation_monitor().last_start_age_minutes(
+          1, (uint32_t) millis());
+
+  - platform: template
+    id: oq_cycling_hp2_2h
+    name: "HP2 starts 2u"
+    icon: mdi:restart
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_hp_diagnostics
+    lambda: |-
+      #if OQ_TOPOLOGY_DUO
+      return (float) oq_diagnostics::installation_monitor().start_count(
+          2, (uint32_t) millis(), oq_diagnostics::InstallationMonitor::kTwoHoursMs);
+      #else
+      return NAN;
+      #endif
+
+  - platform: template
+    id: oq_cycling_hp2_24h
+    name: "HP2 starts 24u"
+    icon: mdi:restart
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_hp_diagnostics
+    lambda: |-
+      #if OQ_TOPOLOGY_DUO
+      return (float) oq_diagnostics::installation_monitor().start_count(
+          2, (uint32_t) millis(), oq_diagnostics::InstallationMonitor::kDayMs);
+      #else
+      return NAN;
+      #endif
+
+  - platform: template
+    id: oq_cycling_hp2_72h
+    name: "HP2 starts 72u"
+    icon: mdi:restart
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_hp_diagnostics
+    lambda: |-
+      #if OQ_TOPOLOGY_DUO
+      return (float) oq_diagnostics::installation_monitor().start_count(
+          2, (uint32_t) millis(), oq_diagnostics::InstallationMonitor::kSeventyTwoHoursMs);
+      #else
+      return NAN;
+      #endif
+
+  - platform: template
+    id: oq_cycling_hp2_last_start
+    name: "HP2 laatste start"
+    icon: mdi:timer-outline
+    unit_of_measurement: "min"
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_hp_diagnostics
+    lambda: |-
+      #if OQ_TOPOLOGY_DUO
+      return oq_diagnostics::installation_monitor().last_start_age_minutes(
+          2, (uint32_t) millis());
+      #else
+      return NAN;
+      #endif
+
+  # Pieken tijdens het openstaande incident. Blijven staan tot je bevestigt.
+  - platform: template
+    id: oq_cycling_peak_2h_sensor
+    name: "Cycling piek 2u"
+    icon: mdi:chart-line
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_hp_diagnostics
+    lambda: |-
+      const int p = std::max(id(oq_cycling_peak_hp1_2h), id(oq_cycling_peak_hp2_2h));
+      return (p > 0) ? (float) p : NAN;
+
+  - platform: template
+    id: oq_cycling_peak_72h_sensor
+    name: "Cycling piek 72u"
+    icon: mdi:chart-line
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_hp_diagnostics
+    lambda: |-
+      const int p = std::max(id(oq_cycling_peak_hp1_72h), id(oq_cycling_peak_hp2_72h));
+      return (p > 0) ? (float) p : NAN;
+
+binary_sensor:
+  - platform: template
+    id: oq_cycling_alert_sensor
+    name: "Cycling waarschuwing"
+    icon: mdi:alert-decagram
+    device_class: problem
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_hp_diagnostics
+    lambda: |-
+      return id(oq_cycling_alert_latched);
+
+  # Los van de gewone waarschuwing, want dit wijst naar iets anders: niet te
+  # vaak starten, maar de units die elkaar afwisselen. Dat is het gedrag dat
+  # de lead-lock in single-HP DHW-mode moet voorkomen.
+  - platform: template
+    id: oq_cycling_alternating_sensor
+    name: "Cycling afwisselend pendelen"
+    icon: mdi:swap-horizontal
+    device_class: problem
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_hp_diagnostics
+    lambda: |-
+      return id(oq_cycling_alert_alternating);
+
+text_sensor:
+  - platform: template
+    id: oq_cycling_status_text
+    name: "Cycling status"
+    icon: mdi:information-outline
+    update_interval: 60s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_hp_diagnostics
+    lambda: |-
+      if (!id(oq_cycling_alert_latched)) return std::string("Geen incident");
+      char buf[96];
+      const int p2 = std::max(id(oq_cycling_peak_hp1_2h), id(oq_cycling_peak_hp2_2h));
+      const int p72 = std::max(id(oq_cycling_peak_hp1_72h), id(oq_cycling_peak_hp2_72h));
+      snprintf(buf, sizeof(buf), "%s - piek %d/2u, %d/72u",
+               id(oq_cycling_alert_alternating) ? "Afwisselend pendelen" : "Te veel starts",
+               p2, p72);
+      return std::string(buf);

@@ -3777,6 +3777,51 @@ views:
       - type: grid
         cards:
           - type: heading
+            icon: mdi:restart
+            heading: Compressor cycling
+            heading_style: title
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: binary_sensor.openquatt_cycling_waarschuwing
+                name: Waarschuwing actief
+              - entity: binary_sensor.openquatt_cycling_afwisselend_pendelen
+                name: Afwisselend pendelen
+              - entity: sensor.openquatt_cycling_status
+                name: Status
+              - type: section
+                label: Starts per HP
+              - entity: sensor.openquatt_hp1_starts_2u
+                name: HP1 - 2 uur
+              - entity: sensor.openquatt_hp2_starts_2u
+                name: HP2 - 2 uur
+              - entity: sensor.openquatt_hp1_starts_24u
+                name: HP1 - 24 uur
+              - entity: sensor.openquatt_hp2_starts_24u
+                name: HP2 - 24 uur
+              - entity: sensor.openquatt_hp1_starts_72u
+                name: HP1 - 72 uur
+              - entity: sensor.openquatt_hp2_starts_72u
+                name: HP2 - 72 uur
+              - entity: sensor.openquatt_hp1_laatste_start
+                name: HP1 - laatste start (min)
+              - entity: sensor.openquatt_hp2_laatste_start
+                name: HP2 - laatste start (min)
+              - type: section
+                label: Incident
+              - entity: sensor.openquatt_cycling_piek_2u
+                name: Piek 2 uur
+              - entity: sensor.openquatt_cycling_piek_72u
+                name: Piek 72 uur
+              - entity: number.openquatt_cycling_waarschuwing_2u
+                name: Drempel 2 uur
+              - entity: number.openquatt_cycling_waarschuwing_72u
+                name: Drempel 72 uur
+              - entity: button.openquatt_cycling_waarschuwing_bevestigen
+                name: Bevestigen en wissen
+      - type: grid
+        cards:
+          - type: heading
             icon: mdi:stairs-down
             heading: Compressorbegrenzing
             heading_style: title

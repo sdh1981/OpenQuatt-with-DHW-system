@@ -49,6 +49,7 @@ Cooling en DHW worden beschreven in:
 - [Pressure protection v0.32](pressure-protection-v0.32.md): R32 drukbeveiliging per HP — soft/hard caps, HPS-mirror, peak EMA en fouling-trend monitoring.
 - [Supply temp protection v0.32](supply-temp-protection-v0.32.md): per-HP watertemperatuur cap — soft/hard caps op uittredetemperatuur, hysterese, complementair aan systeem-brede `max_water_temp_limit_c`.
 - [Persgasbeveiliging v0.52](discharge-protection-v0.52.md): per-HP begrenzing op persgastemperatuur — de vier trappen (90/98/105/110 °C), de zachte ladder en het samenspel met druk- en aanvoerbeveiliging.
+- [Compressor cycling monitor v0.58](cycling-monitor-v0.58.md): startentellers per HP over 2/6/24/72 uur, en detectie van afwisselend pendelen tussen de units.
 - [Water Temperature Control](water-temperature-control.md): aparte uitleg van stooklijn, PID, curve phase/operating regime en Duo-hysterese.
 - [Koeling-instellingen](koeling-instellingen.md): PI-regelaar, dauwpuntbeveiliging, nacht-free cooling, dual-HP en alle koelparameters.
 - [DHW-instellingen](dhw-instellingen.md): toestandsmachine, temperatuurdrempels, tijdvenster, anti-kortcyclen, solar boost en legionellapreventie.
