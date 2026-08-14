@@ -103,6 +103,20 @@ esp32:
       # niet een chip die in een bootloop belandt. Zonder deze regel kan een
       # verkeerd geraden modus een seriele herflash betekenen.
       CONFIG_SPIRAM_IGNORE_NOTFOUND: y
+      # ---- TLS-allocaties naar PSRAM ----
+      # Gemeten na het inschakelen van PSRAM: 56 kB intern vrij, met 31 kB als
+      # grootste aaneengesloten blok. Ruim de helft van het vrije geheugen is
+      # dus versnipperd. Een TLS-handshake vraagt een aaneengesloten
+      # recordbuffer van tientallen kB en zit daarmee precies op de rand -- een
+      # geloofwaardige verklaring voor manifest-checks die soms niet doorkomen.
+      #
+      # Bewust pas in deze tweede stap, nadat PSRAM aantoonbaar aanwezig bleek
+      # (8 MiB, octal). Met deze vlaggen en GEEN werkende PSRAM zouden
+      # TLS-allocaties op niets uitlopen en zou de manifest-check breken.
+      # Terugweg: deze twee regels weghalen en opnieuw flashen; PSRAM zelf
+      # blijft dan gewoon werken.
+      CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC: y
+      CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC: n
       # v0.50: `COMPILER_OPTIMIZATION_SIZE: y` stond hier zonder CONFIG_-prefix,
       # waardoor kconfgen de regel als malformed weggooide ("ignoring malformed
       # line"). Toevoegen van de prefix is niet nodig: ESPHome zet zelf al
