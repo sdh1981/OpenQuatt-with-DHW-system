@@ -4,14 +4,48 @@ In deze map staan de dashboardbestanden voor OpenQuatt in Home Assistant.
 
 ## Welk bestand kies je?
 
-Kies het bestand dat past bij je opstelling en voorkeurstaal:
+Voor deze fork zijn er twee onderhouden dashboards, allebei Nederlands en Duo:
 
-- `openquatt_ha_dashboard_duo_nl.yaml`
+| Bestand | Wat het is |
+|---|---|
+| `openquatt_ha_dashboard_duo_nl.yaml` | **V1** — de gegroeide indeling, 11 tabs. Met de hand onderhouden. |
+| `openquatt_ha_dashboard_duo_nl_v2.yaml` | **V2** — heringedeeld naar taak, 7 tabs. Gegenereerd. |
+
+### V1
+
+Elf tabs die de firmware-modules volgen: Overzicht, DHW, Energie, Flow, Warmteregeling, Koeling, Warmtepompen, Sensorconfiguratie, Instellingen, Service en test, Diagnostiek. Compleet, maar de pagina's Instellingen en Diagnostiek zijn met ruim honderd entiteiten eerder een lijst dan een scherm.
+
+### V2
+
+Zeven tabs, ingedeeld naar wat je aan het doen bent in plaats van naar waar de code staat:
+
+| Tab | Vraag die hij beantwoordt |
+|---|---|
+| Nu | Is alles goed? |
+| Warm water | Wat doet de boiler, en waar draai ik aan? |
+| Verwarmen | Welke strategie draait, en wat vragen de HP's? |
+| Koelen | Mag er gekoeld worden, en waarom wel of niet? |
+| Energie | Wat heeft het gekost en opgeleverd? |
+| Afstellen | Alle instelbare waarden, gegroepeerd naar beslissing. |
+| Uitzoeken | Waarom doet het systeem wat het doet? |
+
+De sectie **Aandacht** op de eerste tab werkt met voorwaardelijke kaarten: die verschijnen alleen als er iets is. Een lege sectie betekent dat alles in orde is — geen scherm vol groene vinkjes.
+
+V2 wordt gegenereerd:
+
+```bash
+python scripts/build_dashboard_v2.py
+```
+
+Dat script leest eerst uit de firmware-YAML welke entiteiten er werkelijk worden aangemaakt en valideert daarna elke verwijzing daartegen. Een tikfout in een entity-id wordt zo een harde fout in plaats van een leeg vakje in Home Assistant. Bewerk dus het script, niet het YAML-bestand.
+
+### Uit het bovenliggende project
+
+De volgende bestanden komen van [OpenQuatt](https://github.com/OpenQuatt/OpenQuatt) en zijn hier **niet** onderhouden. Ze lopen achter en verwijzen naar entiteiten die in deze fork niet meer bestaan:
+
 - `openquatt_ha_dashboard_duo_en.yaml`
 - `openquatt_ha_dashboard_single_nl.yaml`
 - `openquatt_ha_dashboard_single_en.yaml`
-
-Gebruik `duo` voor Duo en `single` voor Single. Kies daarna `nl` of `en`.
 
 ## Importeren in Home Assistant
 
