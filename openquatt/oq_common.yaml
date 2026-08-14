@@ -54,38 +54,6 @@ ota:
         - lambda: |-
             id(oq_ota_phase_code) = 6;
             id(oq_firmware_update_status).publish_state("Aborted");
-  - platform: http_request
-    on_begin:
-      then:
-        - lambda: |-
-            id(oq_ota_phase_code) = 1;
-            id(oq_ota_progress_pct) = 0.0f;
-            id(oq_firmware_update_status).publish_state("Starting");
-            id(oq_firmware_update_progress).publish_state(0.0f);
-    on_progress:
-      then:
-        - lambda: |-
-            id(oq_ota_phase_code) = 2;
-            id(oq_ota_progress_pct) = x;
-            id(oq_firmware_update_status).publish_state("Uploading");
-            id(oq_firmware_update_progress).publish_state(x);
-    on_end:
-      then:
-        - lambda: |-
-            id(oq_ota_phase_code) = 3;
-            id(oq_ota_progress_pct) = 100.0f;
-            id(oq_firmware_update_status).publish_state("Rebooting");
-            id(oq_firmware_update_progress).publish_state(100.0f);
-    on_error:
-      then:
-        - lambda: |-
-            id(oq_ota_phase_code) = 5;
-            id(oq_firmware_update_status).publish_state("Error");
-    on_abort:
-      then:
-        - lambda: |-
-            id(oq_ota_phase_code) = 6;
-            id(oq_firmware_update_status).publish_state("Aborted");
 
 # ==============================================================================
 # NETWORK + RECOVERY
@@ -101,18 +69,6 @@ captive_portal:
 # Enable ESP Web Tools Wi-Fi provisioning while keeping AP fallback available.
 improv_serial:
   next_url: "http://{{ip_address}}/"
-
-# ==============================================================================
-# HTTP REQUEST (shared CIC + OTA update)
-# ==============================================================================
-http_request:
-  id: req
-  useragent: esphome/openquatt
-  timeout: 2s
-  follow_redirects: true
-  redirect_limit: 3
-  buffer_size_rx: 2048
-  buffer_size_tx: 1024
 
 # ==============================================================================
 # MODBUS (RS485)
@@ -145,10 +101,6 @@ modbus:
 # SHARED RUNTIME STATE
 # ==============================================================================
 globals:
-  - id: oq_fw_check_last_request_ms
-    type: uint32_t
-    restore_value: false
-    initial_value: '0'
   - id: oq_boot_startup_inhibit_until_ms
     type: uint32_t
     restore_value: false
@@ -181,42 +133,6 @@ select:
     restore_value: true
     options: ["OpenQuatt", "CiC"]
     initial_option: "OpenQuatt"
-
-  - platform: template
-    name: "Firmware Update Channel"
-    id: oq_firmware_update_channel
-    icon: mdi:source-branch
-    web_server:
-      sorting_group_id: oq_system_diagnostics
-    entity_category: config
-    optimistic: true
-    restore_value: true
-    options: ["main", "dev"]
-    initial_option: "${release_channel}"
-    on_value:
-      then:
-        - lambda: |-
-            if (x == "dev") {
-              id(oq_firmware_update).set_source_url("${dev_release_manifest_url}");
-            } else {
-              id(oq_firmware_update).set_source_url("${main_release_manifest_url}");
-            }
-        - if:
-            condition:
-              lambda: |-
-                constexpr uint32_t fw_check_cooldown_ms = 1000UL;
-                const uint32_t now_ms = (uint32_t) millis();
-                const uint32_t last_request_ms = id(oq_fw_check_last_request_ms);
-                if (last_request_ms > 0 && now_ms >= last_request_ms &&
-                    (now_ms - last_request_ms) < fw_check_cooldown_ms) {
-                  ESP_LOGW("oq_fw", "Skip firmware update check: cooldown active after a recent request.");
-                  return false;
-                }
-                id(oq_fw_check_last_request_ms) = now_ms;
-                return true;
-            then:
-              - update.check:
-                  id: oq_firmware_update
 
   - platform: template
     name: "Debug Level"
@@ -285,31 +201,6 @@ button:
     id: safe_mode_button
     web_server:
       sorting_group_id: oq_system_diagnostics
-
-  - platform: template
-    id: oq_check_firmware_updates
-    name: Check Firmware Updates
-    icon: mdi:update
-    entity_category: diagnostic
-    web_server:
-      sorting_group_id: oq_system_diagnostics
-    on_press:
-      - if:
-          condition:
-            lambda: |-
-              constexpr uint32_t fw_check_cooldown_ms = 1000UL;
-              const uint32_t now_ms = (uint32_t) millis();
-              const uint32_t last_request_ms = id(oq_fw_check_last_request_ms);
-              if (last_request_ms > 0 && now_ms >= last_request_ms &&
-                  (now_ms - last_request_ms) < fw_check_cooldown_ms) {
-                ESP_LOGW("oq_fw", "Skip firmware update check: cooldown active after a recent request.");
-                return false;
-              }
-              id(oq_fw_check_last_request_ms) = now_ms;
-              return true;
-          then:
-            - update.check:
-                id: oq_firmware_update
 
 binary_sensor:
   - platform: status
@@ -574,20 +465,5 @@ text_sensor:
         snprintf(buffer, sizeof(buffer), "%us", (unsigned) seconds);
       }
       return {buffer};
-    web_server:
-      sorting_group_id: oq_system_diagnostics
-
-update:
-  - platform: http_request
-    id: oq_firmware_update
-    name: Firmware Update
-    source: ${release_manifest_url}
-    # Auto-polling disabled — this is a custom build, we don't want it pulling
-    # the upstream jeroen85/OpenQuatt release manifest (which returns 404 anyway
-    # if no matching asset is published). Manual update.check is still possible.
-    update_interval: never
-    icon: mdi:update
-    entity_category: diagnostic
-    disabled_by_default: true
     web_server:
       sorting_group_id: oq_system_diagnostics
