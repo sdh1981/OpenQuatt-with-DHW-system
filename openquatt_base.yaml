@@ -64,6 +64,22 @@ esphome:
           }
 
 # ==============================================================================
+# PSRAM
+# ==============================================================================
+# De ESP32-S3 op de T-Connect heeft PSRAM, maar die lag ongebruikt: er stond
+# geen psram-component in de config. Alles draaide dus op het interne SRAM --
+# dezelfde bron waar de DHW-tick, de beveiligingsmodules en de cooling-lambdas
+# al twee keer een stack-verhoging naar 32 kB nodig maakten.
+#
+# Fout raden van de modus is ongevaarlijk: CONFIG_SPIRAM_IGNORE_NOTFOUND
+# hieronder laat de chip gewoon starten zonder PSRAM. De sensor "PSRAM vrij"
+# vertelt daarna of het gelukt is. Zie oq_substitutions_common.yaml om te
+# wisselen tussen octal en quad.
+psram:
+  mode: ${oq_psram_mode}
+  speed: ${oq_psram_speed}
+
+# ==============================================================================
 # PLATFORM
 # ==============================================================================
 esp32:
@@ -74,6 +90,19 @@ esp32:
     type: esp-idf
     version: recommended
     sdkconfig_options:
+      # ---- PSRAM ----
+      # Laat de allocator PSRAM meenemen voor grote blokken. ALWAYSINTERNAL
+      # houdt alles onder 8 kB in intern SRAM (snel, en veel kleine allocaties
+      # in PSRAM kosten juist performance). RESERVE_INTERNAL houdt 64 kB
+      # intern achter de hand voor zaken die dwingend intern moeten, zoals
+      # DMA-buffers en interrupt-handlers.
+      CONFIG_SPIRAM_USE_MALLOC: y
+      CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL: "8192"
+      CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL: "65536"
+      # Het vangnet: geen of niet-herkende PSRAM betekent doorstarten zonder,
+      # niet een chip die in een bootloop belandt. Zonder deze regel kan een
+      # verkeerd geraden modus een seriele herflash betekenen.
+      CONFIG_SPIRAM_IGNORE_NOTFOUND: y
       # v0.50: `COMPILER_OPTIMIZATION_SIZE: y` stond hier zonder CONFIG_-prefix,
       # waardoor kconfgen de regel als malformed weggooide ("ignoring malformed
       # line"). Toevoegen van de prefix is niet nodig: ESPHome zet zelf al
