@@ -361,6 +361,25 @@ sensor:
     web_server:
       sorting_group_id: oq_system_diagnostics
 
+  # Laagste stand sinds de laatste start. Een sensor die elke minuut kijkt mist
+  # juist de korte pieken waarin het misgaat -- een TLS-handshake of een OTA
+  # duurt seconden. Dit getal onthoudt het diepste punt en is daarmee de enige
+  # betrouwbare maat voor hoe dicht je bij een allocatiefout zat.
+  - platform: template
+    name: "Intern geheugen laagste stand"
+    id: oq_heap_internal_min
+    icon: mdi:memory
+    unit_of_measurement: "B"
+    device_class: data_size
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    lambda: |-
+      return (float) heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+
   - platform: template
     name: "PSRAM vrij"
     id: oq_psram_free
