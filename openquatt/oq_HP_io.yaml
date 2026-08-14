@@ -247,6 +247,11 @@ number:
 # ----------------------------
 # SENSOR
 # ----------------------------
+# All live holding-register measurements from 2099 through 2138 deliberately
+# form one contiguous range. The three unused gaps are bridged at 2105, by an
+# internal spacer at 2109, and at 2135; no item in this range uses
+# skip_updates. Result: one 40-register snapshot per controller update
+# (5 seconds by default).
 sensor:
   - platform: modbus_controller
     modbus_controller_id: ${hp_id}
@@ -322,7 +327,6 @@ sensor:
           min_value: 0
           max_value: 100
           ignore_out_of_range: true
-    skip_updates: ${oq_skip_10s}
     web_server:
       sorting_group_id: oq_${hp_id}
 
@@ -343,7 +347,6 @@ sensor:
           min_value: 0
           max_value: 100
           ignore_out_of_range: true
-    skip_updates: ${oq_skip_10s}
     web_server:
       sorting_group_id: oq_${hp_id}
 
@@ -362,7 +365,6 @@ sensor:
           min_value: 0
           max_value: 1000
           ignore_out_of_range: true
-    skip_updates: ${oq_skip_30s}
     web_server:
       sorting_group_id: oq_${hp_id}
 
@@ -376,7 +378,8 @@ sensor:
     unit_of_measurement: "RPM"
     state_class: "measurement"
     accuracy_decimals: 0
-    # register_count: 2  # 2105 - 2106
+    # Bridge unused register 2106 to the next live register at 2107.
+    register_count: 2
     filters:
       - multiply: 1
       - clamp:
@@ -402,9 +405,19 @@ sensor:
           min_value: 0
           max_value: 1000
           ignore_out_of_range: true
-    skip_updates: ${oq_skip_10s}
     web_server:
       sorting_group_id: oq_${hp_id}
+
+  # Internal spacer: binary_sensor.modbus_controller does not support
+  # register_count. Reading reserved register 2109 as an internal sensor keeps
+  # 2108 and 2110 contiguous in the shared 2099-2138 request.
+  - platform: modbus_controller
+    modbus_controller_id: ${hp_id}
+    id: ${hp_id}_reserved_2109
+    register_type: holding
+    address: 2109
+    value_type: U_WORD
+    internal: true
 
   - platform: modbus_controller
     modbus_controller_id: ${hp_id}
@@ -451,7 +464,6 @@ sensor:
           min_value: -30
           max_value: 100
           ignore_out_of_range: true
-    skip_updates: ${oq_skip_30s}
     web_server:
       sorting_group_id: oq_${hp_id}
 
@@ -473,7 +485,6 @@ sensor:
           min_value: -30
           max_value: 150
           ignore_out_of_range: true
-    skip_updates: ${oq_skip_30s}
     web_server:
       sorting_group_id: oq_${hp_id}
 
@@ -484,11 +495,16 @@ sensor:
     icon: mdi:thermometer
     register_type: holding
     address: 2113
+    value_type: U_WORD
     unit_of_measurement: "°C"
     device_class: "temperature"
     state_class: "measurement"
     accuracy_decimals: 2
-    register_count: 2  # 2113 - 2114
+    # Span 2113-2115 so ESPHome merges this item with the next register at
+    # 2116. This makes gas-return (2113) and evaporating temperature (2132)
+    # part of one Modbus response. U_WORD still parses only the first word;
+    # the extra registers only bridge the otherwise separate read ranges.
+    register_count: 3
     filters:
       - offset: -3000
       - multiply: 0.01
@@ -496,7 +512,6 @@ sensor:
           min_value: -30
           max_value: 100
           ignore_out_of_range: true
-    skip_updates: ${oq_skip_30s}
     web_server:
       sorting_group_id: oq_${hp_id}
 
@@ -516,7 +531,6 @@ sensor:
           min_value: 0
           max_value: 20
           ignore_out_of_range: true
-    skip_updates: ${oq_skip_30s}
     web_server:
       sorting_group_id: oq_${hp_id}
 
@@ -538,7 +552,6 @@ sensor:
           min_value: 0
           max_value: 60
           ignore_out_of_range: true
-    skip_updates: ${oq_skip_30s}
     web_server:
       sorting_group_id: oq_${hp_id}
 
@@ -547,7 +560,6 @@ sensor:
     id: ${hp_id}_pcb_firmware_raw
     register_type: holding
     address: 2122
-    skip_updates: ${oq_skip_30s}
     value_type: U_WORD
     internal: true
 
@@ -557,9 +569,8 @@ sensor:
     disabled_by_default: true
     icon: mdi:memory
     register_type: holding
-    register_count: 4  # 2123 - 2127
+    register_count: 4  # 2123 - 2126
     address: 2123
-    skip_updates: ${oq_skip_30s}
     web_server:
       sorting_group_id: oq_${hp_id}
 
@@ -569,9 +580,8 @@ sensor:
     disabled_by_default: true
     icon: mdi:identifier
     register_type: holding
-    register_count: 4  # 2127 - 2131
+    register_count: 4  # 2127 - 2130
     address: 2127
-    skip_updates: ${oq_skip_30s}
     web_server:
       sorting_group_id: oq_${hp_id}
 
@@ -593,7 +603,6 @@ sensor:
           min_value: -30
           max_value: 100
           ignore_out_of_range: true
-    skip_updates: ${oq_skip_30s}
     web_server:
       sorting_group_id: oq_${hp_id}
 
@@ -615,13 +624,12 @@ sensor:
           min_value: -30
           max_value: 100
           ignore_out_of_range: true
-    skip_updates: ${oq_skip_30s}
     web_server:
       sorting_group_id: oq_${hp_id}
 
-  # Afgeleide diagnostiek: oververhitting (superheat), uit al-gelezen gas- +
-  # verzadigingstemperaturen. Nuttig voor koudemiddel-lading/expansie-gezondheid.
-  # Read-only, geen regel-effect.
+  # Afgeleide diagnostiek: oververhitting (superheat), uit gas- +
+  # verzadigingstemperaturen uit dezelfde Modbus-response. Nuttig voor
+  # koudemiddel-lading/expansie-gezondheid. Read-only, geen regel-effect.
   - platform: template
     id: ${hp_id}_suction_superheat
     name: "${prefix}Suction superheat"
@@ -630,10 +638,29 @@ sensor:
     state_class: measurement
     accuracy_decimals: 1
     entity_category: diagnostic
-    update_interval: 30s
+    update_interval: 5s
     lambda: |-
       if (!id(${hp_id}_gas_return_temp).has_state() || isnan(id(${hp_id}_gas_return_temp).state)) return NAN;
       if (!id(${hp_id}_evaporating_temp).has_state() || isnan(id(${hp_id}_evaporating_temp).state)) return NAN;
+
+      // Superheat is only meaningful while the compressor is actually
+      // running.  During startup, standby and defrost the two temperatures
+      // are not a valid suction/saturation pair and can produce misleading
+      // values around zero or below zero.
+      if (!id(${hp_id}_compressor_freq).has_state() ||
+          isnan(id(${hp_id}_compressor_freq).state) ||
+          id(${hp_id}_compressor_freq).state < 10.0f) return NAN;
+      if (id(${hp_id}_defrost).has_state() && id(${hp_id}_defrost).state) return NAN;
+
+      // 2120 flags gas-return sensor failure and evaporator-pressure faults.
+      // Without this guard a stale/fallback pressure value can look like a
+      // real superheat measurement.
+      if (id(${hp_id}_status_2120_raw).has_state() &&
+          !isnan(id(${hp_id}_status_2120_raw).state)) {
+        const uint16_t status = static_cast<uint16_t>(lroundf(id(${hp_id}_status_2120_raw).state));
+        if (status & (0x0008u | 0x0010u | 0x0400u)) return NAN;
+      }
+
       return id(${hp_id}_gas_return_temp).state - id(${hp_id}_evaporating_temp).state;
     web_server:
       sorting_group_id: oq_hp_diagnostics
@@ -646,7 +673,7 @@ sensor:
     state_class: measurement
     accuracy_decimals: 1
     entity_category: diagnostic
-    update_interval: 30s
+    update_interval: 5s
     lambda: |-
       if (!id(${hp_id}_gas_discharge_temp).has_state() || isnan(id(${hp_id}_gas_discharge_temp).state)) return NAN;
       if (!id(${hp_id}_condensing_temp).has_state() || isnan(id(${hp_id}_condensing_temp).state)) return NAN;
@@ -716,7 +743,8 @@ sensor:
     device_class: "temperature"
     state_class: "measurement"
     accuracy_decimals: 2
-    # register_count: 2  # 2135 - 2137
+    # Bridge unused register 2136 to the next live register at 2137.
+    register_count: 2
     filters:
       - offset: -3000
       - multiply: 0.01
@@ -724,7 +752,6 @@ sensor:
           min_value: -30
           max_value: 100
           ignore_out_of_range: true
-    skip_updates: ${oq_skip_30s}
     web_server:
       sorting_group_id: oq_${hp_id}
 
@@ -947,7 +974,6 @@ sensor:
     register_type: holding
     address: 2119
     value_type: U_WORD
-    skip_updates: ${oq_skip_30s}
     internal: true
 
   - platform: modbus_controller
@@ -956,7 +982,6 @@ sensor:
     register_type: holding
     address: 2120
     value_type: U_WORD
-    skip_updates: ${oq_skip_30s}
     internal: true
 
   - platform: modbus_controller
@@ -965,7 +990,6 @@ sensor:
     register_type: holding
     address: 2121
     value_type: U_WORD
-    skip_updates: ${oq_skip_30s}
     internal: true
 
   # ----------------------------
@@ -973,6 +997,8 @@ sensor:
   # ----------------------------
 binary_sensor:
   # At least bits 0,2,4,5,6,11 are used for status in R2108.
+  # All bitmask views share R2108; the internal sensor at R2109 bridges onward
+  # to R2110 because this binary-sensor platform has no register_count option.
   - platform: modbus_controller
     modbus_controller_id: ${hp_id}
     name: "${prefix}Fan Low Speed Mode"
@@ -982,7 +1008,6 @@ binary_sensor:
     register_type: holding
     address: 2108
     bitmask: 0x1
-    skip_updates: ${oq_skip_10s}
     web_server:
       sorting_group_id: oq_${hp_id}
 
@@ -995,7 +1020,6 @@ binary_sensor:
     register_type: holding
     address: 2108
     bitmask: 0x4
-    skip_updates: ${oq_skip_10s}
     web_server:
       sorting_group_id: oq_${hp_id}
 
@@ -1008,7 +1032,6 @@ binary_sensor:
     register_type: holding
     address: 2108
     bitmask: 0x8
-    skip_updates: ${oq_skip_10s}
     web_server:
       sorting_group_id: oq_${hp_id}
 
@@ -1021,7 +1044,6 @@ binary_sensor:
     register_type: holding
     address: 2108
     bitmask: 0x10
-    skip_updates: ${oq_skip_10s}
     web_server:
       sorting_group_id: oq_${hp_id}
 
@@ -1034,7 +1056,6 @@ binary_sensor:
     register_type: holding
     address: 2108
     bitmask: 0x20
-    skip_updates: ${oq_skip_10s}
     web_server:
       sorting_group_id: oq_${hp_id}
 
@@ -1047,7 +1068,6 @@ binary_sensor:
     register_type: holding
     address: 2108
     bitmask: 0x40
-    skip_updates: ${oq_skip_10s}
     on_state:
       then:
         - lambda: |-
@@ -1064,7 +1084,6 @@ binary_sensor:
     register_type: holding
     address: 2108
     bitmask: 0x800
-    skip_updates: ${oq_skip_10s}
     web_server:
       sorting_group_id: oq_${hp_id}
 
@@ -1219,7 +1238,7 @@ text_sensor:
     name: "${prefix}Superheat status"
     icon: mdi:gauge
     entity_category: diagnostic
-    update_interval: 30s
+    update_interval: 5s
     web_server:
       sorting_group_id: oq_hp_diagnostics
     lambda: |-
