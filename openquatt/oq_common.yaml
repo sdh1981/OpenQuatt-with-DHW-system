@@ -320,6 +320,78 @@ binary_sensor:
       sorting_group_id: oq_system_diagnostics
 
 sensor:
+  # ---- Geheugen ----
+  # Nodig om te zien of PSRAM daadwerkelijk is gevonden en of het interne SRAM
+  # er lucht van krijgt. Blijft "PSRAM totaal" op 0 staan, dan is de modus in
+  # oq_substitutions_common.yaml verkeerd geraden (probeer quad in plaats van
+  # octal); de chip start dan gewoon door zonder PSRAM.
+  #
+  # "Intern geheugen vrij" is het getal dat er echt toe doet: DMA-buffers,
+  # interrupt-handlers en de stacks moeten daar staan en kunnen niet uitwijken.
+  - platform: template
+    name: "Intern geheugen vrij"
+    id: oq_heap_internal_free
+    icon: mdi:memory
+    unit_of_measurement: "B"
+    device_class: data_size
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    lambda: |-
+      return (float) heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+
+  # Grootste aaneengesloten interne blok. Zakt dit ver onder het vrije totaal,
+  # dan is de heap gefragmenteerd -- dat verklaart allocatiefouten terwijl er
+  # op papier nog ruimte is.
+  - platform: template
+    name: "Intern geheugen grootste blok"
+    id: oq_heap_internal_largest
+    icon: mdi:memory
+    unit_of_measurement: "B"
+    device_class: data_size
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    lambda: |-
+      return (float) heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+
+  - platform: template
+    name: "PSRAM vrij"
+    id: oq_psram_free
+    icon: mdi:chip
+    unit_of_measurement: "B"
+    device_class: data_size
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    lambda: |-
+      return (float) heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+
+  # 0 = geen PSRAM gevonden. Dat is de check na het flashen.
+  - platform: template
+    name: "PSRAM totaal"
+    id: oq_psram_total
+    icon: mdi:chip
+    unit_of_measurement: "B"
+    device_class: data_size
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 300s
+    entity_category: diagnostic
+    lambda: |-
+      return (float) heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+
   - platform: template
     name: Firmware Update Progress
     id: oq_firmware_update_progress

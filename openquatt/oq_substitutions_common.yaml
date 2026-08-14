@@ -203,6 +203,19 @@ ha_electricity_tariff_entity_id: "sensor.zonneplan_current_electricity_tariff" #
 # ----------------------------
 # HP IO (MODBUS POLLING)
 # ----------------------------
+# ---- PSRAM ----
+# De T-Connect (ESP32-S3) heeft PSRAM aan boord, maar die werd niet gebruikt:
+# er stond geen psram-component in de config, dus alles liep op het interne
+# SRAM. Dat is precies de schaarse bron hier -- zie de stack-verhogingen naar
+# 32 kB in openquatt_base.yaml, die kwamen na echte stack-overflow-crashes.
+#
+# Modus verkeerd raden is ongevaarlijk: dan vindt de chip geen PSRAM en start
+# hij gewoon zonder, dankzij CONFIG_SPIRAM_IGNORE_NOTFOUND. De sensor
+# "PSRAM vrij" laat meteen zien of het gelukt is. Werkt octal niet, zet hier
+# dan "quad" neer en flash opnieuw.
+oq_psram_mode: "octal"                               # PSRAM-modus: octal (N16R8) of quad.
+oq_psram_speed: "80MHz"                              # PSRAM-klokfrequentie.
+
 oq_modbus_update_interval_s: "5"                    # Base Modbus controller polling interval [s].
 oq_modbus_command_throttle_ms: "300"                 # Minimum spacing between Modbus commands [ms].
 oq_modbus_max_cmd_retries: "1"                       # Retries per Modbus command; keep low to avoid long blocking on bad links.
