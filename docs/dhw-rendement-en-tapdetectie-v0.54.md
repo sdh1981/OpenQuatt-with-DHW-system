@@ -33,8 +33,10 @@ Dat is geen fout maar het punt: 3 kW erin, 3 kW eruit is COP 1. Een cyclus waari
 | `sensor.openquatt_dhw_cyclus_cop` | warmte eruit ÷ elektrisch erin, laatste voltooide cyclus |
 | `sensor.openquatt_dhw_cyclus_energie_in` | Wh elektrisch |
 | `sensor.openquatt_dhw_cyclus_energie_uit` | Wh thermisch |
-| `sensor.openquatt_dhw_cop_vandaag` | zelfde verhouding over de hele dag |
-| `sensor.openquatt_dhw_energie_vandaag` | Wh elektrisch vandaag |
+
+> **Etmaal- en lifetime-cijfers staan elders.** `oq_smart_diagnostics.yaml` houdt DHW-energie en -COP al bij over 24 uur en over de hele levensduur: `DHW COP 24h`, `DHW COP lifetime`, `DHW energy input 24h`, `DHW heat output 24h`, plus het aantal cycli en de gemiddelde kWh per cyclus.
+>
+> Dit bestand voegt daar alleen de **COP van de laatste voltooide cyclus** aan toe — dat ontbrak. In v0.54 stonden hier ook dag-totalen; die dupliceerden de bestaande 24-uurssensoren en zijn in v0.59 verwijderd.
 
 Een cyclus telt pas mee vanaf **50 Wh**. Daaronder is het een afgebroken start of een klep die kort omging — daar valt niets zinnigs over te zeggen.
 
