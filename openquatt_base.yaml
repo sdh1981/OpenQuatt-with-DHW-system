@@ -88,13 +88,28 @@ esp32:
     version: recommended
     sdkconfig_options:
       # ---- PSRAM ----
-      # Laat de allocator PSRAM meenemen voor grote blokken. ALWAYSINTERNAL
-      # houdt alles onder 8 kB in intern SRAM (snel, en veel kleine allocaties
-      # in PSRAM kosten juist performance). RESERVE_INTERNAL houdt 64 kB
-      # intern achter de hand voor zaken die dwingend intern moeten, zoals
-      # DMA-buffers en interrupt-handlers.
+      # Laat de allocator PSRAM meenemen. ALWAYSINTERNAL is de grens: alles
+      # eronder blijft in intern SRAM, alles erboven mag naar PSRAM.
       CONFIG_SPIRAM_USE_MALLOC: y
-      CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL: "8192"
+      # v0.57: van 8192 naar 2048. Met 8 kB verhuisde er in de praktijk vrijwel
+      # niets -- van 8 MB PSRAM was 17 kB in gebruik, en het grootste
+      # aaneengesloten interne blok bleef op 31744 B staan, exact hetzelfde
+      # getal als voor de migratie. ESPHome alloceert honderden kleine blokken
+      # voor sensoren, strings en entity-objecten; die vielen allemaal onder de
+      # grens en bleven dus intern rondslingeren.
+      #
+      # Aanleiding: "Intern geheugen laagste stand" zakte binnen minuten naar
+      # 15192 B, ruim 45 kB onder het vrije totaal op dat moment. Zo'n korte,
+      # grote piek -- vermoedelijk de webserver die alle entiteiten naar JSON
+      # serialiseert -- gaat op 2 kB wel naar PSRAM en op 8 kB niet.
+      #
+      # Terugweg: dit getal terug op 8192. Wordt de interface merkbaar trager,
+      # dan is dit de knop; PSRAM is langzamer dan SRAM en dat weegt het
+      # zwaarst bij veel kleine allocaties.
+      CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL: "2048"
+      # Houdt 64 kB intern achter de hand voor wat dwingend intern moet, zoals
+      # DMA-buffers en interrupt-handlers. Die vragen expliciet om
+      # MALLOC_CAP_INTERNAL en gaan sowieso langs de grens hierboven.
       CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL: "65536"
       # Het vangnet: geen of niet-herkende PSRAM betekent doorstarten zonder,
       # niet een chip die in een bootloop belandt. Zonder deze regel kan een
