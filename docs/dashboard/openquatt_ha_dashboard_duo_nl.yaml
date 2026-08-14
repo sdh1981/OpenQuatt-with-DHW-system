@@ -3891,12 +3891,6 @@ views:
                 name: OpenQuatt-versie
               - entity: sensor.openquatt_openquatt_release_channel
                 name: OpenQuatt-releasekanaal
-              - entity: select.openquatt_firmware_update_channel
-                name: Firmware-updatekanaal
-              - entity: update.openquatt_firmware_update
-                name: Firmware-update
-              - entity: button.openquatt_check_firmware_updates
-                name: Controleer firmware-updates
           - type: heading
             icon: mdi:chip
             heading: Regelaarinformatie

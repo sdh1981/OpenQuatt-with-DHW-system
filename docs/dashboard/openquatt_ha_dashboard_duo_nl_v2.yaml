@@ -2416,10 +2416,6 @@ views:
     - type: entities
       show_header_toggle: false
       entities:
-      - entity: button.openquatt_check_firmware_updates
-        name: Controleer firmware-updates
-      - entity: select.openquatt_firmware_update_channel
-        name: Firmware-updatekanaal
       - entity: number.openquatt_minimum_runtime
         name: Minimum runtime
       - entity: button.openquatt_reset_cumulative_energy_counters
@@ -2566,8 +2562,6 @@ views:
         name: OpenQuatt-versie
       - entity: sensor.openquatt_openquatt_release_channel
         name: OpenQuatt-releasekanaal
-      - entity: update.openquatt_firmware_update
-        name: Firmware-update
     - type: heading
       icon: mdi:chip
       heading: Regelaarinformatie

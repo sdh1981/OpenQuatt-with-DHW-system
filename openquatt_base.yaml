@@ -10,11 +10,14 @@
 # ==============================================================================
 substitutions:
   <<: !include openquatt/topology/oq_topology_duo.yaml
-  main_release_manifest_url: "https://github.com/jeroen85/OpenQuatt/releases/latest/download/openquatt-duo-ota.manifest.json"
-  dev_release_manifest_url: "https://github.com/jeroen85/OpenQuatt/releases/download/dev-latest/openquatt-duo-ota.manifest.json"
-  # Stable OTA channel by default. Dev builds should override both substitutions
-  # via `esphome -s release_channel dev -s release_manifest_url ... compile ...`.
-  release_manifest_url: "https://github.com/jeroen85/OpenQuatt/releases/latest/download/openquatt-duo-ota.manifest.json"
+  # v0.56: de firmware-updatecheck is verwijderd. Die wees naar de releases van
+  # het bovenliggende project, en die firmware past niet op deze fork -- hij zou
+  # de hele DHW-keten, de beveiligingen en de CiC-brug overschrijven. Daarmee
+  # zijn ook de enige uitgaande verbindingen weg: geen http_request-component,
+  # geen manifest-URL's, geen verkeer naar GitHub.
+  #
+  # Updaten gaat via de native ESPHome-OTA vanuit Home Assistant of de CLI,
+  # precies zoals je dat hier al deed.
 
 packages:
   <<: !include openquatt/oq_packages_common.yaml
@@ -56,12 +59,6 @@ esphome:
       - text_sensor.template.publish:
           id: oq_release_channel_text
           state: "${release_channel}"
-      - lambda: |-
-          if (id(oq_firmware_update_channel).current_option() == "dev") {
-            id(oq_firmware_update).set_source_url("${dev_release_manifest_url}");
-          } else {
-            id(oq_firmware_update).set_source_url("${main_release_manifest_url}");
-          }
 
 # ==============================================================================
 # PSRAM
