@@ -166,6 +166,9 @@ oq_discharge_protection: !include oq_discharge_protection.yaml
 # Compressor-cycling monitor: startentellers per HP en detectie van
 # afwisselend pendelen tussen de units.
 oq_cycling_monitor: !include oq_cycling_monitor.yaml
+# Vangnet op opgeslagen instellingen: eigen ijkpunt vastleggen, afwijkingen
+# melden en terugzetten.
+oq_config_snapshot: !include oq_config_snapshot.yaml
 oq_smart_diagnostics: !include
   file: oq_smart_diagnostics.yaml
   vars:

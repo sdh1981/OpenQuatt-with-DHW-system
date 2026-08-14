@@ -1,0 +1,302 @@
+# ==============================================================================
+# OpenQuatt - Vangnet op opgeslagen instellingen (v0.60)
+# ==============================================================================
+#
+# Aanleiding: "DHW single HP level bump" stond op 2 terwijl de default 1 is en
+# geen enkele regel code die waarde schrijft. Dat kwam pas aan het licht toen
+# een compressor op level 4 bleek te draaien en het van achteren naar voren is
+# teruggerekend. Het probleem was niet dat de waarde veranderde, maar dat er
+# geen manier was om dat te zien.
+#
+# Home Assistant registreert al die entiteiten wel degelijk in zijn recorder.
+# Het gat zit niet in registratie maar in OPMERKEN en TERUGKOMEN.
+#
+# Daarom geen vergelijking met de fabrieksdefaults -- die zouden permanent
+# afwijken, want er staan bewust tientallen dingen anders. In plaats daarvan
+# leg je zelf vast wat jouw goede staat is, en meldt dit bestand wanneer de
+# werkelijkheid daarvan afdrijft.
+#
+# --- Waarom een hash en geen index ---
+# De momentopname bewaart per instelling get_object_id_hash(), niet de positie
+# in App.get_numbers(). Die volgorde is de registratievolgorde en verschuift
+# zodra er entiteiten bijkomen of verdwijnen -- precies het scenario waar dit
+# vangnet voor bedoeld is. Op hash opzoeken blijft kloppen: nieuwe entiteiten
+# hebben simpelweg geen vermelding, verdwenen entiteiten laten een wees achter.
+#
+# --- Wat dit niet is ---
+# De momentopname leeft in dezelfde preference-opslag die hier verdacht is.
+# Verschuiven de slots, dan kan de opname meeschuiven. Daarom staat alles in
+# EEN global in plaats van 83 losse: een slot in plaats van 83, en raakt die
+# corrupt dan zie je onzin in plaats van geloofwaardig-maar-fout.
+#
+# Dit maakt drift zichtbaar en terugdraaibaar. Het voorkomt hem niet. Voorkomen
+# zou betekenen restore_value opgeven, en dat kost meer dan het oplevert.
+# ==============================================================================
+
+globals:
+  # 83 instellingen in scope; 128 geeft ruimte voor groei zonder de opname
+  # ongeldig te maken.
+  - id: oq_cfg_snap_hash
+    type: uint32_t[128]
+    restore_value: true
+  - id: oq_cfg_snap_value
+    type: float[128]
+    restore_value: true
+  - id: oq_cfg_snap_count
+    type: int
+    restore_value: true
+    initial_value: '0'
+  # Wandkloktijd van de vastlegging, zodat je weet hoe oud je ijkpunt is.
+  - id: oq_cfg_snap_epoch
+    type: uint32_t
+    restore_value: true
+    initial_value: '0'
+
+  # Runtime-uitkomst van de vergelijking.
+  - id: oq_cfg_drift_count
+    type: int
+    restore_value: false
+    initial_value: '0'
+  # Aanvragen vanuit de knoppen; de interval voert ze uit zodat de iteratie
+  # over de entiteiten op een plek staat.
+  - id: oq_cfg_snap_request
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: oq_cfg_restore_request
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+button:
+  - platform: template
+    id: oq_cfg_snapshot_button
+    name: "Instellingen vastleggen"
+    icon: mdi:content-save-check
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+    on_press:
+      - lambda: 'id(oq_cfg_snap_request) = true;'
+
+  # Schrijft de momentopname terug. Expliciete handeling: dit overschrijft je
+  # huidige instellingen met wat er bij de vastlegging stond.
+  - platform: template
+    id: oq_cfg_restore_button
+    name: "Instellingen herstellen"
+    icon: mdi:backup-restore
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+    on_press:
+      - lambda: 'id(oq_cfg_restore_request) = true;'
+
+interval:
+  - interval: 10s
+    startup_delay: 25000ms
+    then:
+      - lambda: |-
+          // In scope: config-entiteiten uit de DHW-keten en de drie
+          // beveiligingsmodules. Op prefix in plaats van een handmatige lijst,
+          // zodat nieuwe instellingen vanzelf meelopen.
+          auto in_scope = [](const std::string &oid) -> bool {
+            return oid.rfind("dhw_", 0) == 0 ||
+                   oid.rfind("pressure_", 0) == 0 ||
+                   oid.rfind("supply_temp_", 0) == 0 ||
+                   oid.rfind("discharge_", 0) == 0;
+          };
+
+          const bool taking = id(oq_cfg_snap_request);
+          const bool restoring = id(oq_cfg_restore_request) && id(oq_cfg_snap_count) > 0;
+          id(oq_cfg_snap_request) = false;
+          id(oq_cfg_restore_request) = false;
+
+          auto find_slot = [](uint32_t h) -> int {
+            for (int i = 0; i < id(oq_cfg_snap_count); i++) {
+              if (id(oq_cfg_snap_hash)[i] == h) return i;
+            }
+            return -1;
+          };
+
+          int n_stored = 0;
+          int drift = 0;
+
+          // ----- Numbers -----
+          for (auto *num : App.get_numbers()) {
+            if (num->get_entity_category() != esphome::EntityCategory::ENTITY_CATEGORY_CONFIG) continue;
+            const std::string oid = num->get_object_id();
+            if (!in_scope(oid)) continue;
+            const uint32_t h = num->get_object_id_hash();
+            const float v = num->state;
+
+            if (taking) {
+              if (n_stored < 128) {
+                id(oq_cfg_snap_hash)[n_stored] = h;
+                id(oq_cfg_snap_value)[n_stored] = v;
+                n_stored++;
+              }
+              continue;
+            }
+            const int slot = find_slot(h);
+            if (slot < 0) continue;                    // na de opname toegevoegd
+            const float saved = id(oq_cfg_snap_value)[slot];
+            if (restoring) {
+              if (!isnan(saved) && fabsf(saved - v) > 0.0001f) {
+                num->make_call().set_value(saved).perform();
+              }
+              continue;
+            }
+            if (!isnan(saved) && !isnan(v) && fabsf(saved - v) > 0.0001f) drift++;
+          }
+
+          // ----- Switches ----- (opgeslagen als 0.0 / 1.0 in dezelfde tabel)
+          for (auto *sw : App.get_switches()) {
+            if (sw->get_entity_category() != esphome::EntityCategory::ENTITY_CATEGORY_CONFIG) continue;
+            const std::string oid = sw->get_object_id();
+            if (!in_scope(oid)) continue;
+            const uint32_t h = sw->get_object_id_hash();
+            const float v = sw->state ? 1.0f : 0.0f;
+
+            if (taking) {
+              if (n_stored < 128) {
+                id(oq_cfg_snap_hash)[n_stored] = h;
+                id(oq_cfg_snap_value)[n_stored] = v;
+                n_stored++;
+              }
+              continue;
+            }
+            const int slot = find_slot(h);
+            if (slot < 0) continue;
+            const float saved = id(oq_cfg_snap_value)[slot];
+            if (restoring) {
+              const bool want = saved >= 0.5f;
+              if (want != sw->state) { if (want) sw->turn_on(); else sw->turn_off(); }
+              continue;
+            }
+            if ((saved >= 0.5f) != sw->state) drift++;
+          }
+
+          if (taking) {
+            id(oq_cfg_snap_count) = n_stored;
+            auto clk = id(oq_time).now();
+            id(oq_cfg_snap_epoch) = clk.is_valid() ? (uint32_t) clk.timestamp : 0U;
+            id(oq_cfg_drift_count) = 0;
+            ESP_LOGI("oq_cfg", "Instellingen vastgelegd: %d waarden.", n_stored);
+          } else if (restoring) {
+            id(oq_cfg_drift_count) = 0;
+            ESP_LOGW("oq_cfg", "Instellingen hersteld naar de vastgelegde momentopname.");
+          } else {
+            if (drift != id(oq_cfg_drift_count) && id(oq_cfg_snap_count) > 0) {
+              ESP_LOGW("oq_cfg", "Instellingen wijken af van de vastlegging: %d waarde(n).", drift);
+            }
+            id(oq_cfg_drift_count) = drift;
+          }
+
+sensor:
+  - platform: template
+    id: oq_cfg_drift_count_sensor
+    name: "Instellingen afwijkingen"
+    icon: mdi:counter
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+    lambda: |-
+      return (float) id(oq_cfg_drift_count);
+
+  - platform: template
+    id: oq_cfg_snap_count_sensor
+    name: "Instellingen vastgelegd"
+    icon: mdi:content-save-check-outline
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 300s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+    lambda: |-
+      return (float) id(oq_cfg_snap_count);
+
+binary_sensor:
+  - platform: template
+    id: oq_cfg_drift_sensor
+    name: "Instellingen gewijzigd"
+    icon: mdi:file-alert
+    device_class: problem
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+    lambda: |-
+      return id(oq_cfg_snap_count) > 0 && id(oq_cfg_drift_count) > 0;
+
+text_sensor:
+  # De kern van dit bestand. Bij het level-4-voorval had hier gestaan:
+  #   single_hp_level_bump: 1 -> 2
+  # en was die hele zoektocht een blik op een sensor geweest.
+  - platform: template
+    id: oq_cfg_drift_text
+    name: "Instellingen afwijking"
+    icon: mdi:file-compare
+    update_interval: 60s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_system_diagnostics
+    lambda: |-
+      if (id(oq_cfg_snap_count) <= 0) return std::string("Nog niets vastgelegd");
+      if (id(oq_cfg_drift_count) <= 0) return std::string("Gelijk aan de vastlegging");
+
+      auto in_scope = [](const std::string &oid) -> bool {
+        return oid.rfind("dhw_", 0) == 0 ||
+               oid.rfind("pressure_", 0) == 0 ||
+               oid.rfind("supply_temp_", 0) == 0 ||
+               oid.rfind("discharge_", 0) == 0;
+      };
+      auto find_slot = [](uint32_t h) -> int {
+        for (int i = 0; i < id(oq_cfg_snap_count); i++) {
+          if (id(oq_cfg_snap_hash)[i] == h) return i;
+        }
+        return -1;
+      };
+
+      std::string out;
+      int shown = 0;
+      char buf[96];
+
+      for (auto *num : App.get_numbers()) {
+        if (shown >= 4) break;
+        if (num->get_entity_category() != esphome::EntityCategory::ENTITY_CATEGORY_CONFIG) continue;
+        const std::string oid = num->get_object_id();
+        if (!in_scope(oid)) continue;
+        const int slot = find_slot(num->get_object_id_hash());
+        if (slot < 0) continue;
+        const float saved = id(oq_cfg_snap_value)[slot];
+        if (isnan(saved) || isnan(num->state) || fabsf(saved - num->state) <= 0.0001f) continue;
+        snprintf(buf, sizeof(buf), "%s%s: %g -> %g", out.empty() ? "" : ", ",
+                 oid.c_str(), saved, num->state);
+        out += buf;
+        shown++;
+      }
+      for (auto *sw : App.get_switches()) {
+        if (shown >= 4) break;
+        if (sw->get_entity_category() != esphome::EntityCategory::ENTITY_CATEGORY_CONFIG) continue;
+        const std::string oid = sw->get_object_id();
+        if (!in_scope(oid)) continue;
+        const int slot = find_slot(sw->get_object_id_hash());
+        if (slot < 0) continue;
+        const bool saved = id(oq_cfg_snap_value)[slot] >= 0.5f;
+        if (saved == sw->state) continue;
+        snprintf(buf, sizeof(buf), "%s%s: %s -> %s", out.empty() ? "" : ", ",
+                 oid.c_str(), saved ? "aan" : "uit", sw->state ? "aan" : "uit");
+        out += buf;
+        shown++;
+      }
+
+      // Meer dan vier past niet in een HA-statuswaarde (255 tekens); het aantal
+      // staat los in "Instellingen afwijkingen".
+      if (id(oq_cfg_drift_count) > shown) {
+        snprintf(buf, sizeof(buf), " (+%d meer)", id(oq_cfg_drift_count) - shown);
+        out += buf;
+      }
+      return out.empty() ? std::string("Gelijk aan de vastlegging") : out;
