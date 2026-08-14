@@ -163,6 +163,9 @@ oq_supply_temp_protection: !include oq_supply_temp_protection.yaml
 # is persgas de scherpste vroege indicator -- de druk loopt pas op als de warmte
 # er al is.
 oq_discharge_protection: !include oq_discharge_protection.yaml
+# Compressor-cycling monitor: startentellers per HP en detectie van
+# afwisselend pendelen tussen de units.
+oq_cycling_monitor: !include oq_cycling_monitor.yaml
 oq_smart_diagnostics: !include
   file: oq_smart_diagnostics.yaml
   vars:
