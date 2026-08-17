@@ -56,6 +56,28 @@ modbus_controller:
         - logger.log: "${prefix}Modbus ONLINE"
 
 # ----------------------------
+# ODU EEPROM DUMP
+# ----------------------------
+# Read-only uitlezing van de EEPROM van de buitenunit, overgenomen uit upstream.
+# Biedt drie endpoints per unit aan:
+#   /openquatt/odu-eeprom/hp${hp_index}/start      (POST)
+#   /openquatt/odu-eeprom/hp${hp_index}/status     (GET)
+#   /openquatt/odu-eeprom/hp${hp_index}/download   (GET)
+#
+# Neemt de bus NIET over: hij wacht tot de commandowachtrij leeg is, zet dan een
+# enkele leesopdracht in, en wacht opnieuw. De normale polling loopt dus door en
+# de comms-watchdog van de HP blijft rustig. Prijs daarvan is dat een dump een
+# paar minuten duurt.
+# De external_components-registratie staat in oq_common.yaml: dit bestand wordt
+# per warmtepomp geincludeerd en zou de bron dus dubbel aanmelden.
+openquatt_odu_eeprom_dump:
+  - id: ${hp_id}_odu_eeprom_dump
+    controller: ${hp_id}
+    clock: oq_time
+    hp_index: ${hp_index}
+    device_address: ${device_address}
+
+# ----------------------------
 # GLOBALS
 # ----------------------------
 globals:
@@ -1207,6 +1229,37 @@ binary_sensor:
   # ----------------------------
   # TEXT SENSOR
   # ----------------------------
+# ----------------------------
+# ODU EEPROM DUMP - BEDIENING
+# ----------------------------
+# Upstream start en volgt de dump via de eigen webapp. Die bouwt deze fork niet
+# mee, dus hier ESPHome-entiteiten: starten vanuit Home Assistant of de
+# klassieke web-UI, en de voortgang zien. Het bestand zelf haal je daarna op via
+# de download-URL; dat blijft HTTP, want een binaire dump past niet in een
+# entiteit.
+button:
+  - platform: template
+    id: ${hp_id}_odu_eeprom_start
+    name: "${prefix}ODU EEPROM dump starten"
+    icon: mdi:download-circle
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_${hp_id}
+    on_press:
+      - lambda: |-
+          const auto result = id(${hp_id}_odu_eeprom_dump).start(true);
+          switch (result) {
+            case openquatt_odu_eeprom_dump::OpenQuattOduEepromDump::StartResult::STARTED:
+              ESP_LOGI("oq_eeprom", "${prefix}dump gestart");
+              break;
+            case openquatt_odu_eeprom_dump::OpenQuattOduEepromDump::StartResult::BUSY:
+              ESP_LOGW("oq_eeprom", "${prefix}dump loopt al");
+              break;
+            case openquatt_odu_eeprom_dump::OpenQuattOduEepromDump::StartResult::UNAVAILABLE:
+              ESP_LOGE("oq_eeprom", "${prefix}dump niet beschikbaar (geen buffer of geen bus)");
+              break;
+          }
+
 text_sensor:
   # Human-readable reason why the HP is limiting/reducing the compressor frequency
   # (decoded from Failure protection 1, doc reg 2120 = OQ 2119). "Geen" = the HP is
@@ -1405,3 +1458,29 @@ text_sensor:
     update_interval: never
     web_server:
       sorting_group_id: oq_hp_diagnostics
+
+  # Voortgang van de EEPROM-dump. "Klaar" betekent dat er een momentopname
+  # klaarstaat op de download-URL; die blijft tot de volgende dump bewaard.
+  - platform: template
+    id: ${hp_id}_odu_eeprom_status
+    name: "${prefix}ODU EEPROM dump status"
+    icon: mdi:database-search
+    entity_category: diagnostic
+    update_interval: 5s
+    web_server:
+      sorting_group_id: oq_${hp_id}
+    lambda: |-
+      auto &dump = id(${hp_id}_odu_eeprom_dump);
+      if (!dump.is_available()) return std::string("Niet beschikbaar");
+      if (dump.is_active()) {
+        char buf[48];
+        snprintf(buf, sizeof(buf), "Bezig - %u%%, %u registers",
+                 (unsigned) dump.progress_percent(), (unsigned) dump.registers_read());
+        return std::string(buf);
+      }
+      if (dump.has_snapshot()) {
+        char buf[48];
+        snprintf(buf, sizeof(buf), "Klaar - %u registers", (unsigned) dump.registers_read());
+        return std::string(buf);
+      }
+      return std::string("Nog geen dump");

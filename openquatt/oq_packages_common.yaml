@@ -185,3 +185,4 @@ heatpump1: !include
     hp_id: "hp1"
     prefix: "HP1 - "
     device_address: 0x01
+    hp_index: 1

@@ -56,6 +56,17 @@ ota:
             id(oq_firmware_update_status).publish_state("Aborted");
 
 # ==============================================================================
+# EXTERNE COMPONENTEN
+# ==============================================================================
+# Hier en niet in oq_HP_io.yaml: dat bestand wordt per warmtepomp geincludeerd
+# en zou dezelfde bron dan tweemaal aanmelden.
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [openquatt_odu_eeprom_dump]
+
+# ==============================================================================
 # NETWORK + RECOVERY
 # ==============================================================================
 wifi:
