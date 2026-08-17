@@ -1247,7 +1247,7 @@ button:
       sorting_group_id: oq_${hp_id}
     on_press:
       - lambda: |-
-          const auto result = id(${hp_id}_odu_eeprom_dump).start(true);
+          const auto result = id(${hp_id}_odu_eeprom_dump)->start(true);
           switch (result) {
             case openquatt_odu_eeprom_dump::OpenQuattOduEepromDump::StartResult::STARTED:
               ESP_LOGI("oq_eeprom", "${prefix}dump gestart");
@@ -1470,17 +1470,17 @@ text_sensor:
     web_server:
       sorting_group_id: oq_${hp_id}
     lambda: |-
-      auto &dump = id(${hp_id}_odu_eeprom_dump);
-      if (!dump.is_available()) return std::string("Niet beschikbaar");
-      if (dump.is_active()) {
+      auto *dump = id(${hp_id}_odu_eeprom_dump);
+      if (dump == nullptr || !dump->is_available()) return std::string("Niet beschikbaar");
+      if (dump->is_active()) {
         char buf[48];
         snprintf(buf, sizeof(buf), "Bezig - %u%%, %u registers",
-                 (unsigned) dump.progress_percent(), (unsigned) dump.registers_read());
+                 (unsigned) dump->progress_percent(), (unsigned) dump->registers_read());
         return std::string(buf);
       }
-      if (dump.has_snapshot()) {
+      if (dump->has_snapshot()) {
         char buf[48];
-        snprintf(buf, sizeof(buf), "Klaar - %u registers", (unsigned) dump.registers_read());
+        snprintf(buf, sizeof(buf), "Klaar - %u registers", (unsigned) dump->registers_read());
         return std::string(buf);
       }
       return std::string("Nog geen dump");
