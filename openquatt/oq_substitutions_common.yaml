@@ -13,7 +13,7 @@
 device_name: "openquatt"                              # Internal ESPHome device ID / hostname base.
 friendly_name: OpenQuatt                              # Display name in Home Assistant / UI.
 project_name: "openquatt.openquatt"                   # ESPHome project identifier shown in firmware metadata.
-project_version: "v0.61.0"                          # Firmware version shown in firmware metadata. Loopt los van de
+project_version: "v0.62.0"                          # Firmware version shown in firmware metadata. Loopt los van de
                                                        # protocol/hardware directory versie (v0.29.0 in de mapnaam).
 release_channel: "main"                               # Firmware release channel shown in diagnostics (`main` or `dev`).
 hp_perf_map_header: "openquatt/includes/hp_perf_map.h" # C++ performance-map header include path.
@@ -21,6 +21,7 @@ thermal_request_logic_header: "openquatt/includes/oq_thermal_request_logic.h" # 
 heating_curve_logic_header: "openquatt/includes/oq_heating_curve_logic.h" # Shared C++ helper include for curve runtime state and naming.
 dhw_controller_logic_header: "openquatt/includes/oq_dhw_controller_logic.h" # Shared C++ helper include for DHW finite-state control.
 installation_monitor_header: "openquatt/includes/oq_installation_monitoring.h" # Compressor-startenteller; overgenomen van upstream.
+odu_runtime_freq_table_header: "openquatt/includes/oq_odu_runtime_frequency_table.h" # EXPERIMENTEEL: frequentiekromme tijdelijk in de ODU zetten.
 # v0.42: oq_webserver_css_url / oq_webserver_js_url substitutions verwijderd —
 # custom webapp is uit de build; classic ESPHome v3 UI gebruikt de defaults.
 

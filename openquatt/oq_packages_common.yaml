@@ -186,3 +186,10 @@ heatpump1: !include
     prefix: "HP1 - "
     device_address: 0x01
     hp_index: 1
+# EXPERIMENTEEL, na oq_HP_io omdat het de modbus-controller en de eeprom-dump
+# component van die HP gebruikt. Eén regel weghalen schakelt de hele feature uit.
+odu_freq_table_hp1: !include
+  file: oq_odu_runtime_frequency_table.yaml
+  vars:
+    hp_id: "hp1"
+    prefix: "HP1 - "

@@ -1,0 +1,506 @@
+# ==============================================================================
+# OpenQuatt - EXPERIMENTEEL: frequentiekromme van de buitenunit tijdelijk zetten
+# ==============================================================================
+#
+# Overgenomen van upstream (openquatt/experimental/
+# oq_odu_runtime_frequency_table_hp.yaml). Daar zijn alle entiteiten
+# `internal: true` omdat hun eigen webapp ze aanstuurt; die bouwt deze fork niet
+# mee, dus hier staan ze gewoon in Home Assistant.
+#
+# --- LEES DIT EERST ---
+# Dit schrijft over Modbus 22 registers naar de buitenunit: de koelkromme F0-F10
+# en de verwarmingskromme F0-F10. Daarmee verander je wat "stand 3" voor de unit
+# betekent in Hz.
+#
+# Het is VLUCHTIG. Er wordt naar de runtime-schaduw geschreven en de checksum op
+# blad 3510/3511 blijft ongemoeid, dus een volledige power cycle van de
+# buitenunit zet de fabriekstabel terug. Dat is je noodrem.
+#
+# Het is ook NIET afgestemd op de rest van OpenQuatt. `hp_perf_map.h` bevat
+# gemeten vermogens en COP's per stand; verschuif je de Hz achter een stand, dan
+# klopt die tabel niet meer en daarmee ook de vermogens-, COP- en
+# dispatch-berekeningen die erop leunen. Gebruik dit voor korte, bewaakte
+# proeven, niet als instelling die je laat staan.
+#
+# --- Bediening ---
+#   1. "tabel ophalen"      leest wat er NU in de unit staat naar de invoervakken
+#   2. invoervakken aanpassen (0-120 Hz, moet oplopend zijn)
+#   3. "schrijven vrijgeven" aanzetten
+#   4. "tabel toepassen"     schrijft, maar alleen als de unit stilstaat
+#
+# De vrijgaveknop gaat er bij het schrijven automatisch weer uit: een druk is
+# een schrijfactie. De status vertelt waar het strandde als er iets misgaat.
+#
+# Defaults hieronder zijn de fabriekswaarden zoals gemeten in de EEPROM-dumps
+# van HP1 en HP2 (die zijn byte-identiek). Zie docs/odu-eeprom-parameters.md.
+#
+# Vereiste vars: hp_id, prefix
+# ==============================================================================
+
+switch:
+  # Bewust `restore_mode: ALWAYS_OFF`: na een herstart van de ESP staat het
+  # schrijven nooit vanzelf weer vrij.
+  - platform: template
+    id: ${hp_id}_odu_freq_write_enable
+    name: "${prefix}EXPERIMENTEEL schrijven vrijgeven"
+    icon: mdi:alert-decagram
+    entity_category: config
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+
+number:
+  - platform: template
+    id: ${hp_id}_odu_freq_cool_f0
+    name: "${prefix}EXPERIMENTEEL koelen F0 Hz"
+    icon: mdi:snowflake
+    entity_category: config
+    unit_of_measurement: "Hz"
+    mode: box
+    min_value: 0
+    max_value: 120
+    step: 1
+    restore_value: true
+    optimistic: true
+    initial_value: 0
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+
+  - platform: template
+    id: ${hp_id}_odu_freq_cool_f1
+    name: "${prefix}EXPERIMENTEEL koelen F1 Hz"
+    icon: mdi:snowflake
+    entity_category: config
+    unit_of_measurement: "Hz"
+    mode: box
+    min_value: 0
+    max_value: 120
+    step: 1
+    restore_value: true
+    optimistic: true
+    initial_value: 30
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+
+  - platform: template
+    id: ${hp_id}_odu_freq_cool_f2
+    name: "${prefix}EXPERIMENTEEL koelen F2 Hz"
+    icon: mdi:snowflake
+    entity_category: config
+    unit_of_measurement: "Hz"
+    mode: box
+    min_value: 0
+    max_value: 120
+    step: 1
+    restore_value: true
+    optimistic: true
+    initial_value: 36
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+
+  - platform: template
+    id: ${hp_id}_odu_freq_cool_f3
+    name: "${prefix}EXPERIMENTEEL koelen F3 Hz"
+    icon: mdi:snowflake
+    entity_category: config
+    unit_of_measurement: "Hz"
+    mode: box
+    min_value: 0
+    max_value: 120
+    step: 1
+    restore_value: true
+    optimistic: true
+    initial_value: 42
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+
+  - platform: template
+    id: ${hp_id}_odu_freq_cool_f4
+    name: "${prefix}EXPERIMENTEEL koelen F4 Hz"
+    icon: mdi:snowflake
+    entity_category: config
+    unit_of_measurement: "Hz"
+    mode: box
+    min_value: 0
+    max_value: 120
+    step: 1
+    restore_value: true
+    optimistic: true
+    initial_value: 47
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+
+  - platform: template
+    id: ${hp_id}_odu_freq_cool_f5
+    name: "${prefix}EXPERIMENTEEL koelen F5 Hz"
+    icon: mdi:snowflake
+    entity_category: config
+    unit_of_measurement: "Hz"
+    mode: box
+    min_value: 0
+    max_value: 120
+    step: 1
+    restore_value: true
+    optimistic: true
+    initial_value: 52
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+
+  - platform: template
+    id: ${hp_id}_odu_freq_cool_f6
+    name: "${prefix}EXPERIMENTEEL koelen F6 Hz"
+    icon: mdi:snowflake
+    entity_category: config
+    unit_of_measurement: "Hz"
+    mode: box
+    min_value: 0
+    max_value: 120
+    step: 1
+    restore_value: true
+    optimistic: true
+    initial_value: 56
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+
+  - platform: template
+    id: ${hp_id}_odu_freq_cool_f7
+    name: "${prefix}EXPERIMENTEEL koelen F7 Hz"
+    icon: mdi:snowflake
+    entity_category: config
+    unit_of_measurement: "Hz"
+    mode: box
+    min_value: 0
+    max_value: 120
+    step: 1
+    restore_value: true
+    optimistic: true
+    initial_value: 61
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+
+  - platform: template
+    id: ${hp_id}_odu_freq_cool_f8
+    name: "${prefix}EXPERIMENTEEL koelen F8 Hz"
+    icon: mdi:snowflake
+    entity_category: config
+    unit_of_measurement: "Hz"
+    mode: box
+    min_value: 0
+    max_value: 120
+    step: 1
+    restore_value: true
+    optimistic: true
+    initial_value: 66
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+
+  - platform: template
+    id: ${hp_id}_odu_freq_cool_f9
+    name: "${prefix}EXPERIMENTEEL koelen F9 Hz"
+    icon: mdi:snowflake
+    entity_category: config
+    unit_of_measurement: "Hz"
+    mode: box
+    min_value: 0
+    max_value: 120
+    step: 1
+    restore_value: true
+    optimistic: true
+    initial_value: 71
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+
+  - platform: template
+    id: ${hp_id}_odu_freq_cool_f10
+    name: "${prefix}EXPERIMENTEEL koelen F10 Hz"
+    icon: mdi:snowflake
+    entity_category: config
+    unit_of_measurement: "Hz"
+    mode: box
+    min_value: 0
+    max_value: 120
+    step: 1
+    restore_value: true
+    optimistic: true
+    initial_value: 74
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+
+
+  - platform: template
+    id: ${hp_id}_odu_freq_heat_f0
+    name: "${prefix}EXPERIMENTEEL verwarmen F0 Hz"
+    icon: mdi:fire
+    entity_category: config
+    unit_of_measurement: "Hz"
+    mode: box
+    min_value: 0
+    max_value: 120
+    step: 1
+    restore_value: true
+    optimistic: true
+    initial_value: 0
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+
+  - platform: template
+    id: ${hp_id}_odu_freq_heat_f1
+    name: "${prefix}EXPERIMENTEEL verwarmen F1 Hz"
+    icon: mdi:fire
+    entity_category: config
+    unit_of_measurement: "Hz"
+    mode: box
+    min_value: 0
+    max_value: 120
+    step: 1
+    restore_value: true
+    optimistic: true
+    initial_value: 30
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+
+  - platform: template
+    id: ${hp_id}_odu_freq_heat_f2
+    name: "${prefix}EXPERIMENTEEL verwarmen F2 Hz"
+    icon: mdi:fire
+    entity_category: config
+    unit_of_measurement: "Hz"
+    mode: box
+    min_value: 0
+    max_value: 120
+    step: 1
+    restore_value: true
+    optimistic: true
+    initial_value: 39
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+
+  - platform: template
+    id: ${hp_id}_odu_freq_heat_f3
+    name: "${prefix}EXPERIMENTEEL verwarmen F3 Hz"
+    icon: mdi:fire
+    entity_category: config
+    unit_of_measurement: "Hz"
+    mode: box
+    min_value: 0
+    max_value: 120
+    step: 1
+    restore_value: true
+    optimistic: true
+    initial_value: 49
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+
+  - platform: template
+    id: ${hp_id}_odu_freq_heat_f4
+    name: "${prefix}EXPERIMENTEEL verwarmen F4 Hz"
+    icon: mdi:fire
+    entity_category: config
+    unit_of_measurement: "Hz"
+    mode: box
+    min_value: 0
+    max_value: 120
+    step: 1
+    restore_value: true
+    optimistic: true
+    initial_value: 55
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+
+  - platform: template
+    id: ${hp_id}_odu_freq_heat_f5
+    name: "${prefix}EXPERIMENTEEL verwarmen F5 Hz"
+    icon: mdi:fire
+    entity_category: config
+    unit_of_measurement: "Hz"
+    mode: box
+    min_value: 0
+    max_value: 120
+    step: 1
+    restore_value: true
+    optimistic: true
+    initial_value: 61
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+
+  - platform: template
+    id: ${hp_id}_odu_freq_heat_f6
+    name: "${prefix}EXPERIMENTEEL verwarmen F6 Hz"
+    icon: mdi:fire
+    entity_category: config
+    unit_of_measurement: "Hz"
+    mode: box
+    min_value: 0
+    max_value: 120
+    step: 1
+    restore_value: true
+    optimistic: true
+    initial_value: 67
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+
+  - platform: template
+    id: ${hp_id}_odu_freq_heat_f7
+    name: "${prefix}EXPERIMENTEEL verwarmen F7 Hz"
+    icon: mdi:fire
+    entity_category: config
+    unit_of_measurement: "Hz"
+    mode: box
+    min_value: 0
+    max_value: 120
+    step: 1
+    restore_value: true
+    optimistic: true
+    initial_value: 72
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+
+  - platform: template
+    id: ${hp_id}_odu_freq_heat_f8
+    name: "${prefix}EXPERIMENTEEL verwarmen F8 Hz"
+    icon: mdi:fire
+    entity_category: config
+    unit_of_measurement: "Hz"
+    mode: box
+    min_value: 0
+    max_value: 120
+    step: 1
+    restore_value: true
+    optimistic: true
+    initial_value: 79
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+
+  - platform: template
+    id: ${hp_id}_odu_freq_heat_f9
+    name: "${prefix}EXPERIMENTEEL verwarmen F9 Hz"
+    icon: mdi:fire
+    entity_category: config
+    unit_of_measurement: "Hz"
+    mode: box
+    min_value: 0
+    max_value: 120
+    step: 1
+    restore_value: true
+    optimistic: true
+    initial_value: 85
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+
+  - platform: template
+    id: ${hp_id}_odu_freq_heat_f10
+    name: "${prefix}EXPERIMENTEEL verwarmen F10 Hz"
+    icon: mdi:fire
+    entity_category: config
+    unit_of_measurement: "Hz"
+    mode: box
+    min_value: 0
+    max_value: 120
+    step: 1
+    restore_value: true
+    optimistic: true
+    initial_value: 90
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+
+button:
+  - platform: template
+    id: ${hp_id}_odu_freq_load
+    name: "${prefix}EXPERIMENTEEL tabel ophalen"
+    icon: mdi:table-arrow-down
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+    on_press:
+      - lambda: |-
+          oq_odu_runtime_frequency::RuntimeFrequencyTableRefs refs = {
+              id(${hp_id}),
+              id(${hp_id}_odu_eeprom_dump),
+              id(${hp_id}_odu_freq_write_enable),
+              id(${hp_id}_odu_freq_status),
+              "${prefix}",
+              {
+                  id(${hp_id}_odu_freq_cool_f0),
+                  id(${hp_id}_odu_freq_cool_f1),
+                  id(${hp_id}_odu_freq_cool_f2),
+                  id(${hp_id}_odu_freq_cool_f3),
+                  id(${hp_id}_odu_freq_cool_f4),
+                  id(${hp_id}_odu_freq_cool_f5),
+                  id(${hp_id}_odu_freq_cool_f6),
+                  id(${hp_id}_odu_freq_cool_f7),
+                  id(${hp_id}_odu_freq_cool_f8),
+                  id(${hp_id}_odu_freq_cool_f9),
+                  id(${hp_id}_odu_freq_cool_f10)
+              },
+              {
+                  id(${hp_id}_odu_freq_heat_f0),
+                  id(${hp_id}_odu_freq_heat_f1),
+                  id(${hp_id}_odu_freq_heat_f2),
+                  id(${hp_id}_odu_freq_heat_f3),
+                  id(${hp_id}_odu_freq_heat_f4),
+                  id(${hp_id}_odu_freq_heat_f5),
+                  id(${hp_id}_odu_freq_heat_f6),
+                  id(${hp_id}_odu_freq_heat_f7),
+                  id(${hp_id}_odu_freq_heat_f8),
+                  id(${hp_id}_odu_freq_heat_f9),
+                  id(${hp_id}_odu_freq_heat_f10)
+              },
+          };
+          oq_odu_runtime_frequency::load_runtime_table(refs);
+
+  - platform: template
+    id: ${hp_id}_odu_freq_apply
+    name: "${prefix}EXPERIMENTEEL tabel toepassen"
+    icon: mdi:alert-circle-check-outline
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+    on_press:
+      - lambda: |-
+          oq_odu_runtime_frequency::RuntimeFrequencyTableRefs refs = {
+              id(${hp_id}),
+              id(${hp_id}_odu_eeprom_dump),
+              id(${hp_id}_odu_freq_write_enable),
+              id(${hp_id}_odu_freq_status),
+              "${prefix}",
+              {
+                  id(${hp_id}_odu_freq_cool_f0),
+                  id(${hp_id}_odu_freq_cool_f1),
+                  id(${hp_id}_odu_freq_cool_f2),
+                  id(${hp_id}_odu_freq_cool_f3),
+                  id(${hp_id}_odu_freq_cool_f4),
+                  id(${hp_id}_odu_freq_cool_f5),
+                  id(${hp_id}_odu_freq_cool_f6),
+                  id(${hp_id}_odu_freq_cool_f7),
+                  id(${hp_id}_odu_freq_cool_f8),
+                  id(${hp_id}_odu_freq_cool_f9),
+                  id(${hp_id}_odu_freq_cool_f10)
+              },
+              {
+                  id(${hp_id}_odu_freq_heat_f0),
+                  id(${hp_id}_odu_freq_heat_f1),
+                  id(${hp_id}_odu_freq_heat_f2),
+                  id(${hp_id}_odu_freq_heat_f3),
+                  id(${hp_id}_odu_freq_heat_f4),
+                  id(${hp_id}_odu_freq_heat_f5),
+                  id(${hp_id}_odu_freq_heat_f6),
+                  id(${hp_id}_odu_freq_heat_f7),
+                  id(${hp_id}_odu_freq_heat_f8),
+                  id(${hp_id}_odu_freq_heat_f9),
+                  id(${hp_id}_odu_freq_heat_f10)
+              },
+          };
+          oq_odu_runtime_frequency::apply_runtime_table(
+              refs, id(${hp_id}_odu_freq_write_enable)->state);
+
+text_sensor:
+  # `update_interval: never` -- deze sensor wordt alleen door de lambdas gevuld.
+  - platform: template
+    id: ${hp_id}_odu_freq_status
+    name: "${prefix}EXPERIMENTEEL frequentietabel status"
+    icon: mdi:alert-decagram-outline
+    entity_category: diagnostic
+    update_interval: never
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
