@@ -22,11 +22,21 @@
 # dispatch-berekeningen die erop leunen. Gebruik dit voor korte, bewaakte
 # proeven, niet als instelling die je laat staan.
 #
+# --- SCHRIJVEN STAAT STANDAARD VERGRENDELD ---
+# `odu_freq_write_unlocked` in oq_substitutions_common.yaml staat op "0". De
+# knop "tabel toepassen" weigert dan en meldt dat, en er komt niets op de bus.
+# Ophalen en bewerken blijven werken -- lezen is ongevaarlijk.
+#
+# Ontgrendelen kost een codewijziging plus flashen. Dat is opzet: een proef op
+# een cv-installatie hoort niet achter een muisklik te zitten. Zet terug op "0"
+# zodra de proef klaar is.
+#
 # --- Bediening ---
 #   1. "tabel ophalen"      leest wat er NU in de unit staat naar de invoervakken
 #   2. invoervakken aanpassen (0-120 Hz, moet oplopend zijn)
-#   3. "schrijven vrijgeven" aanzetten
-#   4. "tabel toepassen"     schrijft, maar alleen als de unit stilstaat
+#   3. grendel op "1" zetten en flashen -- alleen als je echt gaat proeven
+#   4. "schrijven vrijgeven" aanzetten
+#   5. "tabel toepassen"     schrijft, maar alleen als de unit stilstaat
 #
 # De vrijgaveknop gaat er bij het schrijven automatisch weer uit: een druk is
 # een schrijfactie. De status vertelt waar het strandde als er iets misgaat.
@@ -458,6 +468,19 @@ button:
       sorting_group_id: oq_${hp_id}_freq
     on_press:
       - lambda: |-
+          // GRENDEL. Staat odu_freq_write_unlocked op "0", dan komt er niets op
+          // de bus. Dit zit vóór alles: vóór de vrijgaveschakelaar, vóór de
+          // toestandscontrole van de unit, vóór het opbouwen van de opdracht.
+          // Ontgrendelen kan alleen door de substitutie te wijzigen en te
+          // flashen -- zie oq_substitutions_common.yaml.
+          const bool write_unlocked = (${odu_freq_write_unlocked} != 0);
+          if (!write_unlocked) {
+            id(${hp_id}_odu_freq_status)->publish_state(
+                "VERGRENDELD: schrijven staat uit in oq_substitutions_common.yaml");
+            ESP_LOGW("oq_odu_freq", "${prefix}schrijfpoging geweigerd: grendel staat dicht");
+            return;
+          }
+
           oq_odu_runtime_frequency::RuntimeFrequencyTableRefs refs = {
               id(${hp_id}),
               id(${hp_id}_odu_eeprom_dump),

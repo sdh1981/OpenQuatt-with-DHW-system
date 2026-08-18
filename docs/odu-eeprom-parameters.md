@@ -122,6 +122,8 @@ Fase 0 en 1 zijn goedkoop en leveren het antwoord op de vraag of dit kan — waa
 
 ## Gebouwd in v0.62.0: de frequentiekromme tijdelijk zetten
 
+> **Schrijven staat vergrendeld.** `odu_freq_write_unlocked` in `oq_substitutions_common.yaml` staat op `"0"`. De knop "tabel toepassen" weigert dan en er komt niets op de bus; ophalen en bewerken blijven werken. Ontgrendelen kost een codewijziging plus flashen, en dat is opzet — dit is geen muisklik-actie op een cv-installatie in een bewoond huis. Zet terug op `"0"` zodra een proef klaar is.
+
 Overgenomen van upstream, waar dit in `openquatt/experimental/` staat. Het schrijft **22 registers vanaf modbus 3000** — koelen F0–F10 en verwarmen F0–F10, blad 3001 tot en met 3022 — in één functie-16 transactie. Verder wordt er niets aangeraakt.
 
 Het is vluchtig: dit gaat naar de runtime-schaduw en de checksum op 3510/3511 blijft staan, dus een volledige power cycle van de buitenunit zet de fabriekstabel terug. Dat is meteen de noodrem.

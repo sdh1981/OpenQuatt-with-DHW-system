@@ -22,6 +22,15 @@ heating_curve_logic_header: "openquatt/includes/oq_heating_curve_logic.h" # Shar
 dhw_controller_logic_header: "openquatt/includes/oq_dhw_controller_logic.h" # Shared C++ helper include for DHW finite-state control.
 installation_monitor_header: "openquatt/includes/oq_installation_monitoring.h" # Compressor-startenteller; overgenomen van upstream.
 odu_runtime_freq_table_header: "openquatt/includes/oq_odu_runtime_frequency_table.h" # EXPERIMENTEEL: frequentiekromme tijdelijk in de ODU zetten.
+# GRENDEL op het schrijven van de frequentiekromme. "0" = vergrendeld: de
+# knop "tabel toepassen" doet niets en meldt dat. Ophalen en bewerken blijft
+# gewoon werken, want lezen is ongevaarlijk.
+#
+# Bewust een substitutie en geen schakelaar in de UI: ontgrendelen kost een
+# codewijziging plus flashen. Dat is de ceremonie die erbij hoort -- een
+# vergissing met een muisklik mag hier niet kunnen. Zet op "1" wanneer je
+# daadwerkelijk een proef gaat doen, en daarna weer terug op "0".
+odu_freq_write_unlocked: "0"
 # v0.42: oq_webserver_css_url / oq_webserver_js_url substitutions verwijderd —
 # custom webapp is uit de build; classic ESPHome v3 UI gebruikt de defaults.
 
