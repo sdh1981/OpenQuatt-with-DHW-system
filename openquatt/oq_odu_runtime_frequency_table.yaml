@@ -36,7 +36,24 @@
 #   2. invoervakken aanpassen (0-120 Hz, moet oplopend zijn)
 #   3. grendel op "1" zetten en flashen -- alleen als je echt gaat proeven
 #   4. "schrijven vrijgeven" aanzetten
-#   5. "tabel toepassen"     schrijft, maar alleen als de unit stilstaat
+#   5. "tabel toepassen"     schrijft
+#
+# Stap 5 weigert standaard op een draaiende machine. Wil je afstellen zonder de
+# unit tussen elke proef stil te leggen, zet dan "schrijven tijdens bedrijf"
+# aan -- die schakelaar zet die tweede grendel opzij. Beide schakelaars staan
+# na een herstart weer uit.
+#
+# --- MAXIMAAL 5 Hz PER KEER ---
+# Vlak voor het schrijven wordt de tabel gelezen die op dat moment in de unit
+# staat, en een stand mag daar hooguit MAX_STEP_HZ van afwijken. Dat is geen
+# beperking van wat je kunt instellen maar van hoe snel: een grote wijziging
+# maak je in stappen.
+#
+# De reden is deze vakken zelf. Ze hebben restore_value: true, dus een getal uit
+# een eerdere proef blijft staan en ziet er precies zo uit als een bedoelde
+# instelling. Vergeet je stap 1, dan schrijf je die oude waarde -- en dat kan
+# midden in bedrijf zijn. De vergelijking gaat daarom tegen de unit, niet tegen
+# wat hier op het scherm staat.
 #
 # De vrijgaveknop gaat er bij het schrijven automatisch weer uit: een druk is
 # een schrijfactie. De status vertelt waar het strandde als er iets misgaat.
@@ -59,6 +76,32 @@ switch:
     restore_mode: ALWAYS_OFF
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 30
+
+  # Zet de tweede grendel opzij: schrijven terwijl de compressor draait.
+  #
+  # Uit (standaard) leest de component eerst werkmodus en compressorfrequentie
+  # en weigert op een draaiende machine. Aan doet hij die lezing nog steeds --
+  # het log legt vast waarin je geschreven hebt -- maar weigert niet meer.
+  #
+  # Waarom je dit zou willen: een kromme afstellen zonder de unit tussen elke
+  # proef stil te leggen. Elke stop-start kost een compressorstart en vervuilt
+  # je cycling-statistiek.
+  #
+  # Wat je overneemt: de buitenunit krijgt midden in bedrijf een andere
+  # betekenis voor zijn standen. Draait hij op stand 8 en verschuif je die, dan
+  # verandert zijn toerental buiten de normale niveauwissel om. Ook ALWAYS_OFF,
+  # zodat dit nooit vanzelf aan staat na een herstart.
+  - platform: template
+    id: ${hp_id}_odu_freq_allow_while_running
+    name: "${prefix}EXPERIMENTEEL schrijven tijdens bedrijf"
+    icon: mdi:engine-outline
+    entity_category: config
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 35
 
 number:
   - platform: template
@@ -76,6 +119,7 @@ number:
     initial_value: 0
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 100
 
   - platform: template
     id: ${hp_id}_odu_freq_cool_f1
@@ -92,6 +136,7 @@ number:
     initial_value: 30
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 101
 
   - platform: template
     id: ${hp_id}_odu_freq_cool_f2
@@ -108,6 +153,7 @@ number:
     initial_value: 36
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 102
 
   - platform: template
     id: ${hp_id}_odu_freq_cool_f3
@@ -124,6 +170,7 @@ number:
     initial_value: 42
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 103
 
   - platform: template
     id: ${hp_id}_odu_freq_cool_f4
@@ -140,6 +187,7 @@ number:
     initial_value: 47
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 104
 
   - platform: template
     id: ${hp_id}_odu_freq_cool_f5
@@ -156,6 +204,7 @@ number:
     initial_value: 52
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 105
 
   - platform: template
     id: ${hp_id}_odu_freq_cool_f6
@@ -172,6 +221,7 @@ number:
     initial_value: 56
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 106
 
   - platform: template
     id: ${hp_id}_odu_freq_cool_f7
@@ -188,6 +238,7 @@ number:
     initial_value: 61
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 107
 
   - platform: template
     id: ${hp_id}_odu_freq_cool_f8
@@ -204,6 +255,7 @@ number:
     initial_value: 66
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 108
 
   - platform: template
     id: ${hp_id}_odu_freq_cool_f9
@@ -220,6 +272,7 @@ number:
     initial_value: 71
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 109
 
   - platform: template
     id: ${hp_id}_odu_freq_cool_f10
@@ -236,6 +289,7 @@ number:
     initial_value: 74
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 110
 
 
   - platform: template
@@ -253,6 +307,7 @@ number:
     initial_value: 0
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 200
 
   - platform: template
     id: ${hp_id}_odu_freq_heat_f1
@@ -269,6 +324,7 @@ number:
     initial_value: 30
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 201
 
   - platform: template
     id: ${hp_id}_odu_freq_heat_f2
@@ -285,6 +341,7 @@ number:
     initial_value: 39
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 202
 
   - platform: template
     id: ${hp_id}_odu_freq_heat_f3
@@ -301,6 +358,7 @@ number:
     initial_value: 49
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 203
 
   - platform: template
     id: ${hp_id}_odu_freq_heat_f4
@@ -317,6 +375,7 @@ number:
     initial_value: 55
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 204
 
   - platform: template
     id: ${hp_id}_odu_freq_heat_f5
@@ -333,6 +392,7 @@ number:
     initial_value: 61
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 205
 
   - platform: template
     id: ${hp_id}_odu_freq_heat_f6
@@ -349,6 +409,7 @@ number:
     initial_value: 67
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 206
 
   - platform: template
     id: ${hp_id}_odu_freq_heat_f7
@@ -365,6 +426,7 @@ number:
     initial_value: 72
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 207
 
   - platform: template
     id: ${hp_id}_odu_freq_heat_f8
@@ -381,6 +443,7 @@ number:
     initial_value: 79
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 208
 
   - platform: template
     id: ${hp_id}_odu_freq_heat_f9
@@ -397,6 +460,7 @@ number:
     initial_value: 85
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 209
 
   - platform: template
     id: ${hp_id}_odu_freq_heat_f10
@@ -413,6 +477,7 @@ number:
     initial_value: 90
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 210
 
 button:
   - platform: template
@@ -422,6 +487,7 @@ button:
     entity_category: config
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 20
     on_press:
       - lambda: |-
           oq_odu_runtime_frequency::RuntimeFrequencyTableRefs refs = {
@@ -466,6 +532,7 @@ button:
     entity_category: config
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 40
     on_press:
       - lambda: |-
           // GRENDEL. Staat odu_freq_write_unlocked op "0", dan komt er niets op
@@ -515,7 +582,9 @@ button:
               },
           };
           oq_odu_runtime_frequency::apply_runtime_table(
-              refs, id(${hp_id}_odu_freq_write_enable)->state);
+              refs,
+              id(${hp_id}_odu_freq_write_enable)->state,
+              id(${hp_id}_odu_freq_allow_while_running)->state);
 
 text_sensor:
   # `update_interval: never` -- deze sensor wordt alleen door de lambdas gevuld.
@@ -527,3 +596,4 @@ text_sensor:
     update_interval: never
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 10
