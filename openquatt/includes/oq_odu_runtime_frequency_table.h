@@ -175,13 +175,23 @@ inline void queue_runtime_write(RuntimeFrequencyTableRefs refs, std::array<float
 
 // Leest eerst de toestand van de unit. Schrijven mag alleen in stilstand:
 // werkmodus 0 en compressorfrequentie 0.
+// allow_while_running komt van een schakelaar per unit. Staat die uit, dan mag
+// er alleen geschreven worden op een stilstaande machine. Staat hij aan, dan
+// wordt de toestand nog steeds gelezen -- we willen in het log zien waarin we
+// geschreven hebben -- maar niet meer geweigerd.
+//
+// Wat je daarmee overneemt: de buitenunit krijgt midden in bedrijf een andere
+// betekenis voor zijn eigen standen. Draait hij op stand 8 en verschuif je die,
+// dan verandert zijn toerental op een commando dat niet de normale niveauwissel
+// is. De beveiligingen IN de unit blijven staan, en een power cycle zet de
+// fabriekstabel terug -- dat blijft de noodrem.
 inline void queue_guarded_runtime_write(RuntimeFrequencyTableRefs refs, std::array<float, 11> cooling,
-                                        std::array<float, 11> heating) {
+                                        std::array<float, 11> heating, bool allow_while_running) {
   publish_status(refs, "CONTROLE: toestand van de unit wordt gelezen");
   auto cmd = esphome::modbus_controller::ModbusCommandItem::create_read_command(
       refs.controller, esphome::modbus::EntityType::HOLDING, GUARD_START_ADDRESS, GUARD_REGISTER_COUNT,
-      [refs, cooling, heating](esphome::modbus::EntityType register_type, uint16_t start_address,
-                               std::span<const uint8_t> data) {
+      [refs, cooling, heating, allow_while_running](esphome::modbus::EntityType register_type,
+                                                    uint16_t start_address, std::span<const uint8_t> data) {
         uint16_t working_mode = 0;
         uint16_t compressor_hz = 0;
         if (!read_u16_word(data, GUARD_WORKING_MODE_INDEX, working_mode)) {
@@ -192,13 +202,18 @@ inline void queue_guarded_runtime_write(RuntimeFrequencyTableRefs refs, std::arr
           publish_status(refs, "GEBLOKKEERD: compressorfrequentie onbekend");
           return;
         }
-        if (working_mode != 0) {
-          publish_status(refs, "GEBLOKKEERD: unit staat niet in standby");
+        const bool unit_running = (working_mode != 0) || (compressor_hz > 0);
+        if (unit_running && !allow_while_running) {
+          publish_status(refs, working_mode != 0 ? "GEBLOKKEERD: unit staat niet in standby"
+                                                 : "GEBLOKKEERD: compressor draait");
           return;
         }
-        if (compressor_hz > 0) {
-          publish_status(refs, "GEBLOKKEERD: compressor draait");
-          return;
+        if (unit_running) {
+          // Niet blokkeren, wel vastleggen waarin je geschreven hebt. Loopt er
+          // daarna iets vreemds, dan staat hier in het log op welke frequentie
+          // de compressor draaide toen de tabel onder hem veranderde.
+          ESP_LOGW(TAG, "%sschrijven TIJDENS BEDRIJF: werkmodus %u, compressor %u Hz", refs.prefix,
+                   (unsigned) working_mode, (unsigned) compressor_hz);
         }
         queue_runtime_write(refs, cooling, heating);
       });
@@ -274,7 +289,7 @@ inline bool read_desired_values(const std::array<esphome::number::Number *, 11> 
   return validate_monotonic_table(values);
 }
 
-inline void apply_runtime_table(RuntimeFrequencyTableRefs refs, bool enabled) {
+inline void apply_runtime_table(RuntimeFrequencyTableRefs refs, bool enabled, bool allow_while_running) {
   if (refs.eeprom_dump != nullptr && refs.eeprom_dump->is_active()) {
     publish_status(refs, "GEBLOKKEERD: EEPROM-dump loopt");
     return;
@@ -295,7 +310,7 @@ inline void apply_runtime_table(RuntimeFrequencyTableRefs refs, bool enabled) {
     return;
   }
 
-  queue_guarded_runtime_write(refs, cooling, heating);
+  queue_guarded_runtime_write(refs, cooling, heating, allow_while_running);
 }
 
 }  // namespace oq_odu_runtime_frequency

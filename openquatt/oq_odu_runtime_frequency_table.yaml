@@ -36,7 +36,12 @@
 #   2. invoervakken aanpassen (0-120 Hz, moet oplopend zijn)
 #   3. grendel op "1" zetten en flashen -- alleen als je echt gaat proeven
 #   4. "schrijven vrijgeven" aanzetten
-#   5. "tabel toepassen"     schrijft, maar alleen als de unit stilstaat
+#   5. "tabel toepassen"     schrijft
+#
+# Stap 5 weigert standaard op een draaiende machine. Wil je afstellen zonder de
+# unit tussen elke proef stil te leggen, zet dan "schrijven tijdens bedrijf"
+# aan -- die schakelaar zet die tweede grendel opzij. Beide schakelaars staan
+# na een herstart weer uit.
 #
 # De vrijgaveknop gaat er bij het schrijven automatisch weer uit: een druk is
 # een schrijfactie. De status vertelt waar het strandde als er iets misgaat.
@@ -60,6 +65,31 @@ switch:
     web_server:
       sorting_group_id: oq_${hp_id}_freq
       sorting_weight: 30
+
+  # Zet de tweede grendel opzij: schrijven terwijl de compressor draait.
+  #
+  # Uit (standaard) leest de component eerst werkmodus en compressorfrequentie
+  # en weigert op een draaiende machine. Aan doet hij die lezing nog steeds --
+  # het log legt vast waarin je geschreven hebt -- maar weigert niet meer.
+  #
+  # Waarom je dit zou willen: een kromme afstellen zonder de unit tussen elke
+  # proef stil te leggen. Elke stop-start kost een compressorstart en vervuilt
+  # je cycling-statistiek.
+  #
+  # Wat je overneemt: de buitenunit krijgt midden in bedrijf een andere
+  # betekenis voor zijn standen. Draait hij op stand 8 en verschuif je die, dan
+  # verandert zijn toerental buiten de normale niveauwissel om. Ook ALWAYS_OFF,
+  # zodat dit nooit vanzelf aan staat na een herstart.
+  - platform: template
+    id: ${hp_id}_odu_freq_allow_while_running
+    name: "${prefix}EXPERIMENTEEL schrijven tijdens bedrijf"
+    icon: mdi:engine-outline
+    entity_category: config
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 35
 
 number:
   - platform: template
@@ -540,7 +570,9 @@ button:
               },
           };
           oq_odu_runtime_frequency::apply_runtime_table(
-              refs, id(${hp_id}_odu_freq_write_enable)->state);
+              refs,
+              id(${hp_id}_odu_freq_write_enable)->state,
+              id(${hp_id}_odu_freq_allow_while_running)->state);
 
 text_sensor:
   # `update_interval: never` -- deze sensor wordt alleen door de lambdas gevuld.
