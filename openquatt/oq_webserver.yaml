@@ -89,6 +89,14 @@ web_server:
     - id: oq_hp_diagnostics
       name: "HP Diagnostics"
       sorting_weight: 190
+    # EXPERIMENTEEL: frequentiekromme van de buitenunit. Zwaar gewicht zodat het
+    # onder de normale bediening blijft hangen -- dit is geen dagelijkse knop.
+    - id: oq_hp1_freq
+      name: "HP1 - EXPERIMENTEEL frequentietabel"
+      sorting_weight: 200
+    - id: oq_hp2_freq
+      name: "HP2 - EXPERIMENTEEL frequentietabel"
+      sorting_weight: 201
     - id: oq_raw
       name: "RAW"
       sorting_weight: 999

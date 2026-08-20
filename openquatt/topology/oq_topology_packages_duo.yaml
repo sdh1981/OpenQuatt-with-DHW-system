@@ -5,3 +5,9 @@ heatpump2: !include
     prefix: "HP2 - "
     device_address: 0x02
     hp_index: 2
+# EXPERIMENTEEL, zie de toelichting bij hp1 in oq_packages_common.yaml.
+odu_freq_table_hp2: !include
+  file: ../oq_odu_runtime_frequency_table.yaml
+  vars:
+    hp_id: "hp2"
+    prefix: "HP2 - "

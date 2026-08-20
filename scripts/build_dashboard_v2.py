@@ -623,6 +623,28 @@ V_DIAG = view(
               ('sensor.openquatt_intern_geheugen_laagste_stand', 'Laagste stand'),
               title='Intern geheugen, week'),
     ),
+    # De 22 invoervakken per unit staan bewust NIET allemaal hier: dat wordt een
+    # muur van getallen. Alleen de verwarmingskromme, want daar draait het om.
+    # Koelen en F0 staan op de apparaatpagina van HA onder Configuratie.
+    grid(
+        head('mdi:sine-wave', 'ODU frequentiekromme'),
+        note('**Experimenteel.** Schrijven is in de firmware vergrendeld — '
+             '`odu_freq_write_unlocked` staat op `"0"`, en ontgrendelen kost een '
+             'codewijziging plus flashen.\n\n'
+             '"Tabel ophalen" is wel veilig: dat leest de kromme die op dit moment '
+             'in de buitenunit staat, en zet hem in de vakken hieronder. Zolang je '
+             'niet hebt opgehaald tonen die de fabriekswaarden.'),
+        rows(('sensor.openquatt_hp1_experimenteel_frequentietabel_status', 'HP1 status'),
+             ('sensor.openquatt_hp2_experimenteel_frequentietabel_status', 'HP2 status'),
+             ('button.openquatt_hp1_experimenteel_tabel_ophalen', 'HP1 tabel ophalen'),
+             ('button.openquatt_hp2_experimenteel_tabel_ophalen', 'HP2 tabel ophalen')),
+        rows('Verwarmen HP1, Hz per stand',
+             *[('number.openquatt_hp1_experimenteel_verwarmen_f%d_hz' % i, 'F%d' % i)
+               for i in range(1, 11)]),
+        rows('Verwarmen HP2, Hz per stand',
+             *[('number.openquatt_hp2_experimenteel_verwarmen_f%d_hz' % i, 'F%d' % i)
+               for i in range(1, 11)]),
+    ),
     grid(
         head('mdi:tag-text', 'Systeem'),
         rows(('sensor.openquatt_openquatt_version', 'Versie'),
@@ -679,13 +701,13 @@ def main():
         '# die verschijnen alleen als er iets is. Een lege sectie is het signaal dat',
         '# alles in orde is -- niet een scherm vol groene vinkjes.',
         '#',
-        '# VEREIST FIRMWARE v0.60.0 OF NIEUWER.',
+        '# VEREIST FIRMWARE v0.62.0 OF NIEUWER.',
         '#',
-        '# Dit dashboard verwijst naar entiteiten uit de cycling monitor (v0.58) en',
-        '# het instellingen-vangnet (v0.60). Draait er oudere firmware op het',
-        '# apparaat, dan tonen die vakjes "Entiteit niet gevonden" -- en belangrijker:',
-        '# de rustmelding op de eerste tab verschijnt dan nooit, omdat haar conditie',
-        '# aan twee van die entiteiten hangt.',
+        '# Dit dashboard verwijst naar entiteiten uit de cycling monitor (v0.58), het',
+        '# instellingen-vangnet (v0.60) en de ODU-frequentiekromme (v0.62). Draait er',
+        '# oudere firmware op het apparaat, dan tonen die vakjes "Entiteit niet',
+        '# gevonden" -- en belangrijker: de rustmelding op de eerste tab verschijnt',
+        '# dan nooit, omdat haar conditie aan twee van die entiteiten hangt.',
         '#',
         '# Gegenereerd. Elke entity-id is gecontroleerd tegen de entiteiten die de',
         '# firmware-BRON aanmaakt. Dat is niet hetzelfde als wat er op het apparaat',
