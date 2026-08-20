@@ -438,19 +438,19 @@ void OpenQuattOduEepromDump::queue_current_request_() {
   auto command = modbus_controller::ModbusCommandItem::create_read_command(
       this->controller_, modbus::ModbusRegisterType::HOLDING, expected_start, this->request_register_count_,
       [this, expected_start, request_token](modbus::ModbusRegisterType, uint16_t start_address,
-                                            const std::vector<uint8_t>& data) {
+                                            std::span<const uint8_t> data) {
         if (start_address == expected_start) this->on_response_(request_token, start_address, data);
       });
   this->controller_->queue_command(command);
 }
 
-uint16_t OpenQuattOduEepromDump::read_word_(const std::vector<uint8_t>& data, size_t index) {
+uint16_t OpenQuattOduEepromDump::read_word_(std::span<const uint8_t> data, size_t index) {
   const size_t offset = index * 2U;
   return static_cast<uint16_t>((static_cast<uint16_t>(data[offset]) << 8U) | data[offset + 1U]);
 }
 
 void OpenQuattOduEepromDump::on_response_(uint32_t request_token, uint16_t start_address,
-                                          const std::vector<uint8_t>& data) {
+                                          std::span<const uint8_t> data) {
   if (!this->active_.load(std::memory_order_acquire) ||
       request_token != this->request_token_.load(std::memory_order_acquire) ||
       !this->waiting_for_response_.load(std::memory_order_acquire) || start_address != this->request_start_address_) {

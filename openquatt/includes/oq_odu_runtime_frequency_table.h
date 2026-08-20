@@ -38,6 +38,14 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+// <span> voor de lees-callbacks. ESPHome 2026.8.0 geeft de payload door als
+// std::span<const uint8_t> waar dat eerder een const std::vector<uint8_t>& was,
+// en een span converteert niet terug naar een vector. Een span-parameter werkt
+// op beide versies: op 2026.7.0 komt er een vector binnen die impliciet naar een
+// span converteert, op 2026.8.0 komt hij er al als span in.
+// <vector> blijft nodig: create_write_multiple_command neemt nog steeds een
+// std::vector<uint16_t> met de te schrijven waarden.
+#include <span>
 #include <vector>
 
 #include "esphome/components/modbus_controller/modbus_controller.h"
@@ -94,21 +102,21 @@ inline bool validate_monotonic_table(const std::array<float, 11> &values) {
   return true;
 }
 
-inline bool read_u16_word(const std::vector<uint8_t> &data, size_t index, uint16_t &value) {
+inline bool read_u16_word(std::span<const uint8_t> data, size_t index, uint16_t &value) {
   const size_t offset = index * 2U;
   if (data.size() < offset + 2U) return false;
   value = (uint16_t(data[offset]) << 8) | uint16_t(data[offset + 1U]);
   return true;
 }
 
-inline bool read_word_as_frequency(const std::vector<uint8_t> &data, size_t index, float &value) {
+inline bool read_word_as_frequency(std::span<const uint8_t> data, size_t index, float &value) {
   uint16_t raw = 0;
   if (!read_u16_word(data, index, raw)) return false;
   value = float(raw);
   return valid_frequency(value);
 }
 
-inline bool parse_runtime_table(const std::vector<uint8_t> &data, std::array<float, 11> &cooling,
+inline bool parse_runtime_table(std::span<const uint8_t> data, std::array<float, 11> &cooling,
                                std::array<float, 11> &heating, int &loaded) {
   loaded = 0;
   float value = NAN;
@@ -161,7 +169,7 @@ inline void queue_runtime_write(RuntimeFrequencyTableRefs refs, std::array<float
       refs.controller, RUNTIME_TABLE_START_ADDRESS, RUNTIME_TABLE_REGISTER_COUNT,
       build_runtime_write_values(cooling, heating));
   cmd.on_data_func = [refs, cooling, heating](esphome::modbus::ModbusRegisterType register_type,
-                                              uint16_t start_address, const std::vector<uint8_t> &data) {
+                                              uint16_t start_address, std::span<const uint8_t> data) {
     publish_status(refs, "SCHRIJVEN: bevestigd door de unit");
     queue_apply_readback(refs, cooling, heating);
   };
@@ -176,7 +184,7 @@ inline void queue_guarded_runtime_write(RuntimeFrequencyTableRefs refs, std::arr
   auto cmd = esphome::modbus_controller::ModbusCommandItem::create_read_command(
       refs.controller, esphome::modbus::ModbusRegisterType::HOLDING, GUARD_START_ADDRESS, GUARD_REGISTER_COUNT,
       [refs, cooling, heating](esphome::modbus::ModbusRegisterType register_type, uint16_t start_address,
-                               const std::vector<uint8_t> &data) {
+                               std::span<const uint8_t> data) {
         uint16_t working_mode = 0;
         uint16_t compressor_hz = 0;
         if (!read_u16_word(data, GUARD_WORKING_MODE_INDEX, working_mode)) {
@@ -209,7 +217,7 @@ inline void queue_apply_readback(RuntimeFrequencyTableRefs refs, std::array<floa
       refs.controller, esphome::modbus::ModbusRegisterType::HOLDING, RUNTIME_TABLE_START_ADDRESS,
       RUNTIME_TABLE_REGISTER_COUNT,
       [refs, expected_cooling, expected_heating](esphome::modbus::ModbusRegisterType register_type,
-                                                 uint16_t start_address, const std::vector<uint8_t> &data) {
+                                                 uint16_t start_address, std::span<const uint8_t> data) {
         std::array<float, 11> cooling{};
         std::array<float, 11> heating{};
         int loaded = 0;
@@ -245,7 +253,7 @@ inline void load_runtime_table(RuntimeFrequencyTableRefs refs) {
       refs.controller, esphome::modbus::ModbusRegisterType::HOLDING, RUNTIME_TABLE_START_ADDRESS,
       RUNTIME_TABLE_REGISTER_COUNT,
       [refs](esphome::modbus::ModbusRegisterType register_type, uint16_t start_address,
-             const std::vector<uint8_t> &data) {
+             std::span<const uint8_t> data) {
         std::array<float, 11> cooling{};
         std::array<float, 11> heating{};
         int loaded = 0;
