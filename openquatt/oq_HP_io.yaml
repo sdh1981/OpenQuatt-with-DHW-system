@@ -66,10 +66,14 @@ modbus_controller:
 #   /openquatt/odu-eeprom/hp${hp_index}/status     (GET)
 #   /openquatt/odu-eeprom/hp${hp_index}/download   (GET)
 #
-# Neemt de bus NIET over: hij wacht tot de commandowachtrij leeg is, zet dan een
-# enkele leesopdracht in, en wacht opnieuw. De normale polling loopt dus door en
-# de comms-watchdog van de HP blijft rustig. Prijs daarvan is dat een dump een
-# paar minuten duurt.
+# Neemt de bus NIET over: er staat altijd hooguit een leesopdracht uit, en er zit
+# een vaste 500ms tussen twee verzoeken. De hub plant die lezingen tussen de
+# normale pollcommando's in, dus de polling loopt door en de comms-watchdog van
+# de HP blijft rustig. Een dump duurt daarmee ~15s.
+#
+# Tot ESPHome 2026.8.0 wachtte hij in plaats daarvan tot de commandowachtrij van
+# de controller leeg was. get_command_queue_length() bestaat daar niet meer; zie
+# de toelichting in loop() van de component.
 # De external_components-registratie staat in oq_common.yaml: dit bestand wordt
 # per warmtepomp geincludeerd en zou de bron dus dubbel aanmelden.
 openquatt_odu_eeprom_dump:
