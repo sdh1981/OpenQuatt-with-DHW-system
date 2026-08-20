@@ -59,6 +59,7 @@ switch:
     restore_mode: ALWAYS_OFF
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 30
 
 number:
   - platform: template
@@ -76,6 +77,7 @@ number:
     initial_value: 0
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 100
 
   - platform: template
     id: ${hp_id}_odu_freq_cool_f1
@@ -92,6 +94,7 @@ number:
     initial_value: 30
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 101
 
   - platform: template
     id: ${hp_id}_odu_freq_cool_f2
@@ -108,6 +111,7 @@ number:
     initial_value: 36
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 102
 
   - platform: template
     id: ${hp_id}_odu_freq_cool_f3
@@ -124,6 +128,7 @@ number:
     initial_value: 42
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 103
 
   - platform: template
     id: ${hp_id}_odu_freq_cool_f4
@@ -140,6 +145,7 @@ number:
     initial_value: 47
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 104
 
   - platform: template
     id: ${hp_id}_odu_freq_cool_f5
@@ -156,6 +162,7 @@ number:
     initial_value: 52
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 105
 
   - platform: template
     id: ${hp_id}_odu_freq_cool_f6
@@ -172,6 +179,7 @@ number:
     initial_value: 56
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 106
 
   - platform: template
     id: ${hp_id}_odu_freq_cool_f7
@@ -188,6 +196,7 @@ number:
     initial_value: 61
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 107
 
   - platform: template
     id: ${hp_id}_odu_freq_cool_f8
@@ -204,6 +213,7 @@ number:
     initial_value: 66
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 108
 
   - platform: template
     id: ${hp_id}_odu_freq_cool_f9
@@ -220,6 +230,7 @@ number:
     initial_value: 71
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 109
 
   - platform: template
     id: ${hp_id}_odu_freq_cool_f10
@@ -236,6 +247,7 @@ number:
     initial_value: 74
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 110
 
 
   - platform: template
@@ -253,6 +265,7 @@ number:
     initial_value: 0
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 200
 
   - platform: template
     id: ${hp_id}_odu_freq_heat_f1
@@ -269,6 +282,7 @@ number:
     initial_value: 30
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 201
 
   - platform: template
     id: ${hp_id}_odu_freq_heat_f2
@@ -285,6 +299,7 @@ number:
     initial_value: 39
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 202
 
   - platform: template
     id: ${hp_id}_odu_freq_heat_f3
@@ -301,6 +316,7 @@ number:
     initial_value: 49
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 203
 
   - platform: template
     id: ${hp_id}_odu_freq_heat_f4
@@ -317,6 +333,7 @@ number:
     initial_value: 55
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 204
 
   - platform: template
     id: ${hp_id}_odu_freq_heat_f5
@@ -333,6 +350,7 @@ number:
     initial_value: 61
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 205
 
   - platform: template
     id: ${hp_id}_odu_freq_heat_f6
@@ -349,6 +367,7 @@ number:
     initial_value: 67
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 206
 
   - platform: template
     id: ${hp_id}_odu_freq_heat_f7
@@ -365,6 +384,7 @@ number:
     initial_value: 72
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 207
 
   - platform: template
     id: ${hp_id}_odu_freq_heat_f8
@@ -381,6 +401,7 @@ number:
     initial_value: 79
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 208
 
   - platform: template
     id: ${hp_id}_odu_freq_heat_f9
@@ -397,6 +418,7 @@ number:
     initial_value: 85
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 209
 
   - platform: template
     id: ${hp_id}_odu_freq_heat_f10
@@ -413,6 +435,7 @@ number:
     initial_value: 90
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 210
 
 button:
   - platform: template
@@ -422,6 +445,7 @@ button:
     entity_category: config
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 20
     on_press:
       - lambda: |-
           oq_odu_runtime_frequency::RuntimeFrequencyTableRefs refs = {
@@ -466,6 +490,7 @@ button:
     entity_category: config
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 40
     on_press:
       - lambda: |-
           // GRENDEL. Staat odu_freq_write_unlocked op "0", dan komt er niets op
@@ -527,3 +552,4 @@ text_sensor:
     update_interval: never
     web_server:
       sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 10
