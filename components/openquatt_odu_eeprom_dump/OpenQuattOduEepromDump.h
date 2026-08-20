@@ -18,10 +18,8 @@
 #include <cstddef>
 #include <cstdint>
 // ESPHome 2026.8.0 geeft de Modbus-payload door als std::span<const uint8_t>,
-// waar dat eerder een const std::vector<uint8_t>& was. Een span converteert niet
-// naar een vector, dus de oude vorm compileert daar niet meer. Andersom werkt
-// het wel: een span-parameter accepteert op 2026.7.0 gewoon de vector, die
-// impliciet converteert. Daarom span, en niet een versie-ifdef.
+// waar dat eerder een const std::vector<uint8_t>& was. Zie min_version in
+// openquatt_base.yaml: die release is sindsdien de ondergrens.
 #include <span>
 #include <vector>
 
