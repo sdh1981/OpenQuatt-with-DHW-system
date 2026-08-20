@@ -81,10 +81,15 @@ class OpenQuattOduEepromDump : public Component {
   static constexpr uint16_t CUSTOMER_MODEL_START_ADDRESS = 11160;
   static constexpr uint16_t SERIAL_START_ADDRESS = 11219;
   static constexpr uint16_t TEXT_REGISTER_COUNT = 20;
-  static constexpr uint32_t BUS_ACQUIRE_TIMEOUT_MS = 60000;
-  static constexpr uint32_t EMPTY_QUEUE_GRACE_MS = 500;
   static constexpr uint32_t FAILURE_COOLDOWN_MS = 1000;
-  static constexpr uint32_t REQUEST_TIMEOUT_MS = 30000;
+  // Afstand tussen twee verzoeken. Verving de wachtrij-controle die ESPHome
+  // 2026.8.0 onmogelijk maakte; zie de toelichting in loop(). 29 verzoeken
+  // (5 identiteit + 24 blokken van 22 registers) maakt de dump ~15s lang.
+  static constexpr uint32_t REQUEST_SPACING_MS = 500;
+  // Was 30s toen een lege wachtrij een verloren antwoord binnen 500ms verried.
+  // Die snelle route is weg, dus dit is nu de enige detectie en moet navenant
+  // korter: een volle pollronde duurt ~2,2s, dus 8s is ruim en toch snel.
+  static constexpr uint32_t REQUEST_TIMEOUT_MS = 8000;
 
   enum class Step : uint8_t {
     WAITING_BUS = 0,
@@ -148,8 +153,6 @@ class OpenQuattOduEepromDump : public Component {
   uint32_t completed_ms_{0};
   uint64_t captured_at_epoch_{0};
   uint32_t queued_ms_{0};
-  uint32_t queue_empty_since_ms_{0};
-  uint32_t bus_wait_started_ms_{0};
   uint32_t next_request_ms_{0};
   char phase_[48]{"idle"};
   char error_[96]{};
