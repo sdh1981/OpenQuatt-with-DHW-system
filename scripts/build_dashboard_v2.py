@@ -647,12 +647,13 @@ V_DIAG = view(
     # Koelen en F0 staan op de apparaatpagina van HA onder Configuratie.
     grid(
         head('mdi:sine-wave', 'ODU frequentiekromme'),
-        note('**Experimenteel.** Schrijven is in de firmware vergrendeld — '
-             '`odu_freq_write_unlocked` staat op `"0"`, en ontgrendelen kost een '
-             'codewijziging plus flashen.\n\n'
-             '"Tabel ophalen" is wel veilig: dat leest de kromme die op dit moment '
-             'in de buitenunit staat, en zet hem in de vakken hieronder. Zolang je '
-             'niet hebt opgehaald tonen die de fabriekswaarden.'),
+        note('**Experimenteel.** Schrijven staat open voor een afstelperiode. Er zitten '
+             'nog drie horden voor: "schrijven vrijgeven" aan, en bij een draaiende '
+             'unit ook "schrijven tijdens bedrijf" — beide gaan na een herstart weer '
+             'uit — plus een grens van 5 Hz per stand per keer.\n\n'
+             '**Druk altijd eerst op "tabel ophalen".** Dat leest de kromme die op dit '
+             'moment in de buitenunit staat. De invoervakken onthouden hun waarde, dus '
+             'zonder ophalen schrijf je mogelijk een getal uit een vorige proef.'),
         rows(('sensor.openquatt_hp1_experimenteel_frequentietabel_status', 'HP1 status'),
              ('sensor.openquatt_hp2_experimenteel_frequentietabel_status', 'HP2 status'),
              ('button.openquatt_hp1_experimenteel_tabel_ophalen', 'HP1 tabel ophalen'),
