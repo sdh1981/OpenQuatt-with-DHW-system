@@ -313,11 +313,12 @@ void OpenQuattOduEepromDump::reset_job_() {
   this->completed_ms_ = 0U;
   this->captured_at_epoch_ = 0U;
   this->queued_ms_ = 0U;
-  this->queue_empty_since_ms_ = 0U;
-  this->bus_wait_started_ms_ = this->started_ms_;
   this->next_request_ms_ = 0U;
   this->set_error_("");
-  this->set_phase_("waiting for Modbus bus");
+  // Niet meer "waiting for Modbus bus": we wachten sinds 2026.8.0 niet meer op
+  // een lege wachtrij, we plannen onze lezingen ertussen. De fasetekst is
+  // zichtbaar in de statussensor, dus die moet kloppen.
+  this->set_phase_("starting");
 }
 
 void OpenQuattOduEepromDump::loop() {
@@ -331,19 +332,16 @@ void OpenQuattOduEepromDump::loop() {
       this->handle_request_result_();
       return;
     }
+    // Enige detectie van een verloren antwoord. Tot ESPHome 2026.8.0 keken we
+    // hier of de wachtrij van de controller leeggelopen was: stond die 500ms
+    // leeg terwijl wij nog wachtten, dan was ons commando verdwenen. Die
+    // wachtrij is niet meer op te vragen -- get_command_queue_length() bestaat
+    // niet meer -- dus dit is nu puur een tijdslimiet. Daarom staat
+    // REQUEST_TIMEOUT_MS op 8s en niet meer op 30s: zonder die snelle detectie
+    // zou elke misser een halve minuut stilstand betekenen.
     if (now - this->queued_ms_ >= REQUEST_TIMEOUT_MS) {
       this->fail_job_("Modbus request timed out");
       return;
-    }
-    if (this->controller_->get_command_queue_length() == 0U) {
-      if (this->queue_empty_since_ms_ == 0U) {
-        this->queue_empty_since_ms_ = now == 0U ? 1U : now;
-      } else if (now - this->queue_empty_since_ms_ >= EMPTY_QUEUE_GRACE_MS) {
-        this->response_valid_.store(false, std::memory_order_relaxed);
-        this->response_received_.store(true, std::memory_order_release);
-      }
-    } else {
-      this->queue_empty_since_ms_ = 0U;
     }
     return;
   }
@@ -351,18 +349,19 @@ void OpenQuattOduEepromDump::loop() {
   if (static_cast<int32_t>(now - this->next_request_ms_) < 0) {
     return;
   }
-  if (this->controller_->get_command_queue_length() != 0U) {
-    if (this->bus_wait_started_ms_ == 0U) this->bus_wait_started_ms_ = now == 0U ? 1U : now;
-    if (now - this->bus_wait_started_ms_ >= BUS_ACQUIRE_TIMEOUT_MS) {
-      this->fail_job_("Modbus bus remained busy");
-    }
-    return;
-  }
-  this->bus_wait_started_ms_ = 0U;
 
   if (this->step_ == Step::WAITING_BUS) {
     this->step_ = this->include_extended_metadata_ ? Step::EXTENDED : Step::CORE;
   }
+  // Vaste afstand tussen verzoeken. Ook dit deed de wachtrij-controle eerder:
+  // die wachtte tot de controller klaar was met zijn eigen pollronde voordat
+  // wij iets stuurden. Zonder vervanging zou de dump direct achter elk antwoord
+  // een nieuw commando aanhangen en de bus dichtzetten.
+  //
+  // We hebben altijd hooguit een verzoek uitstaan, dus de hub kan onze lezing
+  // gewoon tussen de normale pollcommando's inplannen. 500ms is bewust dezelfde
+  // orde als de oude wachttijd; de dump duurt daarmee ~15s in plaats van ~12s.
+  this->next_request_ms_ = now + REQUEST_SPACING_MS;
   this->queue_current_request_();
 }
 
@@ -431,13 +430,12 @@ void OpenQuattOduEepromDump::queue_current_request_() {
   this->response_received_.store(false, std::memory_order_relaxed);
   this->response_valid_.store(false, std::memory_order_relaxed);
   this->waiting_for_response_.store(true, std::memory_order_release);
-  this->queue_empty_since_ms_ = 0U;
   this->queued_ms_ = millis();
   const uint16_t expected_start = this->request_start_address_;
   const uint32_t request_token = this->request_token_.fetch_add(1U, std::memory_order_acq_rel) + 1U;
   auto command = modbus_controller::ModbusCommandItem::create_read_command(
-      this->controller_, modbus::ModbusRegisterType::HOLDING, expected_start, this->request_register_count_,
-      [this, expected_start, request_token](modbus::ModbusRegisterType, uint16_t start_address,
+      this->controller_, modbus::EntityType::HOLDING, expected_start, this->request_register_count_,
+      [this, expected_start, request_token](modbus::EntityType, uint16_t start_address,
                                             std::span<const uint8_t> data) {
         if (start_address == expected_start) this->on_response_(request_token, start_address, data);
       });
@@ -498,7 +496,6 @@ void OpenQuattOduEepromDump::on_response_(uint32_t request_token, uint16_t start
 void OpenQuattOduEepromDump::handle_request_result_() {
   this->waiting_for_response_.store(false, std::memory_order_relaxed);
   this->response_received_.store(false, std::memory_order_relaxed);
-  this->queue_empty_since_ms_ = 0U;
   if (this->response_valid_.load(std::memory_order_acquire)) {
     this->advance_after_success_();
   } else {
