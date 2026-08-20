@@ -55,7 +55,9 @@ modbus_controller:
     address: 1
     modbus_id: mod_bus_3
     update_interval: 5s
-    command_throttle: 80ms
+    # command_throttle stond hier op 80ms en deed al niets: turnaround_time op
+    # mod_bus_3 staat op 100ms en die won altijd. Sinds ESPHome 2026.8.0 heeft
+    # de optie sowieso geen effect meer, dus weg ermee. Bustiming ongewijzigd.
     max_cmd_retries: 1
     offline_skip_updates: 2
     setup_priority: -10

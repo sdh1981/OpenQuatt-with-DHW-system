@@ -106,7 +106,11 @@ modbus:
     # commando's op de volle pollronde = ruim over update_interval (5s). Gevolg:
     # "Duplicate modbus command found" omdat de wachtrij niet leegliep.
     # Niet op de default vertrouwen; die is al twee keer verschoven.
-    turnaround_time: 100ms
+    #
+    # Sinds 2026.8.0 is dit ook de ENIGE knop die nog werkt: command_throttle op
+    # de modbus_controller heeft daar geen effect meer. De afweging voor de
+    # gekozen waarde staat bij oq_modbus_turnaround_time_ms.
+    turnaround_time: ${oq_modbus_turnaround_time_ms}ms
 
 # ==============================================================================
 # SHARED RUNTIME STATE

@@ -40,7 +40,9 @@ modbus_controller:
     address: ${device_address}
     modbus_id: mod_bus
     update_interval: ${oq_modbus_update_interval_s}s
-    command_throttle: ${oq_modbus_command_throttle_ms}ms
+    # command_throttle stond hier op 300ms. ESPHome 2026.8.0 heeft die optie
+    # uitgeschakeld; de afstand tussen commando's komt nu van turnaround_time op
+    # mod_bus. Zie oq_modbus_turnaround_time_ms voor waarom dat 150 is en niet 300.
     max_cmd_retries: ${oq_modbus_max_cmd_retries}
     offline_skip_updates: 5
     setup_priority: -10

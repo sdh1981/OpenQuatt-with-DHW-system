@@ -41,7 +41,9 @@ modbus_controller:
     address: 1
     modbus_id: mod_bus_3
     update_interval: 5s
-    command_throttle: 80ms
+    # Zie oq_cwt_pt_module.yaml: command_throttle 80ms werd al overruled door
+    # turnaround_time 100ms op mod_bus_3, en heeft sinds 2026.8.0 geen effect
+    # meer. Weggehaald; de bustiming verandert hier niet.
     max_cmd_retries: 1
     offline_skip_updates: 2
     setup_priority: -10
