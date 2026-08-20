@@ -60,11 +60,25 @@ class OpenQuattOduEepromDump : public Component {
   uint8_t progress_percent() const { return this->progress_.load(std::memory_order_acquire); }
   uint16_t registers_read() const { return this->registers_read_.load(std::memory_order_acquire); }
 
+  // Terugkoppeling op het ophalen. De schrijver wist al of de hele JSON de deur
+  // uit was -- ChunkedJsonWriter::finish() geeft dat terug -- maar dat werd
+  // weggegooid. Zonder deze getters weet je na een dump nergens of je het
+  // bestand daadwerkelijk binnen hebt.
+  //
+  // Bewust GEEN "download bezig"-vlag naar buiten: 51 kB is voorbij voordat een
+  // entiteit het doorgeeft. Wat je wil weten is of het gelukt is, en dat blijft
+  // staan. Wordt teruggezet bij een nieuwe dump, want dan slaat het op een
+  // andere momentopname.
+  uint16_t download_count() const { return this->download_count_.load(std::memory_order_acquire); }
+  uint32_t last_download_epoch() const { return this->last_download_epoch_.load(std::memory_order_acquire); }
+  bool last_download_failed() const { return this->last_download_failed_.load(std::memory_order_acquire); }
+
   StartResult start(bool include_extended_metadata);
   void write_status(httpd_req_t* req) const;
   bool begin_download();
-  void write_download(httpd_req_t* req) const;
-  void end_download();
+  /// Geeft terug of de volledige JSON verstuurd is; geef dat door aan end_download().
+  bool write_download(httpd_req_t* req) const;
+  void end_download(bool completed);
 
  protected:
   static constexpr uint16_t EEPROM_START_ADDRESS = 2999;
@@ -125,6 +139,11 @@ class OpenQuattOduEepromDump : public Component {
   std::atomic<bool> starting_{false};
   std::atomic<bool> dump_ready_{false};
   std::atomic<bool> download_in_progress_{false};
+  // uint32_t en niet uint64_t: 64-bits atomics zijn op xtensa niet lock-free.
+  // Een epoch past tot 2106 ruim in 32 bits.
+  std::atomic<uint16_t> download_count_{0};
+  std::atomic<uint32_t> last_download_epoch_{0};
+  std::atomic<bool> last_download_failed_{false};
   std::atomic<uint8_t> progress_{0};
   std::atomic<uint16_t> registers_read_{0};
   std::atomic<uint32_t> job_id_{0};

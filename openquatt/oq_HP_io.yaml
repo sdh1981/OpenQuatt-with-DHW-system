@@ -1481,8 +1481,32 @@ text_sensor:
         return std::string(buf);
       }
       if (dump->has_snapshot()) {
-        char buf[48];
-        snprintf(buf, sizeof(buf), "Klaar - %u registers", (unsigned) dump->registers_read());
+        // Terugkoppeling op het ophalen: zonder dit stond hier alleen "Klaar" en
+        // wist je niet of het bestand ook echt binnen was. De component telt
+        // alleen downloads die volledig de deur uit zijn gegaan.
+        char buf[80];
+        const uint16_t n = dump->download_count();
+        if (dump->last_download_failed()) {
+          snprintf(buf, sizeof(buf), "Klaar - %u registers, ophalen mislukt",
+                   (unsigned) dump->registers_read());
+        } else if (n == 0U) {
+          snprintf(buf, sizeof(buf), "Klaar - %u registers, nog niet opgehaald",
+                   (unsigned) dump->registers_read());
+        } else {
+          const uint32_t epoch = dump->last_download_epoch();
+          char when[16] = "";
+          if (epoch != 0U) {
+            auto t = esphome::ESPTime::from_epoch_local((time_t) epoch);
+            snprintf(when, sizeof(when), " %02u:%02u", (unsigned) t.hour, (unsigned) t.minute);
+          }
+          if (n == 1U) {
+            snprintf(buf, sizeof(buf), "Klaar - %u registers, opgehaald%s",
+                     (unsigned) dump->registers_read(), when);
+          } else {
+            snprintf(buf, sizeof(buf), "Klaar - %u registers, %ux opgehaald%s",
+                     (unsigned) dump->registers_read(), (unsigned) n, when);
+          }
+        }
         return std::string(buf);
       }
       return std::string("Nog geen dump");

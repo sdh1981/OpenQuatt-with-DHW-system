@@ -190,8 +190,8 @@ class OpenQuattOduEepromDumpRequestHandler : public AsyncWebHandler {
       httpd_resp_set_type(req, "application/json; charset=utf-8");
       httpd_resp_set_hdr(req, "Cache-Control", "no-store");
       httpd_resp_set_hdr(req, "Content-Disposition", disposition);
-      this->parent_->write_download(req);
-      this->parent_->end_download();
+      const bool completed = this->parent_->write_download(req);
+      this->parent_->end_download(completed);
       return;
     }
 
@@ -303,6 +303,11 @@ void OpenQuattOduEepromDump::reset_job_() {
   this->calculated_crc_.store(0U, std::memory_order_relaxed);
   this->stored_crc_.store(0U, std::memory_order_relaxed);
   this->crc_retry_count_.store(0U, std::memory_order_relaxed);
+  // De ophaalteller hoort bij een momentopname, niet bij het apparaat. Een
+  // nieuwe dump maakt de oude ongeldig, dus "opgehaald" moet weer op nul.
+  this->download_count_.store(0U, std::memory_order_relaxed);
+  this->last_download_epoch_.store(0U, std::memory_order_relaxed);
+  this->last_download_failed_.store(false, std::memory_order_relaxed);
   this->step_ = Step::WAITING_BUS;
   this->waiting_for_response_.store(false, std::memory_order_relaxed);
   this->response_received_.store(false, std::memory_order_relaxed);
@@ -715,7 +720,15 @@ void OpenQuattOduEepromDump::write_status(httpd_req_t* req) const {
   writer.write_bool(this->active_.load(std::memory_order_acquire));
   writer.write_literal(R"(,"dump_ready":)");
   writer.write_bool(this->dump_ready_.load(std::memory_order_acquire));
-  writer.write_literal(R"(,"job_id":)");
+  // Ophaalstatus van deze momentopname. count 0 = nog niet binnengehaald;
+  // failed = de laatste poging brak halverwege af.
+  writer.write_literal(R"(,"download":{"count":)");
+  writer.write_uint(this->download_count_.load(std::memory_order_acquire));
+  writer.write_literal(R"(,"last_epoch":)");
+  writer.write_uint(this->last_download_epoch_.load(std::memory_order_acquire));
+  writer.write_literal(R"(,"failed":)");
+  writer.write_bool(this->last_download_failed_.load(std::memory_order_acquire));
+  writer.write_literal(R"(},"job_id":)");
   writer.write_uint(this->job_id_.load(std::memory_order_acquire));
   writer.write_literal(R"(,"phase":)");
   writer.write_string(phase);
@@ -761,9 +774,24 @@ bool OpenQuattOduEepromDump::begin_download() {
   return allowed;
 }
 
-void OpenQuattOduEepromDump::end_download() { this->download_in_progress_.store(false, std::memory_order_release); }
+void OpenQuattOduEepromDump::end_download(bool completed) {
+  this->download_in_progress_.store(false, std::memory_order_release);
+  this->last_download_failed_.store(!completed, std::memory_order_release);
+  if (!completed) {
+    ESP_LOGW(TAG, "HP%u download afgebroken; verbinding verbroken of buffer vol", this->hp_index_);
+    return;
+  }
+  this->download_count_.fetch_add(1U, std::memory_order_acq_rel);
+  // Tijdstip alleen als de klok loopt; anders blijft het 0 en toont de
+  // entiteit "opgehaald" zonder tijd in plaats van 1970.
+  if (this->clock_ != nullptr) {
+    const auto now = this->clock_->now();
+    if (now.is_valid()) this->last_download_epoch_.store(static_cast<uint32_t>(now.timestamp), std::memory_order_release);
+  }
+  ESP_LOGI(TAG, "HP%u momentopname opgehaald", this->hp_index_);
+}
 
-void OpenQuattOduEepromDump::write_download(httpd_req_t* req) const {
+bool OpenQuattOduEepromDump::write_download(httpd_req_t* req) const {
   char model[48]{};
   char customer_model[48]{};
   char serial[48]{};
@@ -909,7 +937,7 @@ void OpenQuattOduEepromDump::write_download(httpd_req_t* req) const {
     writer.write_char('}');
   }
   writer.write_literal("]}}");
-  writer.finish();
+  return writer.finish();
 }
 
 }  // namespace openquatt_odu_eeprom_dump
