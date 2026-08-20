@@ -22,15 +22,25 @@ heating_curve_logic_header: "openquatt/includes/oq_heating_curve_logic.h" # Shar
 dhw_controller_logic_header: "openquatt/includes/oq_dhw_controller_logic.h" # Shared C++ helper include for DHW finite-state control.
 installation_monitor_header: "openquatt/includes/oq_installation_monitoring.h" # Compressor-startenteller; overgenomen van upstream.
 odu_runtime_freq_table_header: "openquatt/includes/oq_odu_runtime_frequency_table.h" # EXPERIMENTEEL: frequentiekromme tijdelijk in de ODU zetten.
-# GRENDEL op het schrijven van de frequentiekromme. "0" = vergrendeld: de
-# knop "tabel toepassen" doet niets en meldt dat. Ophalen en bewerken blijft
-# gewoon werken, want lezen is ongevaarlijk.
+# GRENDEL op het schrijven van de frequentiekromme. "0" = vergrendeld: de knop
+# "tabel toepassen" doet niets en meldt dat. Ophalen en bewerken blijft altijd
+# werken, want lezen is ongevaarlijk.
 #
-# Bewust een substitutie en geen schakelaar in de UI: ontgrendelen kost een
-# codewijziging plus flashen. Dat is de ceremonie die erbij hoort -- een
-# vergissing met een muisklik mag hier niet kunnen. Zet op "1" wanneer je
-# daadwerkelijk een proef gaat doen, en daarna weer terug op "0".
-odu_freq_write_unlocked: "0"
+# STAAT NU OP "1" -- open, op verzoek, tot dat wordt teruggedraaid. Dit is een
+# actieve afstelperiode van de frequentiekrommen.
+#
+# Toen dit gebouwd werd stond hij op "0" en was de vrijgaveschakelaar de enige
+# andere laag; een substitutie dwong toen de ceremonie af. Inmiddels liggen er
+# drie lagen achter deze, en twee daarvan staan na elke herstart weer uit:
+#
+#   1. "schrijven vrijgeven"        schakelaar, ALWAYS_OFF, gaat uit bij het schrijven
+#   2. "schrijven tijdens bedrijf"  schakelaar, ALWAYS_OFF, anders alleen bij stilstand
+#   3. MAX_STEP_HZ                  een stand mag 5 Hz per keer verschuiven, gemeten
+#                                   tegen wat er OP DAT MOMENT in de unit staat
+#
+# Zet terug op "0" zodra het afstellen klaar is. Dan is de knop dood en kan er
+# per ongeluk niets meer op de bus komen.
+odu_freq_write_unlocked: "1"
 # v0.42: oq_webserver_css_url / oq_webserver_js_url substitutions verwijderd —
 # custom webapp is uit de build; classic ESPHome v3 UI gebruikt de defaults.
 

@@ -122,7 +122,9 @@ Fase 0 en 1 zijn goedkoop en leveren het antwoord op de vraag of dit kan — waa
 
 ## Gebouwd in v0.62.0: de frequentiekromme tijdelijk zetten
 
-> **Schrijven staat vergrendeld.** `odu_freq_write_unlocked` in `oq_substitutions_common.yaml` staat op `"0"`. De knop "tabel toepassen" weigert dan en er komt niets op de bus; ophalen en bewerken blijven werken. Ontgrendelen kost een codewijziging plus flashen, en dat is opzet — dit is geen muisklik-actie op een cv-installatie in een bewoond huis. Zet terug op `"0"` zodra een proef klaar is.
+> **De schrijfgrendel staat open.** `odu_freq_write_unlocked` staat op `"1"` voor een actieve afstelperiode. Op `"0"` weigert "tabel toepassen" meteen en komt er niets op de bus.
+>
+> Er liggen drie lagen achter: de vrijgaveschakelaar, de schakelaar voor schrijven tijdens bedrijf, en de grens van 5 Hz per stand per keer. De eerste twee staan na elke herstart weer uit, dus schrijven blijft een reeks bewuste handelingen. Zet de substitutie terug op `"0"` zodra het afstellen klaar is.
 
 Overgenomen van upstream, waar dit in `openquatt/experimental/` staat. Het schrijft **22 registers vanaf modbus 3000** — koelen F0–F10 en verwarmen F0–F10, blad 3001 tot en met 3022 — in één functie-16 transactie. Verder wordt er niets aangeraakt.
 
