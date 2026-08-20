@@ -1004,6 +1004,35 @@ views:
   - type: grid
     cards:
     - type: heading
+      icon: mdi:database-arrow-down
+      heading: ODU EEPROM
+      heading_style: title
+    - type: entities
+      show_header_toggle: false
+      entities:
+      - entity: sensor.openquatt_hp1_odu_eeprom_dump_status
+        name: HP1 status
+      - entity: sensor.openquatt_hp2_odu_eeprom_dump_status
+        name: HP2 status
+      - entity: button.openquatt_hp1_odu_eeprom_dump_starten
+        name: HP1 dump starten
+      - entity: button.openquatt_hp2_odu_eeprom_dump_starten
+        name: HP2 dump starten
+    - type: markdown
+      content: 'Een dump duurt ~15 s en blijft in werkgeheugen staan: een herstart van het apparaat gooit
+        hem weg. Haal hem dus op voor je iets anders doet.
+
+
+        - [HP1 ophalen](http://{{ states(''sensor.openquatt_ip_address'') }}/openquatt/odu-eeprom/hp1/download)
+
+        - [HP2 ophalen](http://{{ states(''sensor.openquatt_ip_address'') }}/openquatt/odu-eeprom/hp2/download)
+
+
+        De status hierboven meldt daarna of de momentopname **volledig** is opgehaald, met het tijdstip
+        erbij.'
+  - type: grid
+    cards:
+    - type: heading
       icon: mdi:sine-wave
       heading: ODU frequentiekromme
       heading_style: title

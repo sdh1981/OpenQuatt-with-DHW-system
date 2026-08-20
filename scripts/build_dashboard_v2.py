@@ -623,6 +623,25 @@ V_DIAG = view(
               ('sensor.openquatt_intern_geheugen_laagste_stand', 'Laagste stand'),
               title='Intern geheugen, week'),
     ),
+    # De downloadlinks zijn Jinja-templates op sensor.openquatt_ip_address, want
+    # een ESPHome-entiteit kan geen bestand aanbieden -- ophalen loopt altijd via
+    # de webserver van het apparaat. Zo volgt de link het werkelijke adres in
+    # plaats van een IP dat hier hardgecodeerd veroudert.
+    grid(
+        head('mdi:database-arrow-down', 'ODU EEPROM'),
+        rows(('sensor.openquatt_hp1_odu_eeprom_dump_status', 'HP1 status'),
+             ('sensor.openquatt_hp2_odu_eeprom_dump_status', 'HP2 status'),
+             ('button.openquatt_hp1_odu_eeprom_dump_starten', 'HP1 dump starten'),
+             ('button.openquatt_hp2_odu_eeprom_dump_starten', 'HP2 dump starten')),
+        note("Een dump duurt ~15 s en blijft in werkgeheugen staan: een herstart "
+             "van het apparaat gooit hem weg. Haal hem dus op voor je iets anders doet.\n\n"
+             "- [HP1 ophalen](http://{{ states('sensor.openquatt_ip_address') }}"
+             "/openquatt/odu-eeprom/hp1/download)\n"
+             "- [HP2 ophalen](http://{{ states('sensor.openquatt_ip_address') }}"
+             "/openquatt/odu-eeprom/hp2/download)\n\n"
+             "De status hierboven meldt daarna of de momentopname **volledig** is "
+             "opgehaald, met het tijdstip erbij."),
+    ),
     # De 22 invoervakken per unit staan bewust NIET allemaal hier: dat wordt een
     # muur van getallen. Alleen de verwarmingskromme, want daar draait het om.
     # Koelen en F0 staan op de apparaatpagina van HA onder Configuratie.
