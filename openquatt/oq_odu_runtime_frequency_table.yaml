@@ -43,6 +43,18 @@
 # aan -- die schakelaar zet die tweede grendel opzij. Beide schakelaars staan
 # na een herstart weer uit.
 #
+# --- MAXIMAAL 5 Hz PER KEER ---
+# Vlak voor het schrijven wordt de tabel gelezen die op dat moment in de unit
+# staat, en een stand mag daar hooguit MAX_STEP_HZ van afwijken. Dat is geen
+# beperking van wat je kunt instellen maar van hoe snel: een grote wijziging
+# maak je in stappen.
+#
+# De reden is deze vakken zelf. Ze hebben restore_value: true, dus een getal uit
+# een eerdere proef blijft staan en ziet er precies zo uit als een bedoelde
+# instelling. Vergeet je stap 1, dan schrijf je die oude waarde -- en dat kan
+# midden in bedrijf zijn. De vergelijking gaat daarom tegen de unit, niet tegen
+# wat hier op het scherm staat.
+#
 # De vrijgaveknop gaat er bij het schrijven automatisch weer uit: een druk is
 # een schrijfactie. De status vertelt waar het strandde als er iets misgaat.
 #
