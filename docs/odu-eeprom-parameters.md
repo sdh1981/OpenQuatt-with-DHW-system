@@ -147,6 +147,10 @@ Stap 4 is de kern: er wordt nooit geschreven op een draaiende machine. Stap 5 ma
 
 Entiteiten staan in Home Assistant onder Configuratie en Diagnostiek, en in de web-UI in een eigen groep onderaan. Bij upstream zijn ze `internal` omdat hun webapp ze aanstuurt; die bouwt deze fork niet mee.
 
+### Waar dit voor gebruikt wordt
+
+Het uitgewerkte experiment staat in [dynamische-compressorfrequentie-koelen.md](dynamische-compressorfrequentie-koelen.md): stand vastzetten op 1 en de frequentie erachter variëren, om te meten hoe laag deze machine houdbaar kan draaien. Koelen, omdat de koelstrategie de perf_map niet gebruikt en de condensbeveiliging op een gemeten temperatuur werkt.
+
 ### Wat je hierbij moet weten
 
 **`hp_perf_map.h` klopt niet meer zodra je de tabel verschuift.** Die bevat gemeten vermogens en COP's per stand en voedt de duo-dispatcher, de vermogensberekening en elke COP. Verschuif je de Hz achter een stand, dan liegt die tabel. Gebruik dit voor korte, bewaakte proeven — niet als instelling die blijft staan.
