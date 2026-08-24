@@ -1936,8 +1936,7 @@ views:
             cards:
               - type: picture-elements
                 title: Quatt HP1
-                image: >-
-                  https://raw.githubusercontent.com/jeroen85/OpenQuatt/refs/heads/main/docs/dashboard/heatpump/Quatt.png
+                image: /local/docs/dashboard/heatpump/Quatt.png
                 elements:
                   - type: image
                     style:
@@ -1946,14 +1945,10 @@ views:
                       transform: translate(0,0)
                     entity: binary_sensor.openquatt_hp1_4_way_valve
                     state_image:
-                      'on': >-
-                        https://raw.githubusercontent.com/jeroen85/OpenQuatt/main/docs/dashboard/heatpump/Cool.png
-                      'off': >-
-                        https://raw.githubusercontent.com/jeroen85/OpenQuatt/refs/heads/main/docs/dashboard/heatpump/Heat.png
-                      unknown: >-
-                        https://raw.githubusercontent.com/jeroen85/OpenQuatt/refs/heads/main/docs/dashboard/heatpump/Heat.png
-                      unavailable: >-
-                        https://raw.githubusercontent.com/jeroen85/OpenQuatt/refs/heads/main/docs/dashboard/heatpump/Heat.png
+                      'on': /local/docs/dashboard/heatpump/Cool.png
+                      'off': /local/docs/dashboard/heatpump/Heat.png
+                      unknown: /local/docs/dashboard/heatpump/Heat.png
+                      unavailable: /local/docs/dashboard/heatpump/Heat.png
                     tap_action:
                       action: none
                     hold_action:
@@ -2198,8 +2193,7 @@ views:
             cards:
               - type: picture-elements
                 title: Quatt HP2
-                image: >-
-                  https://raw.githubusercontent.com/jeroen85/OpenQuatt/refs/heads/main/docs/dashboard/heatpump/Quatt.png
+                image: /local/docs/dashboard/heatpump/Quatt.png
                 elements:
                   - type: image
                     style:
@@ -2208,14 +2202,10 @@ views:
                       transform: translate(0,0)
                     entity: binary_sensor.openquatt_hp2_4_way_valve
                     state_image:
-                      'on': >-
-                        https://raw.githubusercontent.com/jeroen85/OpenQuatt/main/docs/dashboard/heatpump/Cool.png
-                      'off': >-
-                        https://raw.githubusercontent.com/jeroen85/OpenQuatt/refs/heads/main/docs/dashboard/heatpump/Heat.png
-                      unknown: >-
-                        https://raw.githubusercontent.com/jeroen85/OpenQuatt/refs/heads/main/docs/dashboard/heatpump/Heat.png
-                      unavailable: >-
-                        https://raw.githubusercontent.com/jeroen85/OpenQuatt/refs/heads/main/docs/dashboard/heatpump/Heat.png
+                      'on': /local/docs/dashboard/heatpump/Cool.png
+                      'off': /local/docs/dashboard/heatpump/Heat.png
+                      unknown: /local/docs/dashboard/heatpump/Heat.png
+                      unavailable: /local/docs/dashboard/heatpump/Heat.png
                     tap_action:
                       action: none
                     hold_action:
