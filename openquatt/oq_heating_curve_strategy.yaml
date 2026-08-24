@@ -45,6 +45,15 @@ globals:
     restore_value: false
     initial_value: 'false'
 
+  # Kamer houdt het starten tegen: kamertemperatuur boven setpoint +
+  # room_overheat_off_c. Alleen voor de diagnostiek -- de beslissing zelf staat
+  # in de lambda. Zonder dit zie je "OFF" en weet je niet of dat komt doordat het
+  # water warm genoeg is of doordat het huis dat is.
+  - id: oq_curve_room_blocks_start
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
   # Timestamp when curve stop condition was first armed (OFF confirm guardrail).
   - id: oq_curve_stop_arm_ms
     type: uint32_t
@@ -507,14 +516,35 @@ output:
               off_lock_active = (now_ms - off_since_ms) < off_reentry_min_ms;
             }
             restart_inhibit_active = off_lock_active && !deep_undershoot_restart && !room_requests_heat;
-            if ((below_restart_band || room_requests_heat) && !restart_inhibit_active) {
+            // Kamer als vetorecht bij starten.
+            //
+            // Zonder dit is starten puur waterafhankelijk: pv <= spw - restart_delta
+            // is na elke uit-periode waar, want het water koelt af. Gevolg: de
+            // stooklijn (en daarmee ook Adaptive Heating, dat dezelfde tak
+            // gebruikt) begon te verwarmen terwijl de kamer ruim boven setpoint
+            // stond. De kamer kwam pas in beeld bij het STOPPEN.
+            //
+            // Zelfde drempel als room_warm_for_off hieronder, met opzet: geen
+            // nieuwe instelknop, en geen gat waarin hij start om meteen weer te
+            // willen stoppen. De bestaande dode band blijft dus intact -- tussen
+            // setpoint-room_resume_heat_c en setpoint+room_overheat_off_c mag hij
+            // nog gewoon op water starten.
+            //
+            // room_requests_heat blijft als startreden staan en sluit dit uit: een
+            // koud huis start onmiddellijk, ook met warm water.
+            const bool room_blocks_start = room_valid && (room_c >= (room_sp_c + room_overheat_off_c));
+            if ((below_restart_band || room_requests_heat) && !restart_inhibit_active && !room_blocks_start) {
               heat_request_active = true;
               off_since_ms = 0;
             }
+            id(oq_curve_room_blocks_start) = room_blocks_start;
           }
           if (heat_request_active) {
             restart_inhibit_active = false;
             off_since_ms = 0;
+            // Anders blijft de vlag staan op wat hij was toen we voor het laatst
+            // uit waren, en liegt de diagnostiek zodra we weer draaien.
+            id(oq_curve_room_blocks_start) = false;
           }
 
           if (!heat_request_active) {
@@ -816,7 +846,12 @@ text_sensor:
     web_server:
       sorting_group_id: oq_heating_curve
     lambda: |-
-      if (!id(oq_curve_heat_request_active)) return std::string("OFF");
+      if (!id(oq_curve_heat_request_active)) {
+        // Onderscheid dat je anders zelf moet uitpuzzelen: staat hij uit omdat
+        // het water warm genoeg is, of omdat het huis dat is?
+        return id(oq_curve_room_blocks_start) ? std::string("OFF (kamer boven setpoint)")
+                                              : std::string("OFF");
+      }
       return (id(oq_curve_regime_code) == 1) ? std::string("HEAT") : std::string("COAST");
 
   - platform: template
