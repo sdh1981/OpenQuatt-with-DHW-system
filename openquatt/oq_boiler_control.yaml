@@ -1117,7 +1117,7 @@ number:
     mode: box
     optimistic: true
     restore_value: true
-    initial_value: 1300
+    initial_value: 1800
     entity_category: config
     web_server:
       sorting_group_id: oq_boiler
