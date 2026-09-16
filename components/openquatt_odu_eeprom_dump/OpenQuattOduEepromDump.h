@@ -17,16 +17,15 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
-// ESPHome 2026.8.0 geeft de Modbus-payload door als std::span<const uint8_t>,
-// waar dat eerder een const std::vector<uint8_t>& was. Zie min_version in
-// openquatt_base.yaml: die release is sindsdien de ondergrens.
+// De hub geeft antwoorden door als std::span: register-woorden al in host-
+// volgorde, ruwe PDU's als bytes.
 #include <span>
-#include <vector>
 
 #include <esp_http_server.h>
 #include <freertos/FreeRTOS.h>
 
 #include "PsramBuffer.h"
+#include "esphome/components/modbus/modbus.h"
 #include "esphome/components/modbus_controller/modbus_controller.h"
 #include "esphome/components/time/real_time_clock.h"
 #include "esphome/core/component.h"
@@ -36,7 +35,17 @@ namespace openquatt_odu_eeprom_dump {
 
 using openquatt_common::PsramBuffer;
 
-class OpenQuattOduEepromDump : public Component {
+// Sinds ESPHome 2026.9.0 is dit zelf een apparaat op de Modbus-hub, naast de
+// modbus_controller van dezelfde warmtepomp. Tot dan hing de dump zijn lezingen
+// als ModbusCommandItem in de wachtrij van die controller; die klasse en
+// queue_command() zijn in 2026.9.0 deprecated en verdwijnen in 2027.3.0.
+//
+// De controller blijft de bron van hub en adres (zie setup()), dus de YAML hoeft
+// niet te veranderen. Wat er wel verandert: de hub belooft per geaccepteerd
+// verzoek precies een afsluitende callback. Een foutcode van de unit of een
+// uitblijvend antwoord komt dus nu echt binnen, in plaats van pas na de
+// tijdslimiet.
+class OpenQuattOduEepromDump : public Component, public modbus::ModbusClientDevice {
  public:
   enum class StartResult : uint8_t { STARTED = 0, BUSY, UNAVAILABLE };
 
@@ -98,9 +107,10 @@ class OpenQuattOduEepromDump : public Component {
   // 2026.8.0 onmogelijk maakte; zie de toelichting in loop(). 29 verzoeken
   // (5 identiteit + 24 blokken van 22 registers) maakt de dump ~15s lang.
   static constexpr uint32_t REQUEST_SPACING_MS = 500;
-  // Was 30s toen een lege wachtrij een verloren antwoord binnen 500ms verried.
-  // Die snelle route is weg, dus dit is nu de enige detectie en moet navenant
-  // korter: een volle pollronde duurt ~2,2s, dus 8s is ruim en toch snel.
+  // Vangnet. Een uitblijvend antwoord meldt de hub sinds 2026.9.0 zelf via
+  // on_no_response(), na send_wait_time. Deze grens vangt alleen nog het geval
+  // dat er helemaal niets terugkomt. Een volle pollronde duurt ~2,2s, dus 8s is
+  // ruim.
   static constexpr uint32_t REQUEST_TIMEOUT_MS = 8000;
 
   enum class Step : uint8_t {
@@ -154,7 +164,6 @@ class OpenQuattOduEepromDump : public Component {
   std::atomic<uint16_t> calculated_crc_{0};
   std::atomic<uint16_t> stored_crc_{0};
   std::atomic<uint8_t> crc_retry_count_{0};
-  std::atomic<uint32_t> request_token_{0};
 
   mutable portMUX_TYPE state_mux_ = portMUX_INITIALIZER_UNLOCKED;
   Step step_{Step::WAITING_BUS};
@@ -174,10 +183,19 @@ class OpenQuattOduEepromDump : public Component {
   char phase_[48]{"idle"};
   char error_[96]{};
 
+  // Hub-callbacks. Ze komen uit de loop() van de hub, dus uit dezelfde taak als
+  // onze eigen loop(); ze zetten alleen de vlaggen, loop() handelt af.
+  void on_read_holding_registers(uint16_t start_address, std::span<const uint16_t> registers,
+                                 modbus::ResponseStatus status) override;
+  void on_custom_response(std::span<const uint8_t> request_pdu, std::span<const uint8_t> response_pdu,
+                          modbus::ResponseStatus status) override;
+  bool on_no_response(std::span<const uint8_t> request_pdu) override;
+  void on_not_sent(std::span<const uint8_t> request_pdu) override;
+
   bool available_storage_() const;
   void reset_job_();
   void queue_current_request_();
-  void on_response_(uint32_t request_token, uint16_t start_address, std::span<const uint8_t> data);
+  void mark_request_failed_();
   void handle_request_result_();
   void handle_request_failure_();
   void advance_after_success_();
@@ -189,7 +207,6 @@ class OpenQuattOduEepromDump : public Component {
   uint16_t current_start_address_() const;
   uint16_t current_register_count_() const;
   uint16_t calculate_crc_() const;
-  static uint16_t read_word_(std::span<const uint8_t> data, size_t index);
   static void decode_ascii_words_(const uint16_t* words, size_t count, char* output, size_t output_size);
 };
 
