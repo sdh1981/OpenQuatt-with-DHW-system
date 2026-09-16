@@ -1189,6 +1189,18 @@ binary_sensor:
     device_class: problem
     lambda: |-
       // OT fault should only reflect explicit failure bits, not protection or cycle states.
+      //
+      // R2121 bit 13 ("DC water pump failure", doc 2122) telt hier bewust NIET
+      // mee. Sommige pompen zetten dat bit in stilstand, zonder dat er iets mis
+      // is -- overgenomen uit upstream OpenQuatt v0.50.0 (#646).
+      //
+      // In deze fork weegt dat zwaarder dan upstream: deze vlag breekt de lock
+      // op de lead-unit van DHW single-HP mode. Een vals bit liet DHW daardoor
+      // van unit wisselen, precies het geflipper dat die lock moet voorkomen.
+      //
+      // Een echte pompstoring blijft gevangen: die geeft te weinig flow, en
+      // oq_lowflow_fault_active reageert daar onafhankelijk op. Het bit zelf
+      // blijft leesbaar in ${hp_id}_status_2121_raw.
       auto has_bit = [](float raw, uint16_t bitmask) -> bool {
         return !isnan(raw) && ((static_cast<uint16_t>(lroundf(raw)) & bitmask) != 0);
       };
@@ -1223,8 +1235,7 @@ binary_sensor:
           has_bit(status_2121, 0x0200u) ||
           has_bit(status_2121, 0x0400u) ||
           has_bit(status_2121, 0x0800u) ||
-          has_bit(status_2121, 0x1000u) ||
-          has_bit(status_2121, 0x2000u);
+          has_bit(status_2121, 0x1000u);
 
   # ----------------------------
   # TEXT SENSOR
@@ -1433,7 +1444,9 @@ text_sensor:
       if (has_bit(status_2121, 0x0400u)) add("Outlet water temp sensor failure");
       if (has_bit(status_2121, 0x0800u)) add("Inner coil temp sensor failure");
       if (has_bit(status_2121, 0x1000u)) add("Reserved temp sensor failure");
-      if (has_bit(status_2121, 0x2000u)) add("DC water pump failure");
+      // R2121 bit 13 wordt niet meer als storing gemeld: sommige pompen zetten
+      // het in stilstand. Zie ${hp_id}_ot_fault_active. Het ruwe bit blijft
+      // beschikbaar in ${hp_id}_status_2121_raw.
 
       return s.empty() ? std::string("None") : s;
 

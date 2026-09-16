@@ -44,6 +44,13 @@ interval:
               (uint32_t) ${oq_heat_loop_tick_s} * 1000UL);
           id(oq_thermal_actuator_last_loop_ms) = now_ms;
 
+          // Upstream v0.50.0 (#641): max 6 startopdrachten per compressor per
+          // voortschrijdend uur. RAM-only, per HP. Elke tick laten verlopen zodat
+          // oude tijdstempels na een millis()-wrap niet terugkomen.
+          static oq_thermal_actuator::CompressorStartLimit start_limits[2];
+          static bool start_limit_blocked[2] = {false, false};
+          for (auto &limit : start_limits) limit.expire(now_ms);
+
           auto publish_optimizer_reason = [&](const char* reason)->void {
             #if OQ_TOPOLOGY_DUO
             static std::string last_optimizer_reason = "";
@@ -252,7 +259,12 @@ interval:
             }
             req_level = std::max(min_level, std::min(max_level, req_level));
             const int prev_applied = is_hp1 ? id(hp1_last_applied_level) : id(${ta_secondary_last_applied_level_id});
-            const int retained_level = defrost_stop_hold_level(is_hp1);
+            // Een defrost-hold zet een lopend commando voort. Een gestopt commando
+            // (prev 0) mag hij niet via een verouderde ODU-readback herstarten --
+            // dat zou min-uit-tijd en startlimiet omzeilen (upstream #641).
+            const int retained_level = oq_thermal_actuator::may_retain_command(prev_applied)
+                                           ? defrost_stop_hold_level(is_hp1)
+                                           : 0;
 
             if (req_level == 0 && retained_level > 0) {
               apply_active_mode_hold(is_hp1, retained_level);
@@ -271,6 +283,27 @@ interval:
                 const uint32_t min_off_ms = (uint32_t) min_off_s * 1000UL;
                 if (elapsed_off_ms < min_off_ms) req_level = 0;
               }
+            }
+
+            // Startlimiet: na min-uit-tijd, zodat de melding alleen verschijnt als
+            // de limiet echt de laatste blokkade is. Alleen een nieuwe start wordt
+            // uitgesteld; doorlopen, moduleren en stoppen blijven mogelijk.
+            {
+              const int hp_idx = is_hp1 ? 0 : 1;
+              const uint32_t remaining_ms =
+                  (req_level > 0 && prev_applied == 0) ? start_limits[hp_idx].remaining_ms(now_ms) : 0U;
+              const bool blocked = remaining_ms > 0;
+              if (blocked) {
+                req_level = 0;
+                publish_optimizer_reason("start_limit_6_per_hour");
+              }
+              // Alleen de flank loggen, niet elke tick. Geen "vrijgegeven"-regel:
+              // de flag valt ook terug als de vraag verdwijnt, dat zou misleiden.
+              if (blocked && !start_limit_blocked[hp_idx]) {
+                ESP_LOGW("oq_actuator", "HP%d: startlimiet 6/uur bereikt, start uitgesteld (nog %u s)",
+                         hp_idx + 1, (unsigned) ((remaining_ms + 999U) / 1000U));
+              }
+              start_limit_blocked[hp_idx] = blocked;
             }
 
             if (req_level > 0) set_mode(is_hp1, true);
@@ -361,6 +394,8 @@ interval:
 
           auto log_transition = [&](bool is_hp1, int new_lvl) {
             int &prev = is_hp1 ? id(hp1_last_applied_level) : id(${ta_secondary_last_applied_level_id});
+            // Telt alleen 0 -> >0; een mislukte start telt conservatief mee.
+            start_limits[is_hp1 ? 0 : 1].record_transition(prev, new_lvl, now_ms);
             if (prev != new_lvl) {
               if (is_hp1) id(hp1_last_level_change_ms) = now_ms;
               else id(hp2_last_level_change_ms) = now_ms;
