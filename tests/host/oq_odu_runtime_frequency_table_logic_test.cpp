@@ -45,11 +45,13 @@ int main() {
   assert(parse_runtime_table(std::span<const uint16_t>(FACTORY), cooling, heating, loaded));
   const RuntimeTableWords words = build_runtime_write_values(cooling, heating);
   for (size_t i = 0; i < words.size(); i++) assert(words[i] == FACTORY[i]);
+  assert(cooling[3] == 42.0f);  // koelen F3 in de fabriekstabel
   FrequencyCurve rounded = cooling;
-  rounded[3] = 47.4f;  // afronding: 47.4 schrijft 47 en matcht de teruglezing
-  assert(build_runtime_write_values(rounded, heating)[3] == 47);
+  rounded[3] = 42.4f;  // afronding: 42.4 schrijft 42 en matcht de teruglezing
+  assert(build_runtime_write_values(rounded, heating)[3] == 42);
   assert(tables_match(rounded, cooling));
-  rounded[3] = 47.6f;
+  rounded[3] = 42.6f;  // schrijft 43: de teruglezing van 42 wijkt dan af
+  assert(build_runtime_write_values(rounded, heating)[3] == 43);
   assert(!tables_match(rounded, cooling));
 
   // --- Geldigheid en oplopend ---
