@@ -1246,6 +1246,16 @@ interval:
           }
           const bool thermal_req = heating_req || cooling_req_raw || dhw_req;
 
+          // Flowbewaking loopt door zolang er nog een compressor draait of gevraagd
+          // wordt, niet alleen zolang er warmte- of koelvraag is. Na het wegvallen
+          // van de vraag draait een compressor vaak nog: de minimale looptijd
+          // (>= 300 s), een defrost-hold of gewoon de afbouw. Tot nu toe werd de
+          // low-flow-fout op dat moment gewist en bleef een pompstoring in die
+          // periode onopgemerkt. Overgenomen uit upstream OpenQuatt v0.50.0 (#626).
+          const bool actuator_request_active = id(oq_actuator_hp1_req) > 0 || id(oq_actuator_hp2_req) > 0;
+          const bool any_hp_compressor_active = hp1_lvl > 0 || hp2_lvl > 0 || hp1_cmd_lvl > 0 || hp2_cmd_lvl > 0;
+          const bool flow_guard_required = thermal_req || any_hp_compressor_active || actuator_request_active;
+
           // -------------------------------------------------
           // 2) Flow interlock status + timers
           // -------------------------------------------------
@@ -1253,8 +1263,8 @@ interval:
           const bool flow_valid = !isnan(flow);
           const bool flow_low = (!flow_valid) || (flow < min_flow_lph);
 
-          if (!thermal_req) {
-            // No active thermal request: reset flow interlock state
+          if (!flow_guard_required) {
+            // No thermal request and no compressor running or requested: reset flow interlock state
             id(oq_lowflow_since_ms) = 0;
             id(oq_flow_recover_since_ms) = 0;
             id(oq_lowflow_fault_active) = false;
@@ -1286,8 +1296,8 @@ interval:
           // Flow OK definition for diagnostics: NaN is NOT OK.
           const bool flow_ok = flow_valid && (flow >= min_flow_lph);
 
-          // Internal interlock: only enforced when heating is requested.
-          const bool min_flow_ok = thermal_req ? (!id(oq_lowflow_fault_active) && flow_ok) : true;
+          // Internal interlock: enforced while a thermal request or compressor is active.
+          const bool min_flow_ok = flow_guard_required ? (!id(oq_lowflow_fault_active) && flow_ok) : true;
 
           // Publish lowflow fault status (writes-only-on-change)
           publish_binary_if_changed(id(oq_lowflow_fault_active_bs), id(oq_lowflow_fault_active));
@@ -1318,7 +1328,9 @@ interval:
           const float outside_c = id(outside_temp_selected).state;
 
           bool frost = false;
-          if (!thermal_req) {
+          // Niet naar vorstbescherming zolang een compressor nog afbouwt: die
+          // verwarmt het water al, en CM98 zou de CM1-hold hieronder omzeilen.
+          if (!flow_guard_required) {
             if (isnan(outside_c)) {
               frost = !frost_nan_grace_active; // fail-safe after startup grace
             } else {
@@ -1530,9 +1542,11 @@ interval:
                 }
               }
 
-              // Safety: never leave CM1 to CM0 while any HP still reports/targets activity.
-              // Keep CM1 (pump-on holding state) until both HPs are effectively idle.
-                  if (strcmp(cur_cm, "CM1") == 0 && !thermal_req && base_target == 0 && any_hp_active_guard) {
+              // Safety: never leave CM1 to CM0/CM98 while any HP still reports/targets activity.
+              // Keep CM1 (pump-on holding state) until both HPs are effectively idle, including
+              // a compressor the actuator is still asked to run (minimum runtime, defrost hold).
+                  if (strcmp(cur_cm, "CM1") == 0 && !thermal_req && (base_target == 0 || base_target == 98) &&
+                      (any_hp_active_guard || actuator_request_active)) {
                     desired_local = 1;
                   }
 

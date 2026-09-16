@@ -966,7 +966,12 @@ interval:
           if (min_rt_s > 0 && min_rt_s < 300) min_rt_s = 300;
           const uint32_t min_rt_ms = (min_rt_s > 0) ? ((uint32_t) min_rt_s * 1000UL) : 0;
           auto min_runtime_hold_level = [&](bool is_hp1)->int {
-            if (id(oq_water_temp_hard_trip_active) || min_rt_ms == 0) return 0;
+            // Een low-flow-fout gaat voor de minimale looptijd, net als de
+            // watertemperatuur-trip. Zonder deze regel vroeg deze hold stand 1
+            // terug terwijl supervisory de unit juist op Standby + 0 zette, en
+            // haalde de actuator de stop elke tick weer onderuit. De defrost-hold
+            // blijft wel staan: tijdens echte defrost wordt niet gestopt.
+            if (id(oq_water_temp_hard_trip_active) || id(oq_lowflow_fault_active) || min_rt_ms == 0) return 0;
             const uint32_t last_real_start_ms = is_hp1 ? id(hp1_last_real_heat_start_ms) : id(hp2_last_real_heat_start_ms);
             if (!oq_request::min_runtime_window_active(now_ms, last_real_start_ms, min_rt_ms)) return 0;
 
@@ -1375,11 +1380,13 @@ interval:
           }
 
           // =========================
-          // 5) Absolute water-temperature hard trip
-          // Shared with boiler-control and heating-strategy. This safety stop has
-          // higher priority than compressor minimum runtime.
+          // 5) Absolute water-temperature hard trip / low-flow fault
+          // Shared with boiler-control and heating-strategy. These safety stops have
+          // higher priority than compressor minimum runtime. The low-flow fault is
+          // set by supervisory; normally the CM drops to CM1 at the same time, this
+          // covers the tick in between.
           // =========================
-          if (id(oq_water_temp_hard_trip_active)) {
+          if (id(oq_water_temp_hard_trip_active) || id(oq_lowflow_fault_active)) {
             hp1_req = 0;
             #if OQ_TOPOLOGY_DUO
             hp2_req = 0;
@@ -1403,9 +1410,9 @@ interval:
           // 6) Post-request runtime floor
           // Prevents very short compressor runs in both curve and Power House modes.
           // Runtime is per-compressor and user-tunable, with a hard lower bound of 300 s.
-          // Skipped during an absolute water-temperature hard trip.
+          // Skipped during an absolute water-temperature hard trip or a low-flow fault.
           // =========================
-          if (!id(oq_water_temp_hard_trip_active) && min_rt_s > 0) {
+          if (!id(oq_water_temp_hard_trip_active) && !id(oq_lowflow_fault_active) && min_rt_s > 0) {
             const bool cooling_floor_trip =
                 is_cooling_mode &&
                 id(minimum_safe_supply_temp).has_state() && !isnan(id(minimum_safe_supply_temp).state) &&
