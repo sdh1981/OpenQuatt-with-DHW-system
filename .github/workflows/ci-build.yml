@@ -24,7 +24,8 @@ jobs:
           for src in tests/host/*_test.cpp; do
             bin="$RUNNER_TEMP/$(basename "$src" .cpp)"
             echo "::group::$src"
-            g++ -std=c++17 -Wall -Wextra -Werror "$src" -o "$bin"
+            # C++20 zoals de firmware zelf: de headers gebruiken std::span.
+            g++ -std=c++20 -Wall -Wextra -Werror "$src" -o "$bin"
             "$bin"
             echo "::endgroup::"
           done

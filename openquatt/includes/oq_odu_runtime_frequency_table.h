@@ -17,10 +17,9 @@
 //
 // --- Wat dit doet ---
 // Schrijft 22 registers vanaf modbus 3000: de koelkromme F0-F10 en de
-// verwarmingskromme F0-F10. Het documentblad rekent vanaf 1, de bus vanaf 0:
-//   koelen  F0-F10  blad 3001..3011 -> modbus 3000..3010
-//   verwarmen F0-F10 blad 3012..3022 -> modbus 3011..3021
-// Verder wordt er niets in de EEPROM aangeraakt.
+// verwarmingskromme F0-F10. Verder wordt er niets in de EEPROM aangeraakt.
+// Adressen, grenzen en de beslissingen staan in
+// oq_odu_runtime_frequency_table_logic.h (host-getest).
 //
 // --- Waarom het tijdelijk is ---
 // Dit raakt de runtime-schaduw, niet de chip, en de checksum op blad 3510/3511
@@ -32,56 +31,46 @@
 // unit midden in bedrijf een andere betekenis aan zijn eigen standen geeft.
 // Daarom wordt eerst werkmodus en compressorfrequentie gelezen, en pas
 // geschreven als beide nul zijn. Zie ook docs/odu-eeprom-parameters.md.
+//
+// --- Modbus sinds ESPHome 2026.9.0 ---
+// Tot 2026.9.0 hing elke stap als ModbusCommandItem met een lambda in de
+// wachtrij van de modbus_controller, en startte de volgende stap vanuit die
+// lambda. ModbusCommandItem en queue_command() zijn deprecated en verdwijnen in
+// 2027.3.0.
+//
+// Nu heeft elke HP een vast RuntimeFrequencyTableDevice op de hub, met hub en
+// adres van zijn controller. De keten is dezelfde, maar dan als toestandsmachine:
+//
+//   ophalen:    LOAD
+//   toepassen:  GUARD -> STEP_CHECK -> WRITE -> READBACK
+//
+// Twee dingen worden daardoor beter:
+//   1. Een foutcode, niet-standaard antwoord of uitblijvend antwoord komt nu als
+//      afsluitende callback binnen en eindigt in een statusmelding. Voorheen
+//      bleef de status dan op de laatste tussenstap staan.
+//   2. Per unit loopt er hooguit een opdracht tegelijk. Een tweede druk tijdens
+//      een lopende keten wordt geweigerd in plaats van ertussen geschoven.
 // ============================================================================
 
 #include <array>
-#include <cmath>
 #include <cstdint>
 #include <cstdio>
-// <span> voor de lees-callbacks: ESPHome 2026.8.0 geeft de payload door als
-// std::span<const uint8_t>. Zie min_version in openquatt_base.yaml.
-// <vector> blijft nodig: create_write_multiple_command neemt nog steeds een
-// std::vector<uint16_t> met de te schrijven waarden.
 #include <span>
-#include <vector>
 
+#include "oq_odu_runtime_frequency_table_logic.h"
+
+#include "esphome/components/modbus/modbus.h"
 #include "esphome/components/modbus_controller/modbus_controller.h"
 #include "esphome/components/number/number.h"
 #include "esphome/components/openquatt_odu_eeprom_dump/OpenQuattOduEepromDump.h"
 #include "esphome/components/switch/switch.h"
 #include "esphome/components/text_sensor/text_sensor.h"
+#include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 
 namespace oq_odu_runtime_frequency {
 
 static const char *const TAG = "oq_odu_freq";
-
-// Modbus-adres, dus bladadres min 1. 22 registers = twee krommen van elf.
-static constexpr uint16_t RUNTIME_TABLE_START_ADDRESS = 3000;
-static constexpr uint16_t RUNTIME_TABLE_REGISTER_COUNT = 22;
-
-// Bewakingslezing: modbus 2099..2103 = doc 2100..2104. Index 0 is de huidige
-// werkmodus, index 4 de draaiende compressorfrequentie.
-static constexpr uint16_t GUARD_START_ADDRESS = 2099;
-static constexpr uint16_t GUARD_REGISTER_COUNT = 5;
-static constexpr size_t GUARD_WORKING_MODE_INDEX = 0;
-static constexpr size_t GUARD_COMPRESSOR_FREQUENCY_INDEX = 4;
-
-static constexpr float MIN_FREQUENCY_HZ = 0.0f;
-static constexpr float MAX_FREQUENCY_HZ = 120.0f;
-
-// Grootste verschuiving die een stand in een keer mag maken, vergeleken met wat
-// er OP DAT MOMENT in de unit staat -- niet met wat de invoervakken zich
-// herinneren. Die vakjes hebben restore_value: true, dus een waarde uit een
-// eerdere proef blijft staan en ziet er precies zo uit als een bedoelde
-// instelling. Deze grens vangt dat op.
-//
-// Symmetrisch: een typo die verlaagt is net zo goed een typo, en te ver omlaag
-// duikt onder de 30 Hz die in deze EEPROM overal als ondergrens staat.
-//
-// Een grote bedoelde wijziging maak je dus in stappen. Dat is traag, en dat is
-// het punt.
-static constexpr int MAX_STEP_HZ = 5;
 
 struct RuntimeFrequencyTableRefs {
   esphome::modbus_controller::ModbusController *controller;
@@ -89,8 +78,8 @@ struct RuntimeFrequencyTableRefs {
   esphome::switch_::Switch *enable_switch;
   esphome::text_sensor::TextSensor *status;
   const char *prefix;
-  std::array<esphome::number::Number *, 11> cooling_desired;
-  std::array<esphome::number::Number *, 11> heating_desired;
+  std::array<esphome::number::Number *, CURVE_POINTS> cooling_desired;
+  std::array<esphome::number::Number *, CURVE_POINTS> heating_desired;
 };
 
 inline void publish_status(const RuntimeFrequencyTableRefs &refs, const char *message) {
@@ -98,224 +87,333 @@ inline void publish_status(const RuntimeFrequencyTableRefs &refs, const char *me
   ESP_LOGW(TAG, "%s%s", refs.prefix, message);
 }
 
-inline bool valid_frequency(float value) {
-  return !std::isnan(value) && value >= MIN_FREQUENCY_HZ && value <= MAX_FREQUENCY_HZ;
-}
-
-// Een kromme moet oplopend zijn: stand N mag nooit trager draaien dan stand N-1.
-// Een dalende tabel zou de niveaulogica van de unit betekenisloos maken.
-inline bool validate_monotonic_table(const std::array<float, 11> &values) {
-  for (size_t i = 0; i < values.size(); i++) {
-    if (!valid_frequency(values[i])) return false;
-    if (i > 0 && values[i] < values[i - 1]) return false;
-  }
-  return true;
-}
-
-inline bool read_u16_word(std::span<const uint8_t> data, size_t index, uint16_t &value) {
-  const size_t offset = index * 2U;
-  if (data.size() < offset + 2U) return false;
-  value = (uint16_t(data[offset]) << 8) | uint16_t(data[offset + 1U]);
-  return true;
-}
-
-inline bool read_word_as_frequency(std::span<const uint8_t> data, size_t index, float &value) {
-  uint16_t raw = 0;
-  if (!read_u16_word(data, index, raw)) return false;
-  value = float(raw);
-  return valid_frequency(value);
-}
-
-inline bool parse_runtime_table(std::span<const uint8_t> data, std::array<float, 11> &cooling,
-                               std::array<float, 11> &heating, int &loaded) {
-  loaded = 0;
-  float value = NAN;
-  for (size_t i = 0; i < cooling.size(); i++) {
-    if (!read_word_as_frequency(data, i, value)) return false;
-    cooling[i] = value;
-    loaded++;
-  }
-  for (size_t i = 0; i < heating.size(); i++) {
-    if (!read_word_as_frequency(data, i + cooling.size(), value)) return false;
-    heating[i] = value;
-    loaded++;
-  }
-  return true;
-}
-
-inline void publish_runtime_table(const RuntimeFrequencyTableRefs &refs, const std::array<float, 11> &cooling,
-                                 const std::array<float, 11> &heating) {
+inline void publish_runtime_table(const RuntimeFrequencyTableRefs &refs, const FrequencyCurve &cooling,
+                                  const FrequencyCurve &heating) {
   for (size_t i = 0; i < cooling.size(); i++) refs.cooling_desired[i]->publish_state(cooling[i]);
   for (size_t i = 0; i < heating.size(); i++) refs.heating_desired[i]->publish_state(heating[i]);
 }
 
-inline bool tables_match(const std::array<float, 11> &actual, const std::array<float, 11> &expected) {
-  for (size_t i = 0; i < actual.size(); i++) {
-    if (lroundf(actual[i]) != lroundf(expected[i])) return false;
+class RuntimeFrequencyTableDevice : public esphome::modbus::ModbusClientDevice {
+ public:
+  enum class Stage : uint8_t { IDLE, LOAD, GUARD, STEP_CHECK, WRITE, READBACK };
+
+  // Vangnet voor een keten die nooit afsluit. De hub belooft per geaccepteerd
+  // verzoek precies een afsluitende callback, dus dit hoort niet te gebeuren;
+  // zonder vangnet zou een fout daarin de unit tot de volgende herstart op
+  // "BEZIG" laten staan.
+  static constexpr uint32_t STALE_AFTER_MS = 30000;
+
+  bool bound_to(const esphome::modbus_controller::ModbusController *controller) const {
+    return this->controller_ == controller;
   }
-  return true;
+  bool unbound() const { return this->controller_ == nullptr; }
+
+  void bind(esphome::modbus_controller::ModbusController *controller) {
+    this->controller_ = controller;
+    this->set_parent(controller->hub());
+    this->set_address(controller->device_address());
+  }
+
+  void start_load(const RuntimeFrequencyTableRefs &refs) {
+    if (!this->claim_(refs)) return;
+    publish_status(refs, "OPHALEN: tabel wordt gelezen");
+    this->queue_read_(Stage::LOAD, RUNTIME_TABLE_START_ADDRESS, RUNTIME_TABLE_REGISTER_COUNT);
+  }
+
+  void start_guarded_write(const RuntimeFrequencyTableRefs &refs, const FrequencyCurve &cooling,
+                           const FrequencyCurve &heating, bool allow_while_running) {
+    if (!this->claim_(refs)) return;
+    this->cooling_ = cooling;
+    this->heating_ = heating;
+    this->allow_while_running_ = allow_while_running;
+    publish_status(refs, "CONTROLE: toestand van de unit wordt gelezen");
+    this->queue_read_(Stage::GUARD, GUARD_START_ADDRESS, GUARD_REGISTER_COUNT);
+  }
+
+ protected:
+  void on_read_holding_registers(uint16_t start_address, std::span<const uint16_t> registers,
+                                 esphome::modbus::ResponseStatus status) override {
+    if (this->stage_ == Stage::IDLE || this->stage_ == Stage::WRITE || start_address != this->expected_start_) return;
+    if (!esphome::modbus::succeeded(status)) {
+      char reason[24];
+      snprintf(reason, sizeof(reason), "foutcode 0x%02X", static_cast<unsigned>(*status));
+      this->fail_(reason);
+      return;
+    }
+    switch (this->stage_) {
+      case Stage::LOAD:
+        this->handle_load_(registers);
+        break;
+      case Stage::GUARD:
+        this->handle_guard_(registers);
+        break;
+      case Stage::STEP_CHECK:
+        this->handle_step_check_(registers);
+        break;
+      case Stage::READBACK:
+        this->handle_readback_(registers);
+        break;
+      default:
+        break;
+    }
+  }
+
+  // Let op: bij een meervoudige schrijfopdracht geeft de hub de GEVRAAGDE
+  // waarden terug, ook bij een foutcode. Het antwoord bewijst alleen dat de unit
+  // de opdracht aannam; wat er echt staat zegt pas de teruglezing.
+  void on_write_multiple_registers(uint16_t start_address, std::span<const uint16_t> /*registers*/,
+                                   esphome::modbus::ResponseStatus status) override {
+    if (this->stage_ != Stage::WRITE || start_address != RUNTIME_TABLE_START_ADDRESS) return;
+    if (!esphome::modbus::succeeded(status)) {
+      char message[64];
+      snprintf(message, sizeof(message), "SCHRIJVEN GEWEIGERD: unit gaf foutcode 0x%02X",
+               static_cast<unsigned>(*status));
+      this->finish_(message);
+      return;
+    }
+    publish_status(this->refs_, "SCHRIJVEN: bevestigd door de unit");
+    this->queue_read_(Stage::READBACK, RUNTIME_TABLE_START_ADDRESS, RUNTIME_TABLE_REGISTER_COUNT);
+  }
+
+  void on_custom_response(std::span<const uint8_t> /*request_pdu*/, std::span<const uint8_t> /*response_pdu*/,
+                          esphome::modbus::ResponseStatus /*status*/) override {
+    if (this->stage_ == Stage::IDLE) return;
+    if (this->stage_ == Stage::WRITE) {
+      this->write_unconfirmed_("onverwacht antwoord");
+      return;
+    }
+    this->fail_("onverwacht antwoord");
+  }
+
+  bool on_no_response(std::span<const uint8_t> /*request_pdu*/) override {
+    if (this->stage_ == Stage::IDLE) return false;
+    if (this->stage_ == Stage::WRITE) {
+      // Niet herhalen: misschien is hij wel geland. Teruglezen zegt het.
+      this->write_unconfirmed_("geen antwoord");
+      return false;
+    }
+    // Een lezing mag een keer opnieuw, net als max_cmd_retries 1 op de
+    // controller. De hub stuurt hem dan zelf nog eens en er volgt opnieuw
+    // precies een afsluitende callback.
+    if (this->retry_available_) {
+      this->retry_available_ = false;
+      return true;
+    }
+    this->fail_("geen antwoord");
+    return false;
+  }
+
+  void on_not_sent(std::span<const uint8_t> /*request_pdu*/) override {
+    if (this->stage_ == Stage::IDLE) return;
+    this->fail_("niet verzonden");
+  }
+
+ private:
+  bool claim_(const RuntimeFrequencyTableRefs &refs) {
+    if (this->stage_ != Stage::IDLE) {
+      if (esphome::millis() - this->queued_ms_ < STALE_AFTER_MS) {
+        publish_status(refs, "BEZIG: vorige opdracht voor deze unit loopt nog");
+        return false;
+      }
+      ESP_LOGW(TAG, "%svorige opdracht kwam nooit af; losgekoppeld", refs.prefix);
+      // Vanuit een knop-lambda, dus vanuit de hoofdlus: hier is dit veilig.
+      this->clear_tx_queue_for_device();
+      this->stage_ = Stage::IDLE;
+    }
+    this->refs_ = refs;
+    return true;
+  }
+
+  void queue_read_(Stage stage, uint16_t start, uint16_t count) {
+    this->stage_ = stage;
+    this->expected_start_ = start;
+    this->retry_available_ = true;
+    this->queued_ms_ = esphome::millis();
+    if (!this->read_holding_registers(start, count)) this->fail_("wachtrij weigert");
+  }
+
+  void queue_write_() {
+    // De vrijgaveknop gaat er hier uit, niet later: een druk is een
+    // schrijfactie, ook als er daarna iets misgaat.
+    this->refs_.enable_switch->turn_off();
+    publish_status(this->refs_, "SCHRIJVEN: opdracht in de wachtrij");
+    this->stage_ = Stage::WRITE;
+    this->expected_start_ = RUNTIME_TABLE_START_ADDRESS;
+    this->retry_available_ = false;
+    this->queued_ms_ = esphome::millis();
+    const RuntimeTableWords values = build_runtime_write_values(this->cooling_, this->heating_);
+    // 22 registers, dus functie 16 in een transactie.
+    if (!this->write_multiple_registers(RUNTIME_TABLE_START_ADDRESS, std::span<const uint16_t>(values))) {
+      this->finish_("SCHRIJVEN MISLUKT: wachtrij weigert, er is niets verstuurd");
+    }
+  }
+
+  void handle_load_(std::span<const uint16_t> registers) {
+    FrequencyCurve cooling{};
+    FrequencyCurve heating{};
+    int loaded = 0;
+    char message[64];
+    if (!parse_runtime_table(registers, cooling, heating, loaded)) {
+      snprintf(message, sizeof(message), "OPHALEN MISLUKT: %d/22 registers gelezen", loaded);
+      this->finish_(message);
+      return;
+    }
+    publish_runtime_table(this->refs_, cooling, heating);
+    snprintf(message, sizeof(message), "OPGEHAALD: %d/22 registers", loaded);
+    this->finish_(message);
+  }
+
+  void handle_guard_(std::span<const uint16_t> registers) {
+    if (registers.size() < GUARD_REGISTER_COUNT) {
+      this->finish_("GEBLOKKEERD: toestand van de unit onvolledig");
+      return;
+    }
+    const uint16_t working_mode = registers[GUARD_WORKING_MODE_INDEX];
+    const uint16_t compressor_hz = registers[GUARD_COMPRESSOR_FREQUENCY_INDEX];
+    switch (decide_guard(working_mode, compressor_hz, this->allow_while_running_)) {
+      case GuardDecision::BLOCK_NOT_STANDBY:
+        this->finish_("GEBLOKKEERD: unit staat niet in standby");
+        return;
+      case GuardDecision::BLOCK_COMPRESSOR_RUNNING:
+        this->finish_("GEBLOKKEERD: compressor draait");
+        return;
+      case GuardDecision::ALLOW_WHILE_RUNNING:
+        // Niet blokkeren, wel vastleggen waarin je geschreven hebt. Loopt er
+        // daarna iets vreemds, dan staat hier in het log op welke frequentie
+        // de compressor draaide toen de tabel onder hem veranderde.
+        ESP_LOGW(TAG, "%sschrijven TIJDENS BEDRIJF: werkmodus %u, compressor %u Hz", this->refs_.prefix,
+                 static_cast<unsigned>(working_mode), static_cast<unsigned>(compressor_hz));
+        break;
+      case GuardDecision::ALLOW_STANDSTILL:
+        break;
+    }
+    // Laatste zeef voor het schrijven: de tabel die NU in de unit staat. Kost een
+    // extra lezing per schrijfactie; schrijven gebeurt zelden, en dit is de stap
+    // die een vergissing tegenhoudt.
+    publish_status(this->refs_, "CONTROLE: huidige tabel wordt gelezen");
+    this->queue_read_(Stage::STEP_CHECK, RUNTIME_TABLE_START_ADDRESS, RUNTIME_TABLE_REGISTER_COUNT);
+  }
+
+  void handle_step_check_(std::span<const uint16_t> registers) {
+    FrequencyCurve current_cooling{};
+    FrequencyCurve current_heating{};
+    int loaded = 0;
+    if (!parse_runtime_table(registers, current_cooling, current_heating, loaded)) {
+      this->finish_("GEBLOKKEERD: huidige tabel niet leesbaar");
+      return;
+    }
+    const StepCheck cooling_step = check_step_limit(this->cooling_, current_cooling);
+    const StepCheck heating_step = check_step_limit(this->heating_, current_heating);
+    if (!cooling_step.ok() || !heating_step.ok()) {
+      const bool cooling_blocks = !cooling_step.ok();
+      const StepCheck &step = cooling_blocks ? cooling_step : heating_step;
+      char message[96];
+      snprintf(message, sizeof(message), "GEBLOKKEERD: %s F%u wil %d Hz verschuiven, max %d per keer",
+               cooling_blocks ? "koelen" : "verwarmen", static_cast<unsigned>(step.index), step.delta, MAX_STEP_HZ);
+      this->finish_(message);
+      return;
+    }
+    this->queue_write_();
+  }
+
+  // Leest terug wat er nu werkelijk staat en vergelijkt met wat we bedoelden.
+  // Zonder deze stap weet je alleen dat de unit de opdracht heeft aangenomen,
+  // niet dat hij hem heeft uitgevoerd.
+  void handle_readback_(std::span<const uint16_t> registers) {
+    FrequencyCurve cooling{};
+    FrequencyCurve heating{};
+    int loaded = 0;
+    if (!parse_runtime_table(registers, cooling, heating, loaded)) {
+      char message[64];
+      snprintf(message, sizeof(message), "CONTROLE MISLUKT: %d/22 registers gelezen", loaded);
+      this->finish_(message);
+      return;
+    }
+    publish_runtime_table(this->refs_, cooling, heating);
+    if (!tables_match(cooling, this->cooling_) || !tables_match(heating, this->heating_)) {
+      this->finish_("CONTROLE MISLUKT: teruglezing wijkt af");
+      return;
+    }
+    // Expliciet in de melding dat dit vluchtig is: de invoervakken houden hun
+    // waarde vast over een herstart van de ESP, maar de buitenunit valt bij een
+    // power cycle terug op fabriek.
+    this->finish_("TOEGEPAST: actief tot de buitenunit spanningsloos is geweest");
+  }
+
+  // Schrijfopdracht zonder bevestiging: misschien is hij geland, misschien
+  // niet. Niet herhalen maar teruglezen; de teruglezing meldt dan TOEGEPAST of
+  // CONTROLE MISLUKT, en dat is de enige uitspraak die telt.
+  void write_unconfirmed_(const char *reason) {
+    char message[80];
+    snprintf(message, sizeof(message), "SCHRIJVEN: %s, tabel wordt teruggelezen", reason);
+    publish_status(this->refs_, message);
+    this->queue_read_(Stage::READBACK, RUNTIME_TABLE_START_ADDRESS, RUNTIME_TABLE_REGISTER_COUNT);
+  }
+
+  void fail_(const char *reason) {
+    const char *what = "OPDRACHT MISLUKT";
+    switch (this->stage_) {
+      case Stage::LOAD:
+        what = "OPHALEN MISLUKT";
+        break;
+      case Stage::GUARD:
+        what = "GEBLOKKEERD: toestand van de unit niet leesbaar";
+        break;
+      case Stage::STEP_CHECK:
+        what = "GEBLOKKEERD: huidige tabel niet leesbaar";
+        break;
+      case Stage::WRITE:
+        what = "SCHRIJVEN MISLUKT";
+        break;
+      case Stage::READBACK:
+        what = "CONTROLE MISLUKT";
+        break;
+      case Stage::IDLE:
+        break;
+    }
+    char message[96];
+    snprintf(message, sizeof(message), "%s (%s)", what, reason);
+    this->finish_(message);
+  }
+
+  void finish_(const char *message) {
+    this->stage_ = Stage::IDLE;
+    publish_status(this->refs_, message);
+  }
+
+  esphome::modbus_controller::ModbusController *controller_{nullptr};
+  RuntimeFrequencyTableRefs refs_{};
+  FrequencyCurve cooling_{};
+  FrequencyCurve heating_{};
+  Stage stage_{Stage::IDLE};
+  uint16_t expected_start_{0};
+  uint32_t queued_ms_{0};
+  bool allow_while_running_{false};
+  bool retry_available_{false};
+};
+
+// Een device per controller, dus per HP. Leeft zo lang als het programma: het
+// moet er zijn wanneer de hub zijn callback aflevert, ook na de knop-lambda die
+// de keten startte.
+inline RuntimeFrequencyTableDevice *device_for(const RuntimeFrequencyTableRefs &refs) {
+  static std::array<RuntimeFrequencyTableDevice, 2> devices;
+  if (refs.controller == nullptr) return nullptr;
+  for (auto &device : devices) {
+    if (device.bound_to(refs.controller)) return &device;
+  }
+  for (auto &device : devices) {
+    if (device.unbound()) {
+      device.bind(refs.controller);
+      return &device;
+    }
+  }
+  return nullptr;
 }
 
-inline std::vector<uint16_t> build_runtime_write_values(const std::array<float, 11> &cooling,
-                                                        const std::array<float, 11> &heating) {
-  std::vector<uint16_t> values;
-  values.reserve(RUNTIME_TABLE_REGISTER_COUNT);
-  for (float value : cooling) values.push_back(static_cast<uint16_t>(lroundf(value)));
-  for (float value : heating) values.push_back(static_cast<uint16_t>(lroundf(value)));
-  return values;
-}
-
-inline void queue_apply_readback(RuntimeFrequencyTableRefs refs, std::array<float, 11> expected_cooling,
-                                 std::array<float, 11> expected_heating);
-inline void queue_step_limited_write(RuntimeFrequencyTableRefs refs, std::array<float, 11> cooling,
-                                     std::array<float, 11> heating);
-
-// Schrijft de 22 registers in een enkele functie-16 transactie. De
-// inschakelknop gaat er hier uit, niet later: één druk is één schrijfactie,
-// ook als er daarna iets misgaat.
-inline void queue_runtime_write(RuntimeFrequencyTableRefs refs, std::array<float, 11> cooling,
-                                std::array<float, 11> heating) {
-  refs.enable_switch->turn_off();
-  publish_status(refs, "SCHRIJVEN: opdracht in de wachtrij");
-  auto cmd = esphome::modbus_controller::ModbusCommandItem::create_write_multiple_command(
-      refs.controller, RUNTIME_TABLE_START_ADDRESS, RUNTIME_TABLE_REGISTER_COUNT,
-      build_runtime_write_values(cooling, heating));
-  cmd.on_data_func = [refs, cooling, heating](esphome::modbus::EntityType register_type,
-                                              uint16_t start_address, std::span<const uint8_t> data) {
-    publish_status(refs, "SCHRIJVEN: bevestigd door de unit");
-    queue_apply_readback(refs, cooling, heating);
-  };
-  refs.controller->queue_command(cmd);
-}
-
-// Leest eerst de toestand van de unit. Schrijven mag alleen in stilstand:
-// werkmodus 0 en compressorfrequentie 0.
-// allow_while_running komt van een schakelaar per unit. Staat die uit, dan mag
-// er alleen geschreven worden op een stilstaande machine. Staat hij aan, dan
-// wordt de toestand nog steeds gelezen -- we willen in het log zien waarin we
-// geschreven hebben -- maar niet meer geweigerd.
-//
-// Wat je daarmee overneemt: de buitenunit krijgt midden in bedrijf een andere
-// betekenis voor zijn eigen standen. Draait hij op stand 8 en verschuif je die,
-// dan verandert zijn toerental op een commando dat niet de normale niveauwissel
-// is. De beveiligingen IN de unit blijven staan, en een power cycle zet de
-// fabriekstabel terug -- dat blijft de noodrem.
-inline void queue_guarded_runtime_write(RuntimeFrequencyTableRefs refs, std::array<float, 11> cooling,
-                                        std::array<float, 11> heating, bool allow_while_running) {
-  publish_status(refs, "CONTROLE: toestand van de unit wordt gelezen");
-  auto cmd = esphome::modbus_controller::ModbusCommandItem::create_read_command(
-      refs.controller, esphome::modbus::EntityType::HOLDING, GUARD_START_ADDRESS, GUARD_REGISTER_COUNT,
-      [refs, cooling, heating, allow_while_running](esphome::modbus::EntityType register_type,
-                                                    uint16_t start_address, std::span<const uint8_t> data) {
-        uint16_t working_mode = 0;
-        uint16_t compressor_hz = 0;
-        if (!read_u16_word(data, GUARD_WORKING_MODE_INDEX, working_mode)) {
-          publish_status(refs, "GEBLOKKEERD: werkmodus onbekend");
-          return;
-        }
-        if (!read_u16_word(data, GUARD_COMPRESSOR_FREQUENCY_INDEX, compressor_hz)) {
-          publish_status(refs, "GEBLOKKEERD: compressorfrequentie onbekend");
-          return;
-        }
-        const bool unit_running = (working_mode != 0) || (compressor_hz > 0);
-        if (unit_running && !allow_while_running) {
-          publish_status(refs, working_mode != 0 ? "GEBLOKKEERD: unit staat niet in standby"
-                                                 : "GEBLOKKEERD: compressor draait");
-          return;
-        }
-        if (unit_running) {
-          // Niet blokkeren, wel vastleggen waarin je geschreven hebt. Loopt er
-          // daarna iets vreemds, dan staat hier in het log op welke frequentie
-          // de compressor draaide toen de tabel onder hem veranderde.
-          ESP_LOGW(TAG, "%sschrijven TIJDENS BEDRIJF: werkmodus %u, compressor %u Hz", refs.prefix,
-                   (unsigned) working_mode, (unsigned) compressor_hz);
-        }
-        queue_step_limited_write(refs, cooling, heating);
-      });
-  refs.controller->queue_command(cmd);
-}
-
-// Laatste zeef voor het schrijven: haalt de tabel op die NU in de unit staat en
-// weigert als een stand er meer dan MAX_STEP_HZ van afwijkt.
-//
-// Waarom tegen de unit en niet tegen de invoervakken: die vakken onthouden hun
-// waarde over een herstart heen, dus een getal uit een eerdere proef ziet er
-// hetzelfde uit als een bedoelde instelling. Alleen de unit weet wat er echt
-// staat.
-//
-// Kost een extra leescommando per schrijfactie. Dat is het waard -- schrijven
-// gebeurt zelden, en dit is de stap die een vergissing tegenhoudt.
-inline void queue_step_limited_write(RuntimeFrequencyTableRefs refs, std::array<float, 11> cooling,
-                                     std::array<float, 11> heating) {
-  publish_status(refs, "CONTROLE: huidige tabel wordt gelezen");
-  auto cmd = esphome::modbus_controller::ModbusCommandItem::create_read_command(
-      refs.controller, esphome::modbus::EntityType::HOLDING, RUNTIME_TABLE_START_ADDRESS,
-      RUNTIME_TABLE_REGISTER_COUNT,
-      [refs, cooling, heating](esphome::modbus::EntityType register_type, uint16_t start_address,
-                               std::span<const uint8_t> data) {
-        std::array<float, 11> current_cooling{};
-        std::array<float, 11> current_heating{};
-        int loaded = 0;
-        if (!parse_runtime_table(data, current_cooling, current_heating, loaded)) {
-          publish_status(refs, "GEBLOKKEERD: huidige tabel niet leesbaar");
-          return;
-        }
-
-        char status[96];
-        auto within_step = [&](const std::array<float, 11> &wanted, const std::array<float, 11> &current,
-                               const char *label) -> bool {
-          for (size_t i = 0; i < wanted.size(); i++) {
-            const int delta = (int) lroundf(wanted[i]) - (int) lroundf(current[i]);
-            const int distance = delta < 0 ? -delta : delta;
-            if (distance > MAX_STEP_HZ) {
-              snprintf(status, sizeof(status), "GEBLOKKEERD: %s F%u wil %d Hz verschuiven, max %d per keer",
-                       label, (unsigned) i, delta, MAX_STEP_HZ);
-              publish_status(refs, status);
-              return false;
-            }
-          }
-          return true;
-        };
-
-        if (!within_step(cooling, current_cooling, "koelen")) return;
-        if (!within_step(heating, current_heating, "verwarmen")) return;
-
-        queue_runtime_write(refs, cooling, heating);
-      });
-  refs.controller->queue_command(cmd);
-}
-
-// Leest terug wat er nu werkelijk staat en vergelijkt met wat we bedoelden.
-// Zonder deze stap weet je alleen dat de unit de opdracht heeft aangenomen,
-// niet dat hij hem heeft uitgevoerd.
-inline void queue_apply_readback(RuntimeFrequencyTableRefs refs, std::array<float, 11> expected_cooling,
-                                 std::array<float, 11> expected_heating) {
-  auto cmd = esphome::modbus_controller::ModbusCommandItem::create_read_command(
-      refs.controller, esphome::modbus::EntityType::HOLDING, RUNTIME_TABLE_START_ADDRESS,
-      RUNTIME_TABLE_REGISTER_COUNT,
-      [refs, expected_cooling, expected_heating](esphome::modbus::EntityType register_type,
-                                                 uint16_t start_address, std::span<const uint8_t> data) {
-        std::array<float, 11> cooling{};
-        std::array<float, 11> heating{};
-        int loaded = 0;
-        if (!parse_runtime_table(data, cooling, heating, loaded)) {
-          char status[64];
-          snprintf(status, sizeof(status), "CONTROLE MISLUKT: %d/22 registers gelezen", loaded);
-          publish_status(refs, status);
-          return;
-        }
-        publish_runtime_table(refs, cooling, heating);
-        if (!tables_match(cooling, expected_cooling) || !tables_match(heating, expected_heating)) {
-          publish_status(refs, "CONTROLE MISLUKT: teruglezing wijkt af");
-          return;
-        }
-        // Expliciet in de melding dat dit vluchtig is: de invoervakken houden
-        // hun waarde vast over een herstart van de ESP, maar de buitenunit valt
-        // bij een power cycle terug op fabriek. Zonder deze toevoeging blijft
-        // hier "toegepast" staan terwijl de unit allang is teruggevallen.
-        publish_status(refs, "TOEGEPAST: actief tot de buitenunit spanningsloos is geweest");
-      });
-  refs.controller->queue_command(cmd);
+inline bool read_desired_values(const std::array<esphome::number::Number *, CURVE_POINTS> &entities,
+                                FrequencyCurve &values) {
+  for (size_t i = 0; i < entities.size(); i++) values[i] = entities[i]->state;
+  return validate_monotonic_table(values);
 }
 
 // Haalt de tabel op die nu in de unit staat, zodat je bewerkt wat er
@@ -325,33 +423,12 @@ inline void load_runtime_table(RuntimeFrequencyTableRefs refs) {
     publish_status(refs, "GEBLOKKEERD: EEPROM-dump loopt");
     return;
   }
-  publish_status(refs, "OPHALEN: tabel wordt gelezen");
-  auto cmd = esphome::modbus_controller::ModbusCommandItem::create_read_command(
-      refs.controller, esphome::modbus::EntityType::HOLDING, RUNTIME_TABLE_START_ADDRESS,
-      RUNTIME_TABLE_REGISTER_COUNT,
-      [refs](esphome::modbus::EntityType register_type, uint16_t start_address,
-             std::span<const uint8_t> data) {
-        std::array<float, 11> cooling{};
-        std::array<float, 11> heating{};
-        int loaded = 0;
-        if (!parse_runtime_table(data, cooling, heating, loaded)) {
-          char status[64];
-          snprintf(status, sizeof(status), "OPHALEN MISLUKT: %d/22 registers gelezen", loaded);
-          publish_status(refs, status);
-          return;
-        }
-        publish_runtime_table(refs, cooling, heating);
-        char status[64];
-        snprintf(status, sizeof(status), "OPGEHAALD: %d/22 registers", loaded);
-        publish_status(refs, status);
-      });
-  refs.controller->queue_command(cmd);
-}
-
-inline bool read_desired_values(const std::array<esphome::number::Number *, 11> &entities,
-                                std::array<float, 11> &values) {
-  for (size_t i = 0; i < entities.size(); i++) values[i] = entities[i]->state;
-  return validate_monotonic_table(values);
+  RuntimeFrequencyTableDevice *device = device_for(refs);
+  if (device == nullptr) {
+    publish_status(refs, "GEBLOKKEERD: geen Modbus-device beschikbaar");
+    return;
+  }
+  device->start_load(refs);
 }
 
 inline void apply_runtime_table(RuntimeFrequencyTableRefs refs, bool enabled, bool allow_while_running) {
@@ -364,8 +441,8 @@ inline void apply_runtime_table(RuntimeFrequencyTableRefs refs, bool enabled, bo
     return;
   }
 
-  std::array<float, 11> cooling{};
-  std::array<float, 11> heating{};
+  FrequencyCurve cooling{};
+  FrequencyCurve heating{};
   if (!read_desired_values(refs.cooling_desired, cooling)) {
     publish_status(refs, "GEBLOKKEERD: koeltabel ongeldig of niet oplopend");
     return;
@@ -375,7 +452,12 @@ inline void apply_runtime_table(RuntimeFrequencyTableRefs refs, bool enabled, bo
     return;
   }
 
-  queue_guarded_runtime_write(refs, cooling, heating, allow_while_running);
+  RuntimeFrequencyTableDevice *device = device_for(refs);
+  if (device == nullptr) {
+    publish_status(refs, "GEBLOKKEERD: geen Modbus-device beschikbaar");
+    return;
+  }
+  device->start_guarded_write(refs, cooling, heating, allow_while_running);
 }
 
 }  // namespace oq_odu_runtime_frequency
