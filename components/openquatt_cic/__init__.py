@@ -1,6 +1,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import binary_sensor, sensor, switch, text
+from esphome.components.esp32 import include_builtin_idf_component
 from esphome.const import CONF_ID
 
 AUTO_LOAD = ["sensor", "binary_sensor", "switch", "text"]
@@ -72,6 +73,12 @@ CONFIG_SCHEMA = cv.Schema(
 
 
 async def to_code(config):
+    # ESP-IDF's HTTP-client staat standaard op de uitsluitlijst van ESPHome.
+    # Tot 2026.8.0 kwam hij toch in de requirements van `src` terecht; sinds
+    # 2026.9.0 niet meer, en dan vindt OpenQuattCIC.h esp_http_client.h niet.
+    # Zelfde route als http_request en als de EEPROM-dump (esp_http_server).
+    include_builtin_idf_component("esp_http_client")
+
     cg.add_global(openquatt_cic_ns.using)
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
