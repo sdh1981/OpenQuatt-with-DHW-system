@@ -56,7 +56,11 @@
 # wat hier op het scherm staat.
 #
 # De vrijgaveknop gaat er bij het schrijven automatisch weer uit: een druk is
-# een schrijfactie. De status vertelt waar het strandde als er iets misgaat.
+# een schrijfactie. De status vertelt waar het strandde als er iets misgaat,
+# ook bij een foutcode of uitblijvend antwoord van de unit. Kwam het schrijven
+# niet bevestigd terug, dan wordt er teruggelezen en zegt de status TOEGEPAST of
+# CONTROLE MISLUKT. Per unit loopt er een opdracht tegelijk; een tweede druk
+# daartussen geeft "BEZIG".
 #
 # Defaults hieronder zijn de fabriekswaarden zoals gemeten in de EEPROM-dumps
 # van HP1 en HP2 (die zijn byte-identiek). Zie docs/odu-eeprom-parameters.md.

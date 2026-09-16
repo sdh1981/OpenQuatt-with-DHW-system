@@ -55,6 +55,9 @@ esphome:
     - ${dhw_controller_logic_header}
     - ${installation_monitor_header}
     - ${compressor_start_limit_header}
+    # Logica voor de tabel zelf: die includeert hem met een relatief pad, en
+    # ESPHome kopieert alleen wat hier staat naar src/.
+    - ${odu_runtime_freq_table_logic_header}
     - ${odu_runtime_freq_table_header}
   # v0.50: verplaatst uit platformio_options; dat pad is sinds 2026.7.0
   # deprecated en verdwijnt in 2026.12.0. Beide routes roepen intern dezelfde
