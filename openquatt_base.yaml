@@ -42,7 +42,11 @@ esphome:
   # vector. We gebruiken beide nieuwe vormen rechtstreeks, dus op 2026.7.0
   # compileert dit niet meer. Bewuste keuze -- de oude naam werkte nog wel maar
   # gaf bij elk gebruik een deprecatiewaarschuwing, en verdwijnt in 2027.2.0.
-  min_version: 2026.8.0
+  #
+  # 2026.9.0 en niet lager: register_count is daar verwijderd en de gaten in de
+  # HP-leesreeks worden nu met reuse_previous_range overbrugd. Die optie kent
+  # 2026.8.0 niet, dus daar valt de configuratie al bij het valideren om.
+  min_version: 2026.9.0
   name_add_mac_suffix: false
   includes:
     - ${hp_perf_map_header}

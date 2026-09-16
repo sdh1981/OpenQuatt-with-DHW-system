@@ -145,7 +145,6 @@ select:
       "Cooling":   1
       "Heating":   2
       "Hot water": 3
-    skip_updates: ${oq_skip_10s}
     web_server:
       sorting_group_id: oq_${hp_id}
 
@@ -170,7 +169,6 @@ select:
       "8": 8
       "9": 9
       "10": 10
-    skip_updates: ${oq_skip_10s}
     web_server:
       sorting_group_id: oq_${hp_id}
 
@@ -186,7 +184,6 @@ select:
     optionsmap:
       "Off": 0
       "On": 1
-    skip_updates: ${oq_skip_10s}
     web_server:
       sorting_group_id: oq_${hp_id}
 
@@ -202,7 +199,6 @@ select:
     optionsmap:
       "Off": 0
       "On": 4096
-    skip_updates: ${oq_skip_10s}
     web_server:
       sorting_group_id: oq_${hp_id}
 
@@ -268,7 +264,6 @@ number:
     min_value: 0
     max_value: 1000
     mode: slider
-    skip_updates: ${oq_skip_10s}
     web_server:
       sorting_group_id: oq_${hp_id}
 
@@ -276,10 +271,16 @@ number:
 # SENSOR
 # ----------------------------
 # All live holding-register measurements from 2099 through 2138 deliberately
-# form one contiguous range. The three unused gaps are bridged at 2105, by an
-# internal spacer at 2109, and at 2135; no item in this range uses
-# skip_updates. Result: one 40-register snapshot per controller update
-# (5 seconds by default).
+# form one contiguous range. Result: one 40-register snapshot per controller
+# update (5 seconds by default).
+#
+# Sinds ESPHome 2026.9.0 bestaat register_count niet meer. Een gat in de reeks
+# overbrug je nu vanaf de andere kant: `reuse_previous_range: true` op de
+# EERSTVOLGENDE sensor, die de lezing dan over de ongebruikte registers heen
+# laat doorlopen. Dat staat op 2107 (gat 2106), 2116 (2114-2115), 2127
+# (2124-2126), 2131 (2128-2130) en 2137 (2136). Register 2109 wordt nog
+# overbrugd door de interne spacer hieronder. Wat er over de draad gaat is
+# gelijk aan de register_count-versie.
 sensor:
   - platform: modbus_controller
     modbus_controller_id: ${hp_id}
@@ -289,7 +290,6 @@ sensor:
     state_class: measurement
     register_type: holding
     address: 2099
-    #skip_updates: 0
     on_value:
       then:
         - lambda: |-
@@ -314,7 +314,6 @@ sensor:
           min_value: 0
           max_value: 300
           ignore_out_of_range: true
-    #skip_updates: 0
     web_server:
       sorting_group_id: oq_${hp_id}
 
@@ -335,7 +334,6 @@ sensor:
           min_value: 0
           max_value: 16
           ignore_out_of_range: true
-    #skip_updates: 0
     web_server:
       sorting_group_id: oq_${hp_id}
 
@@ -406,15 +404,12 @@ sensor:
     unit_of_measurement: "RPM"
     state_class: "measurement"
     accuracy_decimals: 0
-    # Bridge unused register 2106 to the next live register at 2107.
-    register_count: 2
     filters:
       - multiply: 1
       - clamp:
           min_value: 0
           max_value: 1000
           ignore_out_of_range: true
-    #skip_updates: 0
     web_server:
       sorting_group_id: oq_${hp_id}
 
@@ -424,6 +419,8 @@ sensor:
     icon: mdi:valve
     register_type: holding
     address: 2107
+    # Over ongebruikt register 2106 heen aansluiten op de lezing vanaf 2099.
+    reuse_previous_range: true
     unit_of_measurement: "p"
     state_class: "measurement"
     accuracy_decimals: 0
@@ -436,9 +433,11 @@ sensor:
     web_server:
       sorting_group_id: oq_${hp_id}
 
-  # Internal spacer: binary_sensor.modbus_controller does not support
-  # register_count. Reading reserved register 2109 as an internal sensor keeps
-  # 2108 and 2110 contiguous in the shared 2099-2138 request.
+  # Internal spacer: reading reserved register 2109 as an internal sensor keeps
+  # 2108 and 2110 contiguous in the shared 2099-2138 request. Stamt uit de tijd
+  # van register_count, dat de binary sensors op 2108 niet hadden. Sinds 2026.9.0
+  # zou `reuse_previous_range: true` op 2110 hetzelfde doen; de spacer blijft
+  # staan omdat hij werkt en de lezing zo bit-voor-bit gelijk blijft.
   - platform: modbus_controller
     modbus_controller_id: ${hp_id}
     id: ${hp_id}_reserved_2109
@@ -454,7 +453,6 @@ sensor:
     icon: mdi:thermometer
     register_type: holding
     address: 2110
-    #skip_updates: 0
     unit_of_measurement: "°C"
     device_class: "temperature"
     state_class: "measurement"
@@ -528,11 +526,9 @@ sensor:
     device_class: "temperature"
     state_class: "measurement"
     accuracy_decimals: 2
-    # Span 2113-2115 so ESPHome merges this item with the next register at
-    # 2116. This makes gas-return (2113) and evaporating temperature (2132)
-    # part of one Modbus response. U_WORD still parses only the first word;
-    # the extra registers only bridge the otherwise separate read ranges.
-    register_count: 3
+    # Gas-return (2113) en evaporating temperature (2132) horen in dezelfde
+    # Modbus-response, voor de superheat. De brug over 2114-2115 zat hier als
+    # register_count: 3 en staat sinds ESPHome 2026.9.0 op 2116.
     filters:
       - offset: -3000
       - multiply: 0.01
@@ -549,6 +545,8 @@ sensor:
     icon: mdi:gauge
     register_type: holding
     address: 2116
+    # Over ongebruikte registers 2114-2115 heen aansluiten; zie gas-return.
+    reuse_previous_range: true
     unit_of_measurement: "bar"
     device_class: "pressure"
     state_class: "measurement"
@@ -573,7 +571,6 @@ sensor:
     device_class: "pressure"
     state_class: "measurement"
     accuracy_decimals: 2
-    # register_count: 5  # 2117 - 2121
     filters:
       - multiply: 0.1
       - clamp:
@@ -597,7 +594,7 @@ sensor:
     disabled_by_default: true
     icon: mdi:memory
     register_type: holding
-    register_count: 4  # 2123 - 2126
+    # U_WORD: alleen 2123 wordt geparsed, net als met de oude register_count: 4.
     address: 2123
     web_server:
       sorting_group_id: oq_${hp_id}
@@ -608,8 +605,9 @@ sensor:
     disabled_by_default: true
     icon: mdi:identifier
     register_type: holding
-    register_count: 4  # 2127 - 2130
     address: 2127
+    # Over 2124-2126 heen aansluiten (was register_count: 4 op 2123).
+    reuse_previous_range: true
     web_server:
       sorting_group_id: oq_${hp_id}
 
@@ -620,6 +618,8 @@ sensor:
     icon: mdi:thermometer
     register_type: holding
     address: 2131
+    # Over 2128-2130 heen aansluiten (was register_count: 4 op 2127).
+    reuse_previous_range: true
     unit_of_measurement: "°C"
     device_class: "temperature"
     state_class: "measurement"
@@ -719,7 +719,6 @@ sensor:
     icon: mdi:thermometer-water
     register_type: holding
     address: 2133
-    #skip_updates: 0
     unit_of_measurement: "°C"
     device_class: "temperature"
     state_class: "measurement"
@@ -745,7 +744,6 @@ sensor:
     icon: mdi:thermometer-water
     register_type: holding
     address: 2134
-    #skip_updates: 0
     unit_of_measurement: "°C"
     device_class: "temperature"
     state_class: "measurement"
@@ -771,8 +769,6 @@ sensor:
     device_class: "temperature"
     state_class: "measurement"
     accuracy_decimals: 2
-    # Bridge unused register 2136 to the next live register at 2137.
-    register_count: 2
     filters:
       - offset: -3000
       - multiply: 0.01
@@ -790,14 +786,14 @@ sensor:
     icon: mdi:pump
     register_type: holding
     address: 2137
-    # force_new_range: true
+    # Over ongebruikt register 2136 heen aansluiten.
+    reuse_previous_range: true
     unit_of_measurement: "W"
     device_class: "power"
     state_class: "measurement"
     accuracy_decimals: 2
     filters:
       - multiply: 0.1
-    #skip_updates: 0
     web_server:
       sorting_group_id: oq_${hp_id}
 
@@ -808,7 +804,6 @@ sensor:
     icon: mdi:water-pump
     register_type: holding
     address: 2138
-    #skip_updates: 0
     unit_of_measurement: "L/h"
     device_class: "volume_flow_rate"
     state_class: "measurement"
@@ -1026,7 +1021,7 @@ sensor:
 binary_sensor:
   # At least bits 0,2,4,5,6,11 are used for status in R2108.
   # All bitmask views share R2108; the internal sensor at R2109 bridges onward
-  # to R2110 because this binary-sensor platform has no register_count option.
+  # to R2110 (zie de spacer bij de sensors).
   - platform: modbus_controller
     modbus_controller_id: ${hp_id}
     name: "${prefix}Fan Low Speed Mode"
@@ -1123,7 +1118,6 @@ binary_sensor:
     device_class: running
     register_type: holding
     address: 2118
-    #skip_updates: 0
     on_state:
       then:
         - lambda: |-
