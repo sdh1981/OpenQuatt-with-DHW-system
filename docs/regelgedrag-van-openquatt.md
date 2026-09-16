@@ -58,6 +58,8 @@ Als verwarmen gevraagd wordt, maar de gekozen flow te laag is of te lang ongeldi
 - wordt verdere opbouw naar normaal verwarmen tegengehouden;
 - blijft OpenQuatt in een veiligere tussenroute.
 
+De flowbewaking loopt ook door nadat de vraag is weggevallen, zolang een compressor nog draait of nog gevraagd wordt: tijdens de minimale looptijd, een defrost-hold of de afbouw. Blijft de flow dan 60 s onder het minimum (standaard 250 L/h), dan volgt dezelfde stop naar Standby en stand 0. Die stop gaat voor de minimale looptijd; alleen een lopende defrost wordt niet onderbroken.
+
 Dat kan voelen alsof het systeem niet doorpakt, maar is meestal bewust beveiligd gedrag.
 
 ## Overrides
