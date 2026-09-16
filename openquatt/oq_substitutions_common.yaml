@@ -248,7 +248,10 @@ oq_modbus_update_interval_s: "5"                    # Base Modbus controller pol
 #
 # De som, gemeten aan onze eigen configuratie:
 #   - 12 commando's op een volle ronde (2x de samengevoegde 2099-2138 lezing,
-#     plus 2x 5 losse regelregisters op de cyclus waarin die meelopen)
+#     plus 2x 5 losse regelregisters). Tot ESPHome 2026.9.0 liepen die vijf
+#     via skip_updates maar om de ronde mee; die optie doet daar niets meer,
+#     dus nu is ELKE ronde een volle ronde. De som hieronder rekende al met de
+#     volle ronde, dus de marge blijft staan.
 #   - 19200 8E1 = 0,57 ms per teken; grote lezing ~53 ms, kleine ~9 ms draad
 #   - rondetijd ~= 12 x turnaround + ~440 ms transactie- en slave-tijd
 #
@@ -262,5 +265,7 @@ oq_modbus_update_interval_s: "5"                    # Base Modbus controller pol
 # van de buskosten.
 oq_modbus_turnaround_time_ms: "150"
 oq_modbus_max_cmd_retries: "1"                       # Retries per Modbus command; keep low to avoid long blocking on bad links.
-oq_skip_10s: "1"                                      # 1 skip; effective polling every 10s.
-oq_skip_30s: "5"                                      # 5 skips; effective polling every 30s.
+# oq_skip_10s / oq_skip_30s verwijderd: skip_updates heeft sinds ESPHome 2026.9.0
+# geen effect meer en verdwijnt in 2027.3.0. Wil je registers trager pollen, dan
+# is de route een tweede modbus_controller op hetzelfde adres met een langere
+# update_interval.
