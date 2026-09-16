@@ -234,6 +234,13 @@ bool OpenQuattOduEepromDump::available_storage_() const {
 }
 
 void OpenQuattOduEepromDump::setup() {
+  // Hub en adres komen van de controller van dezelfde HP. Die is bij de
+  // constructie al gekoppeld, dus hier altijd beschikbaar.
+  if (this->controller_ != nullptr) {
+    this->set_parent(this->controller_->hub());
+    this->set_address(this->controller_->device_address());
+  }
+
   const bool allocated = this->eeprom_.allocate_external(EEPROM_REGISTER_COUNT);
   this->available_.store(allocated && this->available_storage_(), std::memory_order_release);
   if (!this->available_.load(std::memory_order_acquire)) {
@@ -253,6 +260,12 @@ void OpenQuattOduEepromDump::dump_config() {
   ESP_LOGCONFIG(TAG, "  HP: %u", this->hp_index_);
   ESP_LOGCONFIG(TAG, "  Modbus device address: %u", this->device_address_);
   ESP_LOGCONFIG(TAG, "  Controller: %s", this->controller_ == nullptr ? "<missing>" : "configured");
+  ESP_LOGCONFIG(TAG, "  Modbus hub device: %s (address %u)", this->parent_ == nullptr ? "<missing>" : "attached",
+                this->address_);
+  if (this->parent_ != nullptr && this->address_ != this->device_address_) {
+    ESP_LOGW(TAG, "  device_address %u wijkt af van het controlleradres %u; er wordt gelezen van %u",
+             this->device_address_, this->address_, this->address_);
+  }
   ESP_LOGCONFIG(TAG, "  Web authentication: not compiled in (fork)");
   ESP_LOGCONFIG(TAG, "  Snapshot buffer: %s", this->available_storage_() ? "PSRAM" : "unavailable");
 }
@@ -261,7 +274,7 @@ OpenQuattOduEepromDump::StartResult OpenQuattOduEepromDump::start(bool include_e
   portENTER_CRITICAL(&this->state_mux_);
   const bool busy = this->active_.load(std::memory_order_acquire) || this->starting_.load(std::memory_order_acquire) ||
                     this->download_in_progress_.load(std::memory_order_acquire);
-  const bool available = this->available_.load(std::memory_order_acquire) && this->controller_ != nullptr;
+  const bool available = this->available_.load(std::memory_order_acquire) && this->parent_ != nullptr;
   if (!busy && available) {
     this->starting_.store(true, std::memory_order_release);
   }
@@ -327,7 +340,7 @@ void OpenQuattOduEepromDump::reset_job_() {
 }
 
 void OpenQuattOduEepromDump::loop() {
-  if (!this->active_.load(std::memory_order_acquire) || this->controller_ == nullptr) {
+  if (!this->active_.load(std::memory_order_acquire) || this->parent_ == nullptr) {
     return;
   }
 
@@ -337,13 +350,10 @@ void OpenQuattOduEepromDump::loop() {
       this->handle_request_result_();
       return;
     }
-    // Enige detectie van een verloren antwoord. Tot ESPHome 2026.8.0 keken we
-    // hier of de wachtrij van de controller leeggelopen was: stond die 500ms
-    // leeg terwijl wij nog wachtten, dan was ons commando verdwenen. Die
-    // wachtrij is niet meer op te vragen -- get_command_queue_length() bestaat
-    // niet meer -- dus dit is nu puur een tijdslimiet. Daarom staat
-    // REQUEST_TIMEOUT_MS op 8s en niet meer op 30s: zonder die snelle detectie
-    // zou elke misser een halve minuut stilstand betekenen.
+    // Vangnet voor een verzoek waar helemaal niets op terugkomt. Een gewoon
+    // uitblijvend antwoord meldt de hub zelf (on_no_response), en dat loopt via
+    // handle_request_failure_() met de retry per blok. Deze grens gooit de hele
+    // dump af, dus hij hoort nooit de normale route te zijn.
     if (now - this->queued_ms_ >= REQUEST_TIMEOUT_MS) {
       this->fail_job_("Modbus request timed out");
       return;
@@ -436,67 +446,90 @@ void OpenQuattOduEepromDump::queue_current_request_() {
   this->response_valid_.store(false, std::memory_order_relaxed);
   this->waiting_for_response_.store(true, std::memory_order_release);
   this->queued_ms_ = millis();
-  const uint16_t expected_start = this->request_start_address_;
-  const uint32_t request_token = this->request_token_.fetch_add(1U, std::memory_order_acq_rel) + 1U;
-  auto command = modbus_controller::ModbusCommandItem::create_read_command(
-      this->controller_, modbus::EntityType::HOLDING, expected_start, this->request_register_count_,
-      [this, expected_start, request_token](modbus::EntityType, uint16_t start_address,
-                                            std::span<const uint8_t> data) {
-        if (start_address == expected_start) this->on_response_(request_token, start_address, data);
-      });
-  this->controller_->queue_command(command);
+  // false = de hub weigert het verzoek, en dan volgt er ook geen callback. Niet
+  // wachten op de tijdslimiet: meteen als mislukt markeren, dan pakt loop() de
+  // gewone foutroute.
+  if (!this->read_holding_registers(this->request_start_address_, this->request_register_count_)) {
+    this->mark_request_failed_();
+  }
 }
 
-uint16_t OpenQuattOduEepromDump::read_word_(std::span<const uint8_t> data, size_t index) {
-  const size_t offset = index * 2U;
-  return static_cast<uint16_t>((static_cast<uint16_t>(data[offset]) << 8U) | data[offset + 1U]);
+void OpenQuattOduEepromDump::mark_request_failed_() {
+  if (!this->active_.load(std::memory_order_acquire) || !this->waiting_for_response_.load(std::memory_order_acquire)) {
+    return;
+  }
+  this->response_valid_.store(false, std::memory_order_relaxed);
+  this->response_received_.store(true, std::memory_order_release);
 }
 
-void OpenQuattOduEepromDump::on_response_(uint32_t request_token, uint16_t start_address,
-                                          std::span<const uint8_t> data) {
-  if (!this->active_.load(std::memory_order_acquire) ||
-      request_token != this->request_token_.load(std::memory_order_acquire) ||
-      !this->waiting_for_response_.load(std::memory_order_acquire) || start_address != this->request_start_address_) {
+void OpenQuattOduEepromDump::on_read_holding_registers(uint16_t start_address, std::span<const uint16_t> registers,
+                                                       modbus::ResponseStatus status) {
+  if (!this->active_.load(std::memory_order_acquire) || !this->waiting_for_response_.load(std::memory_order_acquire) ||
+      start_address != this->request_start_address_) {
     return;
   }
 
-  const size_t expected_bytes = static_cast<size_t>(this->request_register_count_) * 2U;
-  if (data.size() < expected_bytes) {
-    this->response_valid_.store(false, std::memory_order_relaxed);
-    this->response_received_.store(true, std::memory_order_release);
+  // Bij een foutcode is registers leeg; de hub levert een succesvol antwoord
+  // alleen af als de lengte precies klopt (anders on_custom_response). De
+  // lengtecheck blijft als vangnet.
+  if (!modbus::succeeded(status) || registers.size() < this->request_register_count_) {
+    if (!modbus::succeeded(status)) {
+      ESP_LOGD(TAG, "HP%u read 0x%04X x%u: exception 0x%02X", this->hp_index_, start_address,
+               this->request_register_count_, static_cast<unsigned>(*status));
+    }
+    this->mark_request_failed_();
     return;
   }
 
+  // De hub levert de woorden al in host-volgorde; het zelf samenstellen uit
+  // twee bytes (read_word_) is daarmee vervallen.
   switch (this->step_) {
     case Step::EXTENDED:
-      for (size_t index = 0; index < this->extended_.size(); ++index) this->extended_[index] = read_word_(data, index);
+      std::copy_n(registers.begin(), this->extended_.size(), this->extended_.begin());
       break;
     case Step::MODEL:
-      for (size_t index = 0; index < this->model_.size(); ++index) this->model_[index] = read_word_(data, index);
+      std::copy_n(registers.begin(), this->model_.size(), this->model_.begin());
       break;
     case Step::CUSTOMER_MODEL:
-      for (size_t index = 0; index < this->customer_model_.size(); ++index)
-        this->customer_model_[index] = read_word_(data, index);
+      std::copy_n(registers.begin(), this->customer_model_.size(), this->customer_model_.begin());
       break;
     case Step::SERIAL:
-      for (size_t index = 0; index < this->serial_.size(); ++index) this->serial_[index] = read_word_(data, index);
+      std::copy_n(registers.begin(), this->serial_.size(), this->serial_.begin());
       break;
     case Step::CORE:
-      for (size_t index = 0; index < this->core_.size(); ++index) this->core_[index] = read_word_(data, index);
+      std::copy_n(registers.begin(), this->core_.size(), this->core_.begin());
       break;
     case Step::EEPROM:
-      for (size_t index = 0; index < this->request_register_count_; ++index)
-        this->eeprom_[this->eeprom_offset_ + index] = read_word_(data, index);
+      std::copy_n(registers.begin(), this->request_register_count_, this->eeprom_.data() + this->eeprom_offset_);
       break;
     default:
-      this->response_valid_.store(false, std::memory_order_relaxed);
-      this->response_received_.store(true, std::memory_order_release);
+      this->mark_request_failed_();
       return;
   }
 
   this->response_valid_.store(true, std::memory_order_relaxed);
   this->response_received_.store(true, std::memory_order_release);
 }
+
+// Een antwoord dat niet bij het verzoek past (verkeerde lengte, geen standaard-
+// PDU). De standaardimplementatie logt alleen, en dan bleven we tot de
+// tijdslimiet hangen.
+void OpenQuattOduEepromDump::on_custom_response(std::span<const uint8_t> /*request_pdu*/,
+                                                std::span<const uint8_t> response_pdu,
+                                                modbus::ResponseStatus /*status*/) {
+  ESP_LOGD(TAG, "HP%u read 0x%04X: non-standard response (%u bytes)", this->hp_index_, this->request_start_address_,
+           static_cast<unsigned>(response_pdu.size()));
+  this->mark_request_failed_();
+}
+
+// Geen herhaling door de hub (false): de retry per EEPROM-blok zit al in
+// handle_request_failure_(), en een tweede laag eronder zou die verdubbelen.
+bool OpenQuattOduEepromDump::on_no_response(std::span<const uint8_t> /*request_pdu*/) {
+  this->mark_request_failed_();
+  return false;
+}
+
+void OpenQuattOduEepromDump::on_not_sent(std::span<const uint8_t> /*request_pdu*/) { this->mark_request_failed_(); }
 
 void OpenQuattOduEepromDump::handle_request_result_() {
   this->waiting_for_response_.store(false, std::memory_order_relaxed);
@@ -630,6 +663,14 @@ void OpenQuattOduEepromDump::finish_job_() {
 }
 
 void OpenQuattOduEepromDump::fail_job_(const char* error) {
+  // Een verzoek dat nog uitstaat loskoppelen: de hub levert daar dan geen
+  // callback meer voor af, ook niet als het antwoord toch nog binnenkomt. Zo kan
+  // een laat antwoord nooit in een volgende dump belanden. Alleen veilig vanuit
+  // de hoofdlus; fail_job_() wordt ook alleen vanuit loop() aangeroepen.
+  if (this->parent_ != nullptr && this->waiting_for_response_.load(std::memory_order_acquire)) {
+    this->clear_tx_queue_for_device();
+  }
+  this->waiting_for_response_.store(false, std::memory_order_release);
   this->step_ = Step::FAILED;
   this->completed_ms_ = millis();
   this->set_error_(error);
