@@ -9,6 +9,26 @@ permissions:
   contents: read
 
 jobs:
+  # Losse C++-headers zonder ESPHome-afhankelijkheid, getest op de runner zelf.
+  # Elk bestand onder tests/host/ is een eigen programma met een main().
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Build and run host tests
+        run: |
+          set -eu
+          g++ --version | head -1
+          for src in tests/host/*_test.cpp; do
+            bin="$RUNNER_TEMP/$(basename "$src" .cpp)"
+            echo "::group::$src"
+            g++ -std=c++17 -Wall -Wextra -Werror "$src" -o "$bin"
+            "$bin"
+            echo "::endgroup::"
+          done
+
   validate-and-compile:
     runs-on: ubuntu-latest
     strategy:
