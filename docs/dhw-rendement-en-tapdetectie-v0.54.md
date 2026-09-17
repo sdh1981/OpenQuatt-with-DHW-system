@@ -40,7 +40,9 @@ Dat is geen fout maar het punt: 3 kW erin, 3 kW eruit is COP 1. Een cyclus waari
 
 Een cyclus telt pas mee vanaf **50 Wh**. Daaronder is het een afgebroken start of een klep die kort omging — daar valt niets zinnigs over te zeggen.
 
-De dagtellers resetten op dagnummer, niet op uptime, dus een reboot midden op de dag gooit ze niet weg.
+De waarden van de laatste cyclus blijven bewaard over een herstart van de controller.
+
+Het thermische vermogen van een lopende cyclus staat apart in `sensor.openquatt_dhw_hp_thermisch_vermogen`. Dat is een schatting uit de prestatiekaart voor de units die nu voor DHW draaien, en geen meting. Het rekent met single-HP mode, level bump, zachte aanloop en assist.
 
 ### Waar je het voor gebruikt
 
@@ -67,14 +69,14 @@ De detectie bestond al, maar zat binnen `if (oq_dhw_adaptive_usage_enable)` — 
 
 Een douche midden in zo'n venster ging daardoor als tankverlies de UA-schatting in — en die UA voedt weer de time-to-ready en de legionella-ETA.
 
-De detectie staat nu op zichzelf, met een eigen schakelaar die standaard aan staat. De usage-learning gebruikt de tappingen nog steeds voor haar uurpatroon, maar is er niet langer de voorwaarde voor.
+De detectie staat nu op zichzelf, met een eigen schakelaar die standaard aan staat. De usage-learning heeft voor haar uurpatroon nog een eigen, grovere detectie: 2 K daling binnen 5 minuten, alleen actief als usage-learning aan staat. Zie [DHW smart features §3](dhw-smart-features-v0.32.md#3-adaptive-usage-pattern-learning).
 
 ### Entiteiten
 
 | Entiteit | Wat |
 |---|---|
 | `binary_sensor.openquatt_dhw_tapping_actief` | loopt er nu water uit |
-| `sensor.openquatt_dhw_tappingen_vandaag` | teller, reset op dagnummer |
+| `sensor.openquatt_dhw_tappingen_vandaag` | teller, reset op dagnummer (niet op uptime, dus een herstart wist hem niet) |
 | `sensor.openquatt_dhw_laatste_tapping_energie` | ruwe schatting in Wh |
 | `sensor.openquatt_dhw_tanktop_daalsnelheid` | de gemeten K/min, om de drempel op af te stellen |
 | `switch.openquatt_dhw_tapdetectie` | default aan |

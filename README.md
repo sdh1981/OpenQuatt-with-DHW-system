@@ -49,13 +49,14 @@ python -m esphome run openquatt_duo_lilygo_tconnect+cic.yaml
 
 ### Warmwater
 
-Een complete toestandsmachine — `IDLE_CV → DHW_PREPARE → DHW_HEAT_PUMP → DHW_BOOST`, met legionella en foutafhandeling ernaast. Zie [DHW-instellingen](docs/dhw-instellingen.md).
+Een complete toestandsmachine — `IDLE_CV → DHW_PREPARE → DHW_HEAT_PUMP → DHW_BOOST`, met legionella en foutafhandeling ernaast. Zie [DHW: werking en instellingen](docs/dhw-instellingen.md).
 
 - **Single-HP mode** met vastgezette lead per cyclus en gezondheidsafweging tussen de units, zodat de vraag niet halverwege naar de andere compressor verhuist.
 - **Stapsgewijze tweede-HP assist**, die pas inschakelt als de tanktop aantoonbaar te traag stijgt, met eigen persgas- en water-uitbewaking.
 - **Zachte aanloop** van het compressorniveau bij de start van de HP-fase.
 - **Handmatige snelboost**: beide HP's plus het element, met eigen grenzen en afbreekbaar.
-- **Legionellaprogramma** met pasteurisatie-hold, slimme uitstelregels en een plafond op de tanktop tijdens de HP-fase.
+- **HP-fase stopt op de tankbodem** (52 °C), zodat elke cyclus de hele tank doorwarmt.
+- **Legionellaprogramma** met pasteurisatie-hold, een plafond op de tanktop tijdens de HP-fase en optioneel vervroegen naar een goedkoop uur.
 
 ### Beveiliging
 
@@ -109,7 +110,7 @@ Begin bij het [documentatie-overzicht](docs/README.md). Voor dagelijks gebruik:
 
 - [Hoe OpenQuatt werkt](docs/hoe-openquatt-werkt.md) — rolverdeling tussen thermostaat, OpenQuatt, warmtepomp en Home Assistant
 - [Diagnose en afstelling](docs/diagnose-en-afstelling.md) — werkvolgorde bij afwijkend gedrag
-- [DHW-instellingen](docs/dhw-instellingen.md) — alle warmwaterparameters
+- [DHW: werking en instellingen](docs/dhw-instellingen.md) — hoe de warmwaterregeling werkt en alle instellingen
 - [Koeling-instellingen](docs/koeling-instellingen.md) — dauwpuntbeveiliging, nacht-free cooling, emitterprofiel
 - [Instellingen en meetwaarden](docs/instellingen-en-meetwaarden.md) — compile-time en runtime
 
