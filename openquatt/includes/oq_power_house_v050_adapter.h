@@ -217,12 +217,20 @@ inline oq_power_house::DemandDecision decide_demand_with_extensions(const oq_pow
   }
 
   // smart #1 tarief en #2 PV: na de begrenzer, tot 1,2x nominaal. smart #3 raam: 0.
-  float requested_w = out.requested_w + finite_or_zero(ext.tariff_w) + finite_or_zero(ext.pv_boost_w);
+  const float limited_w = out.requested_w;
+  float requested_w = limited_w + finite_or_zero(ext.tariff_w) + finite_or_zero(ext.pv_boost_w);
   requested_w = clampf(requested_w, 0.0f, input.rated_w * 1.20f);
   if (ext.window_open) requested_w = 0.0f;
 
   out.requested_w = requested_w;
-  out.next.last_w = requested_w;  // de fork onthoudt het vermogen NA de uitbreidingen
+  // Bewust ANDERS dan de fork-YAML: de begrenzer onthoudt het vermogen VOOR
+  // tarief en PV. De YAML onthoudt het erna, en dan telt de boost elke cyclus
+  // opnieuw mee: zodra de boost groter is dan wat de begrenzer per cyclus laat
+  // zakken, loopt het vermogen op tot 1,2x nominaal, los van de warmtevraag.
+  // Op 60 s gebeurt dat bij profiel Calm (1404 W/min) al met de standaard-
+  // tariefgrens; op dit ritme van 10 s bij elke boost boven 390 W.
+  // Raam open: 0, zodat het vermogen daarna weer rustig opbouwt (zoals de YAML).
+  out.next.last_w = ext.window_open ? 0.0f : limited_w;
   out.raw_demand = static_cast<int>(std::lround(tuning.demand_max * (requested_w / input.rated_w)));
   if (out.raw_demand < 0) out.raw_demand = 0;
   if (out.raw_demand > tuning.demand_max) out.raw_demand = tuning.demand_max;

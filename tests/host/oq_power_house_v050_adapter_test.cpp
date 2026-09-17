@@ -6,6 +6,12 @@
 // een letterlijke naschrijving van oq_power_house_strategy.yaml (het deel dat
 // P_req en oq_demand_raw uitrekent), zonder de toestand van de uitbreidingen zelf
 // (zon-EMA, tariefslew, PV-slew, raamdetectie): die leest de schaduw uit.
+//
+// Op EEN regel na: wat de begrenzer onthoudt voor de volgende cyclus. De YAML
+// onthoudt het vermogen NA tarief en PV, waardoor die boost zich opstapelt tot
+// 1,2x nominaal (zie test_boost_does_not_ratchet). De adapter onthoudt het
+// vermogen ervoor; de referentie hieronder volgt de adapter op dat punt, met
+// KOPPELING_YAML als markering.
 
 #undef NDEBUG
 #include <assert.h>
@@ -79,11 +85,13 @@ struct ForkReference {
         P_limited = std::fmax(P_raw, lastw - dn * dt_power_s);
     }
     float P_effective = P_limited * water;
+    const float P_before_boost = P_effective;
     const float P_tariff_w = clampf(kKp * tariff_shift_c, -kPr, kPr);
     P_effective = std::fmax(0.0f, std::fmin(kPr * 1.20f, P_effective + P_tariff_w + pv_boost_w));
     if (window_open) P_effective = 0.0f;
 
-    last_w = P_effective;
+    // KOPPELING_YAML: de YAML zet hier last_w = P_effective (na de boost).
+    last_w = window_open ? 0.0f : P_before_boost;
     last_ms = now_ms;
     long raw = std::lround(20.0f * (P_effective / kPr));
     demand_raw = static_cast<int>(raw < 0 ? 0 : (raw > kMaxF ? kMaxF : raw));
@@ -142,6 +150,35 @@ void test_demand_matches_fork() {
     assert_near(out.next.comfort_memory_c, fork.memory_c, 1e-5f);
     assert_near(out.next.last_w, fork.last_w, 0.05f);
   }
+}
+
+// Constante warmtevraag (7 °C buiten, kamer op setpoint) en na 10 minuten een
+// PV-boost van 900 W. Dan hoort het vermogen 900 W hoger te liggen, niet op te
+// lopen tot het plafond van 1,2x nominaal zoals met de YAML-regel gebeurt.
+void test_boost_does_not_ratchet() {
+  oq_power_house::DemandState state;
+  const oq_power_house::DemandTuning tuning{0.5f, kKp, kBelow, kAbove, kRise, kFall, kMaxF};
+  float before_boost = NAN;
+  float last = NAN;
+  for (int step = 0; step < 360; ++step) {
+    oq_power_house::DemandInput in;
+    in.now_ms = 1000U + static_cast<uint32_t>(step) * 10000U;
+    in.outside_c = 7.0f;
+    in.cold_c = kTc;
+    in.zero_power_c = kT0;
+    in.rated_w = kPr;
+    in.room_c = 20.5f;
+    in.setpoint_c = 20.5f;
+    in.water_limit_factor = 1.0f;
+    oq_ph_v050::DemandExtensions ext;
+    ext.pv_boost_w = step >= 60 ? 900.0f : 0.0f;
+    const auto out = oq_ph_v050::decide_demand_with_extensions(in, tuning, state, ext);
+    state = out.next;
+    if (step == 59) before_boost = out.requested_w;
+    last = out.requested_w;
+  }
+  assert_near(before_boost, kPr * (9.0f / 26.0f), 0.5f);  // P_house bij 7 °C
+  assert_near(last, before_boost + 900.0f, 0.5f);
 }
 
 void test_invalid_inputs() {
@@ -264,6 +301,7 @@ void test_preheat() {
 
 int main() {
   test_demand_matches_fork();
+  test_boost_does_not_ratchet();
   test_invalid_inputs();
   test_frequency_context();
   test_candidate_state();
