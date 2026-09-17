@@ -23,6 +23,8 @@ dhw_controller_logic_header: "openquatt/includes/oq_dhw_controller_logic.h" # Sh
 installation_monitor_header: "openquatt/includes/oq_installation_monitoring.h" # Compressor-startenteller; overgenomen van upstream.
 compressor_start_limit_header: "openquatt/includes/oq_compressor_start_limit.h" # Max 6 startopdrachten/uur per compressor; upstream v0.50.0.
 v050_headers_dir: "openquatt/includes/v050"             # Power House-logica uit upstream v0.50.0 (map, ESPHome-vrij, host-getest).
+power_house_v050_adapter_header: "openquatt/includes/oq_power_house_v050_adapter.h" # Fork-aansluiting v0.50-logica (host-getest).
+power_house_v050_shadow_header: "openquatt/includes/oq_power_house_v050_shadow.h" # Power House v0.50 in schaduw; stuurt niets aan.
 odu_runtime_freq_table_logic_header: "openquatt/includes/oq_odu_runtime_frequency_table_logic.h" # Rekenwerk en grenzen van de frequentietabel, ESPHome-vrij en host-getest.
 odu_runtime_freq_table_header: "openquatt/includes/oq_odu_runtime_frequency_table.h" # EXPERIMENTEEL: frequentiekromme tijdelijk in de ODU zetten.
 # GRENDEL op het schrijven van de frequentiekromme. "0" = vergrendeld: de knop
@@ -103,6 +105,7 @@ oq_outside_temp_stale_s: "1200"                       # Ignore a local outdoor r
 oq_heat_loop_tick_s: "5"                              # Scheduler tick for heat-control loop [s].
 oq_heat_loop_curve_s: "30"                            # Effective heat-control cadence in Heating Curve mode [s].
 oq_heat_loop_powerhouse_s: "60"                       # Effective heat-control cadence in Power House mode [s].
+oq_ph_demand_loop_s: "10"                             # Rekenritme van de Power House v0.50-schaduw [s] (upstream-default).
 oq_cop_min_input_w: "10.0"                            # Minimum electrical input for a valid COP calculation [W].
 oq_hp_min_off_s: "240"                                # Minimum per-HP off-time before any restart [s].
 oq_optimizer_soft_w: "3400.0"                         # Soft limit for electrical HP power in optimizer [W]; peak limit follows oq_power_peak_w.

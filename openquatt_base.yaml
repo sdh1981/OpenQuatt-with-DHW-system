@@ -63,6 +63,9 @@ esphome:
     # met submappen naar src/, zodat de relatieve includes (../odu/, ../../)
     # kloppen. Zie openquatt/includes/v050/.
     - ${v050_headers_dir}
+    # Aansluiting van die logica op deze fork, en de schaduwberekening.
+    - ${power_house_v050_adapter_header}
+    - ${power_house_v050_shadow_header}
   # v0.50: verplaatst uit platformio_options; dat pad is sinds 2026.7.0
   # deprecated en verdwijnt in 2026.12.0. Beide routes roepen intern dezelfde
   # cg.add_build_flag() aan, dus de vlag komt identiek terecht.

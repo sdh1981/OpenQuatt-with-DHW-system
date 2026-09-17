@@ -47,7 +47,9 @@ interval:
           // Upstream v0.50.0 (#641): max 6 startopdrachten per compressor per
           // voortschrijdend uur. RAM-only, per HP. Elke tick laten verlopen zodat
           // oude tijdstempels na een millis()-wrap niet terugkomen.
-          static oq_thermal_actuator::CompressorStartLimit start_limits[2];
+          // Gedeeld met de Power House v0.50-schaduw, die ermee bepaalt welke HP
+          // nu mag starten. Alleen de actuator registreert starts.
+          auto &start_limits = oq_thermal_actuator::shared_start_limits();
           static bool start_limit_blocked[2] = {false, false};
           for (auto &limit : start_limits) limit.expire(now_ms);
 

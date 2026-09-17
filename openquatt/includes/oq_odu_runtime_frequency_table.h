@@ -93,6 +93,133 @@ inline void publish_runtime_table(const RuntimeFrequencyTableRefs &refs, const F
   for (size_t i = 0; i < heating.size(); i++) refs.heating_desired[i]->publish_state(heating[i]);
 }
 
+// ----------------------------------------------------------------------------
+// Stille uitlezing van de tabel die de ODU nu gebruikt
+// ----------------------------------------------------------------------------
+// Voor de Power House v0.50-berekening, die per stand wil weten op hoeveel Hz
+// de compressor werkelijk draait. Leest dezelfde 22 registers als "tabel
+// ophalen", maar raakt geen invoervakken of statusmelding aan.
+//
+//   - eerste lezing 20 s na opstart, daarna elke 15 min
+//   - bij een mislukte lezing na 60 s opnieuw; de laatst bekende tabel blijft
+//   - overgeslagen zolang een EEPROM-dump loopt
+//   - na "tabel ophalen" of een geslaagde teruglezing na schrijven wordt de
+//     opgeslagen tabel meteen bijgewerkt (store), zonder extra lezing
+//
+// De periodieke lezing vangt ook een power cycle van de ODU: die zet de
+// fabriekstabel terug zonder dat de ESP het merkt.
+class RuntimeFrequencySnapshotReader : public esphome::modbus::ModbusClientDevice {
+ public:
+  static constexpr uint32_t FIRST_READ_AFTER_MS = 20000UL;
+  static constexpr uint32_t REFRESH_MS = 15UL * 60UL * 1000UL;
+  static constexpr uint32_t RETRY_MS = 60000UL;
+  static constexpr uint32_t PENDING_TIMEOUT_MS = 30000UL;
+
+  bool bound_to(const esphome::modbus_controller::ModbusController *controller) const {
+    return this->controller_ == controller;
+  }
+  bool unbound() const { return this->controller_ == nullptr; }
+
+  void poll(esphome::modbus_controller::ModbusController *controller, uint32_t now_ms, bool bus_busy) {
+    if (controller == nullptr) return;
+    if (this->controller_ == nullptr) this->bind_(controller, now_ms);
+    if (this->pending_) {
+      if (static_cast<uint32_t>(now_ms - this->queued_ms_) < PENDING_TIMEOUT_MS) return;
+      // Vangnet: de hub belooft een afsluitende callback, maar blijft die uit,
+      // dan loskoppelen en later opnieuw.
+      this->clear_tx_queue_for_device();
+      this->fail_(now_ms);
+      return;
+    }
+    if (bus_busy || static_cast<int32_t>(now_ms - this->next_due_ms_) < 0) return;
+    this->pending_ = true;
+    this->queued_ms_ = now_ms;
+    if (!this->read_holding_registers(RUNTIME_TABLE_START_ADDRESS, RUNTIME_TABLE_REGISTER_COUNT)) {
+      this->fail_(now_ms);
+    }
+  }
+
+  // Een geverifieerde tabel uit het schrijfpad of van "tabel ophalen".
+  void store(const FrequencyCurve &cooling, const FrequencyCurve &heating, uint32_t now_ms) {
+    if (!validate_monotonic_table(cooling) || !validate_monotonic_table(heating)) return;
+    for (size_t i = 0; i < CURVE_POINTS; ++i) this->heating_hz_[i] = static_cast<uint16_t>(std::lround(heating[i]));
+    this->known_ = true;
+    this->updated_ms_ = now_ms;
+    this->failures_ = 0;
+    this->next_due_ms_ = now_ms + REFRESH_MS;
+  }
+
+  bool known() const { return this->known_; }
+  const std::array<uint16_t, CURVE_POINTS> &heating_hz() const { return this->heating_hz_; }
+  uint32_t updated_ms() const { return this->updated_ms_; }
+  uint8_t failures() const { return this->failures_; }
+
+ protected:
+  void on_read_holding_registers(uint16_t start_address, std::span<const uint16_t> registers,
+                                 esphome::modbus::ResponseStatus status) override {
+    if (!this->pending_ || start_address != RUNTIME_TABLE_START_ADDRESS) return;
+    this->pending_ = false;
+    const uint32_t now_ms = esphome::millis();
+    FrequencyCurve cooling{};
+    FrequencyCurve heating{};
+    int loaded = 0;
+    if (!esphome::modbus::succeeded(status) || !parse_runtime_table(registers, cooling, heating, loaded) ||
+        !validate_monotonic_table(cooling) || !validate_monotonic_table(heating)) {
+      this->fail_(now_ms);
+      return;
+    }
+    this->store(cooling, heating, now_ms);
+  }
+  void on_custom_response(std::span<const uint8_t>, std::span<const uint8_t>,
+                          esphome::modbus::ResponseStatus) override {
+    if (this->pending_) this->fail_(esphome::millis());
+  }
+  bool on_no_response(std::span<const uint8_t>) override {
+    if (this->pending_) this->fail_(esphome::millis());
+    return false;
+  }
+  void on_not_sent(std::span<const uint8_t>) override {
+    if (this->pending_) this->fail_(esphome::millis());
+  }
+
+ private:
+  void bind_(esphome::modbus_controller::ModbusController *controller, uint32_t now_ms) {
+    this->controller_ = controller;
+    this->set_parent(controller->hub());
+    this->set_address(controller->device_address());
+    this->next_due_ms_ = now_ms + FIRST_READ_AFTER_MS;
+  }
+  void fail_(uint32_t now_ms) {
+    this->pending_ = false;
+    if (this->failures_ < 255) this->failures_++;
+    this->next_due_ms_ = now_ms + RETRY_MS;
+  }
+
+  esphome::modbus_controller::ModbusController *controller_{nullptr};
+  std::array<uint16_t, CURVE_POINTS> heating_hz_{};
+  bool known_{false};
+  bool pending_{false};
+  uint8_t failures_{0};
+  uint32_t queued_ms_{0};
+  uint32_t updated_ms_{0};
+  uint32_t next_due_ms_{0};
+};
+
+// Een lezer per HP (0 = HP1, 1 = HP2). Leeft zo lang als het programma, net als
+// de schrijf-devices: de hub moet zijn callback altijd kunnen afleveren.
+inline RuntimeFrequencySnapshotReader &snapshot_reader(bool hp1) {
+  static std::array<RuntimeFrequencySnapshotReader, 2> readers;
+  return readers[hp1 ? 0 : 1];
+}
+
+inline RuntimeFrequencySnapshotReader *snapshot_reader_for(
+    const esphome::modbus_controller::ModbusController *controller) {
+  for (bool hp1 : {true, false}) {
+    if (snapshot_reader(hp1).bound_to(controller)) return &snapshot_reader(hp1);
+  }
+  return nullptr;
+}
+
 class RuntimeFrequencyTableDevice : public esphome::modbus::ModbusClientDevice {
  public:
   enum class Stage : uint8_t { IDLE, LOAD, GUARD, STEP_CHECK, WRITE, READBACK };
@@ -259,6 +386,7 @@ class RuntimeFrequencyTableDevice : public esphome::modbus::ModbusClientDevice {
       return;
     }
     publish_runtime_table(this->refs_, cooling, heating);
+    this->remember_(cooling, heating);
     snprintf(message, sizeof(message), "OPGEHAALD: %d/22 registers", loaded);
     this->finish_(message);
   }
@@ -302,6 +430,7 @@ class RuntimeFrequencyTableDevice : public esphome::modbus::ModbusClientDevice {
       this->finish_("GEBLOKKEERD: huidige tabel niet leesbaar");
       return;
     }
+    this->remember_(current_cooling, current_heating);
     const StepCheck cooling_step = check_step_limit(this->cooling_, current_cooling);
     const StepCheck heating_step = check_step_limit(this->heating_, current_heating);
     if (!cooling_step.ok() || !heating_step.ok()) {
@@ -330,6 +459,8 @@ class RuntimeFrequencyTableDevice : public esphome::modbus::ModbusClientDevice {
       return;
     }
     publish_runtime_table(this->refs_, cooling, heating);
+    // Wat er gelezen is, staat in de unit, ook als het afwijkt van de bedoeling.
+    this->remember_(cooling, heating);
     if (!tables_match(cooling, this->cooling_) || !tables_match(heating, this->heating_)) {
       this->finish_("CONTROLE MISLUKT: teruglezing wijkt af");
       return;
@@ -379,6 +510,13 @@ class RuntimeFrequencyTableDevice : public esphome::modbus::ModbusClientDevice {
   void finish_(const char *message) {
     this->stage_ = Stage::IDLE;
     publish_status(this->refs_, message);
+  }
+
+  // Werkt de stille momentopname bij (zie RuntimeFrequencySnapshotReader).
+  void remember_(const FrequencyCurve &cooling, const FrequencyCurve &heating) {
+    if (RuntimeFrequencySnapshotReader *reader = snapshot_reader_for(this->controller_)) {
+      reader->store(cooling, heating, esphome::millis());
+    }
   }
 
   esphome::modbus_controller::ModbusController *controller_{nullptr};

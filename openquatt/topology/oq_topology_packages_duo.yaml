@@ -11,3 +11,6 @@ odu_freq_table_hp2: !include
   vars:
     hp_id: "hp2"
     prefix: "HP2 - "
+# Power House v0.50.0 in schaduw: rekent mee, stuurt niets aan. Duo-only omdat
+# hij HP1 en HP2 samen kiest. Zie openquatt/oq_power_house_v050_shadow.yaml.
+oq_power_house_v050_shadow: !include ../oq_power_house_v050_shadow.yaml

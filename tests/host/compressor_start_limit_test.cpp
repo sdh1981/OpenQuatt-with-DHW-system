@@ -45,6 +45,12 @@ int main() {
   assert(hp1.remaining_ms(hour) == 9 * minute);
   assert(hp1.remaining_ms(hour + 9 * minute) == 0);
 
+  // Gedeelde begrenzers: dezelfde instantie bij elke aanroep, per HP los.
+  auto& shared = oq_thermal_actuator::shared_start_limits();
+  shared[0].record_transition(0, 1, 5 * minute);
+  assert(oq_thermal_actuator::shared_start_limits()[0].count() == 1);
+  assert(oq_thermal_actuator::shared_start_limits()[1].count() == 0);
+
   // A stopped command may not be revived by a defrost hold; a running one may.
   assert(!may_retain_command(0));
   assert(may_retain_command(1));
