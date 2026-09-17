@@ -52,6 +52,13 @@ class CompressorStartLimit {
   uint8_t count_{0};
 };
 
+// De begrenzers per HP (index 0 = HP1, 1 = HP2). Eén plek, zodat de actuator ze
+// bijhoudt en de Power House-dispatch kan zien welke HP nu niet mag starten.
+inline std::array<CompressorStartLimit, 2>& shared_start_limits() {
+  static std::array<CompressorStartLimit, 2> limits{};
+  return limits;
+}
+
 // Retained defrost writes continue an active command. A zero command must go
 // through normal start authorization, even if the ODU readback still is active.
 constexpr bool may_retain_command(int previous_level) { return previous_level > 0; }

@@ -34,6 +34,9 @@ web_server:
     - id: oq_power_house
       name: "Power House"
       sorting_weight: 30
+    - id: oq_power_house_v050
+      name: "Power House v0.50 (schaduw)"
+      sorting_weight: 31
     - id: oq_cooling
       name: "Cooling"
       sorting_weight: 35
