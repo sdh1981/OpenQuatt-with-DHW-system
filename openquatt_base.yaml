@@ -59,6 +59,10 @@ esphome:
     # ESPHome kopieert alleen wat hier staat naar src/.
     - ${odu_runtime_freq_table_logic_header}
     - ${odu_runtime_freq_table_header}
+    # Power House-logica uit upstream v0.50.0, als map: ESPHome kopieert de boom
+    # met submappen naar src/, zodat de relatieve includes (../odu/, ../../)
+    # kloppen. Zie openquatt/includes/v050/.
+    - ${v050_headers_dir}
   # v0.50: verplaatst uit platformio_options; dat pad is sinds 2026.7.0
   # deprecated en verdwijnt in 2026.12.0. Beide routes roepen intern dezelfde
   # cg.add_build_flag() aan, dus de vlag komt identiek terecht.
