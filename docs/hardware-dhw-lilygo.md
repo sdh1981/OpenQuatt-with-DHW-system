@@ -130,27 +130,33 @@ De DHW-regeling draait als finite state machine (FSM) met veilige interlocks.
 - `LEGIONELLA`: periodieke cyclus naar hogere temperatuur.
 - `FAULT`: veilige toestand bij fout.
 
+Volledige beschrijving van de regeling en alle instellingen:
+[DHW: werking en instellingen](dhw-instellingen.md). Hieronder de hoofdlijn.
+
 ### Normale DHW-cyclus
 
-1. Startvoorwaarde: `tank_top < startdrempel` (typisch 46 °C), geen lockout/fout.
-2. Klep schakelt naar DHW-pad (boiler), daarna pas warmtepompaanvraag.
-3. Warmtepomp laadt tot de bodemsensor `tank_bottom >= 52 °C` (standaard
-   bodem-gestuurd voor een volledig geladen tank; valt terug op `tank_top >= 49 °C`
-   als de bodemsensor ontbreekt) of tot timeout.
-4. Indien nodig volgt `DHW_BOOST` met het element naar de boost-doelwaarde
-   (standaard **56 °C**).
-   - Optioneel (uit by default): **boost HP-assist** — als de tankbodem koud is
-     bij boost-start (< 35 °C) draaien element én warmtepomp samen; de HP stopt
-     zodra `tank_top >= 52 °C`, het element gaat door tot de boost-doelwaarde.
+1. **Start** bij `tank_top <` startdrempel (standaard 46 °C), zonder lockout of fout.
+2. **Klep** schakelt naar het DHW-pad (boiler); pas daarna gaat de warmtepompaanvraag uit.
+3. **Warmtepomp** laadt tot de bodemsensor `tank_bottom >= 52 °C`.
+   - Die grens staat vast in de firmware.
+   - Valt terug op `tank_top >= 49 °C` als de bodemsensor ontbreekt.
+   - Hooguit 180 min.
+   - In Duo draaien beide units, of met single-HP mode één lead met eventueel een stapsgewijze tweede-HP assist.
+4. **Natraject:** indien nodig volgt `DHW_BOOST` met het element naar de boost-doelwaarde (standaard **56 °C**).
+   - Optioneel (standaard uit): **boost HP-assist**. Is de tankbodem bij de boost-start koud (< 35 °C), dan draaien element én warmtepomp samen. De HP stopt zodra `tank_top >= 52 °C`; het element gaat door tot de boost-doelwaarde.
 5. Daarna terug naar `IDLE_CV`.
+
+**Snelboost** (`DHW boost now`): beide warmtepompen en het element tegelijk.
+- De HP's stoppen bij een tanktop van 55 °C.
+- Het element gaat door tot 60 °C.
 
 ### Legionella-cyclus
 
-- Periodiek (typisch wekelijks).
-- Eerst maximaal bruikbaar opwarmen met warmtepomp (HP-overdracht bij ~53 °C).
-- Daarna element bijschakelen naar de legionella-doelwaarde **68 °C**
-  (Inventum-vereiste), met een pasteurisatie-hold.
-- Run wordt gelogd (laatste/volgende run in diagnostiek).
+- **Planning:** elke 7 dagen na de laatste geslaagde run.
+- **Fase 1:** warmtepomp en element samen. De HP stopt bij een tankbodem van 53 °C, of bij een tanktop van 55 °C (plafond tegen hoge perszijdedruk).
+- **Fase 2:** element alleen naar de legionella-doelwaarde **68 °C** (Inventum-vereiste), met een hold van 15 min.
+- **Klep:** blijft de hele run op DHW, zodat de pomp de tank mengt via de spiraal.
+- **Logging:** laatste en volgende run staan in de diagnostiek.
 
 ### Veiligheid en interlocks
 

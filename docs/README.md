@@ -35,7 +35,8 @@ Cooling en DHW worden beschreven in:
 - [Hoe OpenQuatt werkt](hoe-openquatt-werkt.md): wat koeling wel en niet van OpenQuatt vraagt.
 - [Dashboardoverzicht](dashboardoverzicht.md): waar je de cooling-tab en sensorconfiguratie gebruikt.
 - [Koeling-instellingen](koeling-instellingen.md): alle instelbare koelparameters — emitterprofiel, dauwpuntbeveiliging, nacht-free cooling, minimale runtime en dual-HP.
-- [DHW-instellingen](dhw-instellingen.md): alle instelbare DHW-parameters — temperaturen, tijdvenster, anti-kortcyclen, solar boost en legionellapreventie.
+- [DHW: werking en instellingen](dhw-instellingen.md): hoe de warmwaterregeling werkt en alle instellingen — cycli, bodemstop, compressorniveau, single-HP mode en tweede-HP assist, boosts en snelboost, legionella, flowbewaking en fouten.
+- [DHW commissioning checklist](dhw_commissioning_checklist.md): stap voor stap DHW in bedrijf nemen en controleren.
 
 ## Naslag
 
@@ -45,7 +46,7 @@ Cooling en DHW worden beschreven in:
 - [Power House thermisch model v0.32](power-house-thermisch-model-v0.32.md): UA-leerroutine, zonnewinst-correctie, voorspellend voorconditioneren, frost-zone derating en effectieve aanvoertemperatuur voor de perf_map.
 - [Power House smart features v0.32](power-house-smart-features-v0.32.md): dynamisch tarief, PV-zelfconsumptie, window-open detectie, adaptieve Kp en SCOP/health/heat-up tracking.
 - [DHW-rendement en tapdetectie v0.54](dhw-rendement-en-tapdetectie-v0.54.md): cyclus-COP uit gemeten warmte en elektrisch verbruik, plus tapdetectie op de daalsnelheid van de tanktop.
-- [DHW smart features v0.32](dhw-smart-features-v0.32.md): tariff-aware DHW, PV-zelfconsumptie DHW, adaptive usage pattern learning, tank standby-loss tracker, smart legionella deferral en time-to-ready.
+- [DHW smart features v0.32](dhw-smart-features-v0.32.md): tariff-aware DHW, PV-zelfconsumptie DHW, adaptive usage pattern learning, tank standby-loss tracker, smart legionella deferral, time-to-ready en single-HP mode.
 - [Pressure protection v0.32](pressure-protection-v0.32.md): R32 drukbeveiliging per HP — soft/hard caps, HPS-mirror, peak EMA en fouling-trend monitoring.
 - [Supply temp protection v0.32](supply-temp-protection-v0.32.md): per-HP watertemperatuur cap — soft/hard caps op uittredetemperatuur, hysterese, complementair aan systeem-brede `max_water_temp_limit_c`.
 - [Persgasbeveiliging v0.52](discharge-protection-v0.52.md): per-HP begrenzing op persgastemperatuur — de vier trappen (90/98/105/110 °C), de zachte ladder en het samenspel met druk- en aanvoerbeveiliging.
@@ -53,7 +54,7 @@ Cooling en DHW worden beschreven in:
 - [Instellingen-vangnet v0.60](config-snapshot-v0.60.md): leg je eigen instellingen vast als ijkpunt, zie welke er sindsdien zijn afgedreven en zet ze terug.
 - [Water Temperature Control](water-temperature-control.md): aparte uitleg van stooklijn, PID, curve phase/operating regime en Duo-hysterese.
 - [Koeling-instellingen](koeling-instellingen.md): PI-regelaar, dauwpuntbeveiliging, nacht-free cooling, dual-HP en alle koelparameters.
-- [DHW-instellingen](dhw-instellingen.md): toestandsmachine, temperatuurdrempels, tijdvenster, anti-kortcyclen, solar boost en legionellapreventie.
+- [DHW: werking en instellingen](dhw-instellingen.md): toestandsmachine, sensorbronnen, bodemstop, compressorniveau, single-HP mode en tweede-HP assist, boosts, legionella, tijdvenster en dure uren, flowbewaking, fouten en HA-koppelingen.
 - [Regelgedrag van OpenQuatt](regelgedrag-van-openquatt.md): systeemstanden, overgangen en flowregeling.
 - [Instellingen en meetwaarden](instellingen-en-meetwaarden.md): compile-time en runtime instellingen, plus de belangrijkste meetwaarden.
 - [Ontwikkelen op Mac en WSL](ontwikkelen-op-mac-en-wsl.md): aanbevolen lokale ontwikkelworkflow voor onderhoud en builds.

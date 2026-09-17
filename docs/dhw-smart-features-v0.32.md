@@ -1,6 +1,6 @@
 # DHW Smart Features v0.32
 
-Naast de bestaande DHW-instellingen (zie [DHW-instellingen](dhw-instellingen.md)) introduceert v0.32 zes slimme features. Vier daarvan grijpen actief in op de DHW-regeling, twee zijn observatie-features.
+Naast de bestaande DHW-instellingen (zie [DHW: werking en instellingen](dhw-instellingen.md)) kwamen er in v0.32 zes slimme features bij, plus single-HP mode voor Duo. Hieronder staat hoe ze in de huidige firmware werken.
 
 ## Overzicht
 
@@ -10,10 +10,11 @@ Naast de bestaande DHW-instellingen (zie [DHW-instellingen](dhw-instellingen.md)
 | 2 | PV-zelfconsumptie DHW | actief | uit | ja, grid net power |
 | 3 | Adaptive usage pattern learning | leer + actief | uit | nee |
 | 4 | Tank standby-loss tracker | observatie | aan | nee |
-| 5 | Smart legionella deferral | actief | uit | nee |
+| 5 | Smart legionella deferral | beperkt, zie §5 | uit | nee |
 | 6 | DHW time-to-ready sensor | observatie | aan | nee |
+| 7 | DHW single-HP mode (Duo) | actief | uit | nee |
 
-Alle vier de actieve features beïnvloeden de **effectieve `start_top_c`**: het temperatuur-niveau dat de DHW-toestandsmachine gebruikt om een nieuwe cyclus te starten. Door dit dynamisch op te schuiven, kan OpenQuatt:
+Features #1 tot en met #3 beïnvloeden de **effectieve `start_top_c`**: het temperatuur-niveau dat de DHW-toestandsmachine gebruikt om een nieuwe cyclus te starten. Door dit dynamisch op te schuiven, kan OpenQuatt:
 
 - **eerder** starten als energie goedkoop is of er PV-overschot is (tank vullen voorraadachtig)
 - **later** starten als energie duur is en de tank nog redelijk warm is
@@ -47,18 +48,20 @@ De totale shift wordt geclamped op `[30, hp_stop_top_c − 1 K]` zodat het syste
 
 ## 2. PV-zelfconsumptie DHW
 
-**Wat:** bij grid-export boven een drempel (default 1500 W) verhoogt OpenQuatt `start_top` zodat een DHW-cyclus eerder kickt en de PV-export wordt omgezet in warmte. Daarnaast wordt het boost-element automatisch aan gezet wanneer de export ≥2,7 kW bedraagt (kan een 3 kW element praktisch volledig dekken).
+**Wat:** bij grid-export boven een drempel (default 1500 W) verhoogt OpenQuatt `start_top`, zodat een DHW-cyclus eerder start en de PV-export in warmte wordt omgezet. Daarnaast kan de export een solar boost met het element starten.
 
 **Twee bewegingen:**
-1. `start_top` shift: linear van 0 °C bij export = drempel naar `pv_max_shift` °C bij export = drempel + 3 kW
-2. Boost element forced ON: bij export > 2,7 kW (gewoonlijk dikke zon, vaak meerdere uren per dag)
+1. **`start_top`-shift:** lineair van 0 °C bij export = drempel naar `pv_max_shift` °C bij export = drempel + 3 kW. Werkt zodra deze feature aan staat.
+2. **Element via solar boost:** bij export boven `DHW PV boost export threshold` (default **2700 W**). Dit werkt **alleen als ook `DHW auto boost enable` aan staat**, de hoofdschakelaar voor alle automatische boosts, standaard uit. Die staat bewust uit: PV-export, laag tarief en de HA-trigger pieken allemaal 's middags, en dan ging het element ongevraagd aan.
 
-**Slewing:** 0,5 K/min op de start-shift, zodat een korte zonpiek niet meteen een lade-cyclus triggert.
+**Slewing:** 0,5 K/min op de start-shift, zodat een korte zonpiek niet meteen een laadcyclus start.
 
 **Tuning entiteiten:**
 - `switch.openquatt_dhw_pv_self_consumption_enable`
-- `number.openquatt_dhw_pv_export_threshold` — default 1500 W
+- `number.openquatt_dhw_pv_export_threshold` — default 1500 W (start-shift)
 - `number.openquatt_dhw_pv_max_start_shift` — default 3 °C
+- `number.openquatt_dhw_pv_boost_export_threshold` — default 2700 W, bereik 1000–6000 W (element)
+- `switch.openquatt_dhw_auto_boost_enable` — hoofdschakelaar voor het element-deel
 
 **HA setup:** zelfde grid net power proxy als bij Power House feature #2. Zie het smart-features pakket.
 
@@ -74,12 +77,15 @@ De totale shift wordt geclamped op `[30, hp_stop_top_c − 1 K]` zodat het syste
 
 **Hoe wordt het gebruikt:** bij het inschatten van de start_top, kijkt OpenQuatt `lookahead_min` minuten vooruit (default 45 min). Als dat uur historisch hoge usage heeft, wordt `start_top` verhoogd met max `adaptive_max_shift` °C — zodat de tank op tijd warm staat voor je douche.
 
-**Decay:** elke ~hour worden alle buckets met factor 0,985 vermenigvuldigd. Dat geeft een halfwaardetijd van ~46 dagen. Na 1 maand stabiel patroon zijn nieuwe events nog ongeveer 70% even zwaar als oude — leerroutine blijft trapsgewijs adapteren als gewoontes wijzigen.
+**Decay:** elk **uur** worden alle buckets met factor 0,985 vermenigvuldigd. Dat is een halfwaardetijd van ongeveer **46 uur**, niet 46 dagen zoals het code-commentaar zegt. Een tapping van een week geleden telt nog voor ongeveer 8 %. Het patroon volgt dus vooral de laatste paar dagen. Een bucket loopt op tot maximaal 10.
 
-**Tap-event detectie:**
+**Tap-event detectie (voor dit patroon):**
 - Drop-drempel: 2 K binnen 5 min
-- Debounce: één event per 10 min (douche van 8 min telt als 1 event, niet als 8)
-- Alleen tijdens IDLE_CV state — anders zou een DHW-cyclus zelf als event tellen
+- Debounce: één event per 10 min (een douche van 8 min telt als 1 event, niet als 8)
+- Alleen tijdens IDLE_CV state, anders zou een DHW-cyclus zelf als event tellen
+- Alleen actief als deze feature aan staat
+
+Dit is een andere detectie dan de algemene [tapdetectie op daalsnelheid](dhw-rendement-en-tapdetectie-v0.54.md) (standaard aan). Die voedt de standby-loss-lerer; deze voedt het uurpatroon.
 
 **Tuning entiteiten:**
 - `switch.openquatt_dhw_adaptive_usage_learning`
@@ -128,27 +134,60 @@ De totale shift wordt geclamped op `[30, hp_stop_top_c − 1 K]` zodat het syste
 
 ## 5. Smart legionella deferral
 
-**Wat:** als de tank top in de laatste 7 dagen minstens 60 °C heeft bereikt door normaal gebruik (wat regelmatig gebeurt op zonnige dagen met PV-boost of tijdens een hoge HP_stop), heeft OpenQuatt feitelijk al "legionella-vriendelijke" temperaturen gehad. De geplande wekelijkse legionella-run kan dan worden uitgesteld.
+**Bedoeling:** heeft de hele tank recent al pasteurisatietemperatuur gehaald door normaal gebruik, dan is een legionella-run minder dringend en kan hij worden uitgesteld.
 
-**Hoe wordt het toegepast:** in deze versie registreert OpenQuatt iedere keer dat de tank natuurlijk 60 °C bereikt (`oq_dhw_natural_60c_last_seen_epoch_s`). Het uitstellen zelf gebeurt via `oq_dhw_legionella_defer_days`. Wijzigingen aan de scheduler komen in een latere versie; voor nu is dit een markering die later gebruikt kan worden.
+**Wat de firmware registreert:** elke keer dat de **tankbodem** het legionelladoel haalt (`DHW legionella target`, standaard 68 °C), wordt het tijdstip vastgelegd. Zonder bodemsensor wordt de top gebruikt. De bodem is de moeilijkste zone; haalt alleen de top 68 °C, dan telt dat niet als pasteurisatie. De interne naam `oq_dhw_natural_60c_last_seen_epoch_s` is een overblijfsel; de grens is het legionelladoel, niet 60 °C.
 
-**Veiligheid:** de wettelijke minimum is 60 °C voor minstens 15 minuten. Deze feature **vervangt geen legionella-cyclus** — hij stelt hooguit uit. Dat is wettelijk nog steeds in orde zolang minstens 1× per 14 dagen 60+ wordt bereikt.
+**Wat het in de huidige firmware wél en níét doet:**
+- **Wel:** het voorkomt dat een run door de [tarief-bewuste legionella](dhw-instellingen.md#naar-een-goedkoop-uur-trekken) naar voren wordt getrokken.
+- **Niet:** de gewone wekelijkse run uitstellen. Die plant de DHW-toestandsmachine zelf elke 7 dagen, en daar wordt deze registratie niet op toegepast. `DHW legionella deferral status` zal daarom in de praktijk niet "Uitgesteld - recent natuurlijke pasteurisatie" tonen.
+
+Wie echt wil uitstellen, heeft dus nog een wijziging aan de planner nodig. Voor de veiligheid is de huidige situatie de conservatieve kant: de run gaat altijd door.
 
 **Tuning:**
 - `switch.openquatt_dhw_smart_legionella_deferral`
-- `number.openquatt_dhw_legionella_max_defer` — max uitsteldagen (default 7)
+- `number.openquatt_dhw_legionella_max_defer` — venster in dagen (default 7, bereik 0–14)
+
+---
+
+## 6. DHW time-to-ready sensor
+
+**Wat:** schat hoeveel minuten het duurt tot de tanktop `DHW HP stop top` bereikt. De schatting gebruikt:
+
+- de huidige tanktop ten opzichte van `DHW HP stop top`;
+- het thermische vermogen van de units die nu voor DHW draaien, op hun werkelijke niveau: `DHW HP thermisch vermogen`, uit de prestatiekaart, rekening houdend met single-HP mode, level bump, zachte aanloop en assist;
+- plus 3000 W als het element aan staat;
+- minus `UA_tank × (top − 20 °C)` als standby-verlies;
+- de tankinhoud uit `number.openquatt_dhw_tank_volume` (default 220 L = 255 Wh/K).
+
+**Sensor:** `sensor.openquatt_dhw_estimated_time_to_ready`, in minuten. NaN als er niet verwarmd wordt.
+
+**Beperking:** het doel is `DHW HP stop top` op de tanktop (49 °C), terwijl de HP-fase stopt op een tankbodem van 52 °C. Tijdens de HP-fase valt de schatting daardoor meestal te kort uit. Bruikbaar als trend, niet als belofte.
+
+**Use cases:**
+- Dashboardtegel "Warm water over ~14 min"
+- Vergelijking voor en na een isolatie-update of tankvervanging
 
 ---
 
 ## 7. DHW single-HP mode (Duo)
 
-**Wat:** in Duo-opstelling routeert OpenQuatt standaard de DHW-aanvraag naar **beide** HPs op hetzelfde level. Bij lage DHW-level (1-3) levert dat de COP-arme "Duo 1+1"-toestand (COP ~2,1). Single-HP mode routeert de hele aanvraag naar één HP (de runtime-lead), met een optionele level-bump om de gemiste capaciteit te compenseren.
+**Wat:** in een Duo-opstelling stuurt OpenQuatt de DHW-aanvraag standaard naar **beide** warmtepompen op hetzelfde niveau. Bij een laag DHW-niveau (1–3) levert dat de COP-arme toestand "Duo 1+1" op (COP ~2,1). Single-HP mode stuurt de hele aanvraag naar één unit, de **lead**. Een tweede unit springt alleen op meting bij.
 
 **Hoe:**
 1. `switch.openquatt_dhw_single_hp_mode` AAN
-2. `number.openquatt_dhw_single_hp_level_bump` zet hoeveel levels de lead HP omhoog mag (default **0** sinds v0.51.1, was 1; range 0-3)
+2. `number.openquatt_dhw_single_hp_level_bump`: hoeveel niveaus de lead extra krijgt (default **0** sinds v0.51.1, was 1; bereik 0–3)
 
-> De bump telt bij het ingestelde `DHW HP level` op, niet bij een gemeten tekort. Met `DHW HP level` = 2 en bump 2 draait de lead op 4 zonder dat er iets om die capaciteit heeft gevraagd. De tweede-HP assist doet dat werk wél op meting — die komt pas als de tanktop aantoonbaar te traag stijgt. Wil je de lead structureel hoger, zet dan `DHW HP level` hoger; dan staat in één getal wat er echt gevraagd wordt.
+> De bump telt bij het ingestelde `DHW HP level` op, niet bij een gemeten tekort. Met `DHW HP level` = 2 en bump 2 draait de lead op 4 zonder dat er iets om die capaciteit heeft gevraagd. De tweede-HP assist doet dat werk wél op meting: die komt pas als de tanktop aantoonbaar te traag stijgt. Wil je de lead structureel hoger, zet dan `DHW HP level` hoger; dan staat in één getal wat er echt gevraagd wordt.
+
+**Welke unit lead is:** gekozen bij de start van elke cyclus en vastgezet tot het einde. Volgorde:
+1. **Harde storing:** heeft één unit er een, dan wordt de andere lead.
+2. **Frequentiebegrenzing:** knijpt één unit zichzelf af, dan wordt de andere lead.
+3. **Draaiuren:** anders de unit met de minste draaiuren.
+
+Alleen een harde storing op de lead zet de lead tijdens een cyclus over. Over een seizoen blijven de draaiuren zo ongeveer gelijk, zonder dat de vraag midden in een cyclus van unit wisselt.
+
+**Tweede-HP assist:** loopt de tank te traag op terwijl de lead al op zijn volle niveau zit, dan springt de andere unit stapsgewijs bij, met eigen persgas- en water-uitbewaking. Volledige beschrijving: [DHW: werking en instellingen](dhw-instellingen.md#tweede-hp-assist).
 
 **Voorbeeld scenario:**
 - `oq_dhw_hp_level` = 3
@@ -157,36 +196,20 @@ De totale shift wordt geclamped op `[30, hp_stop_top_c − 1 K]` zodat het syste
 - Single mode + bump 0: lead HP = level 3 alleen → ~2380 W thermisch, COP ~2,5
 
 **Wanneer aanzetten:**
-- Lage DHW level (1-3) waar Duo 1+1 verdacht slechte COP geeft
-- Korte DHW cycli waar tank niet ver leeg gaat — single is sneller bij level + bump
-- Reduceer slijtage van de "trailing" HP (die warmer water ziet)
+- Een laag DHW-niveau (1–3), waar Duo 1+1 een slechte COP geeft
+- Om slijtage te verminderen van de unit die in duo het warmste water ziet
 
 **Wanneer niet aanzetten:**
-- Hoge DHW level (5+) waar je vol vermogen wilt voor snelle laadtijd
-- Bij legionella-runs — daar wil je doorgaans beide HPs voor snelheid
+- Een hoog DHW-niveau (5+), waar je vol vermogen wilt voor een korte laadtijd
 
-**Reden-codes (in `Request reason`):**
-- `dhw_duo` — beide HPs (single mode uit)
-- `dhw_single_hp1` — alleen HP1 (lead), single mode aan
-- `dhw_single_hp2` — alleen HP2 (lead), single mode aan
+**Wat er nog meer geldt:**
+- De schakelaar geldt ook tijdens **legionella**: dan draait alleen de lead en is de assist uit.
+- Tijdens een **snelboost** draaien altijd beide units.
 
-De runtime-lead wisselt automatisch op basis van draaiuren (`oq_runtime_lead_hp` sensor). Dat betekent dat HP1 en HP2 over een seizoen redelijk gelijke draaiuren behouden ondanks single-mode.
-
-## 6. DHW time-to-ready sensor
-
-**Wat:** schat hoeveel minuten tot tank top de stop-temperatuur bereikt, gebaseerd op:
-
-- Huidige `tank_top` versus `hp_stop_top_c`
-- Geschatte heating power: ~4500 W bij actieve HP-fase, +3000 W bij actief boost-element
-- Aftrek van `UA_tank × (top − Tamb_room)` als standby-loss schatting
-- Tank thermal capacity uit `number.openquatt_dhw_tank_volume` (default 220 L = 255 Wh/K)
-
-**Sensor:** `sensor.openquatt_dhw_estimated_time_to_ready` — minuten tot ready, NaN als DHW niet actief is.
-
-**Use cases:**
-- Dashboard tegel: "Warm water over ~14 min"
-- HA automation: pre-bericht voordat iemand zou willen douchen
-- Vergelijking voor/na isolatie-update of tank-vervanging
+**Reden-codes (in `Request Reason`):**
+- `dhw_duo`: beide HPs (single mode uit)
+- `dhw_single_hp1` / `dhw_single_hp2`: alleen de lead
+- `dhw_single_hp1_assist` / `dhw_single_hp2_assist`: lead plus assist
 
 ---
 
@@ -197,11 +220,11 @@ De runtime-lead wisselt automatisch op basis van draaiuren (`oq_runtime_lead_hp`
 3. **#3 Adaptive usage learning aan** — laat 1-2 weken leren voordat de shift effect heeft
 4. **#1 Tariff-shift aan** — als je dynamisch tarief hebt en het smart-features HA-pakket hebt geconfigureerd
 5. **#2 PV-zelfconsumptie aan** — als je PV hebt en de grid net power proxy werkt
-6. **Optioneel #5 Smart legionella deferral** — alleen als je echt zeker weet dat je tank vaak 60+ haalt natuurlijk
+6. **#5 Smart legionella deferral** heeft in de huidige firmware alleen effect in combinatie met de tarief-bewuste legionella (zie §5)
 
 ## Veiligheid
 
-- Alle actieve features (#1, #2, #3) staan default uit
+- Alle actieve features (#1, #2, #3, #7) staan default uit
 - Effectieve `start_top` is altijd geclamped op `[30 °C, hp_stop_top_c − 1 K]`
 - Tariff-shift en PV-shift worden geslewed: tariff-spikes of zonpieken kunnen geen instant start triggeren
 - #4 en #6 zijn pure observatie — geen invloed op control output

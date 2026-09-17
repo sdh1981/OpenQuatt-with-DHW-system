@@ -1,255 +1,477 @@
-# DHW-instellingen
+# DHW: werking en instellingen
 
-Deze pagina beschrijft alle instelbare parameters van de DHW-regeling in OpenQuatt. De regeling stuurt een 3-wegklep, een warmtepomp en een elektrisch boostelement aan via een eindige toestandsmachine (FSM).
+Deze pagina beschrijft hoe de warmwaterregeling (DHW) van deze fork werkt en wat elke instelling doet, zoals de firmware het nu uitvoert. De regeling stuurt een 3-wegklep, de warmtepomp(en) en een elektrisch element van 3 kW aan via een toestandsmachine (`openquatt/includes/oq_dhw_controller_logic.h`). De aansturing daaromheen staat in `openquatt/oq_boiler_control.yaml`.
 
-## Toestandsmachine op hoofdlijnen
+Namen tussen backticks zijn de entiteitnamen zoals ze in Home Assistant en de web-UI staan.
 
-De DHW-controller doorloopt altijd dezelfde reeks toestanden:
+Aanvullend:
+
+- [DHW smart features v0.32](dhw-smart-features-v0.32.md): tarief- en PV-verschuiving van de startdrempel, gebruikspatroon, standby-verlies, time-to-ready.
+- [DHW-rendement en tapdetectie v0.54](dhw-rendement-en-tapdetectie-v0.54.md): cyclus-COP en tapdetectie.
+- [Hardware Duo + DHW (LilyGO)](hardware-dhw-lilygo.md): bekabeling, GPIO en sensorkanalen.
+
+---
+
+## Op hoofdlijnen
+
+Er zijn vijf soorten cycli. Ze lopen allemaal via dezelfde toestanden:
+
+| Cyclus | Start | Wat er draait |
+|---|---|---|
+| **Gewone cyclus** | tanktop onder de startdrempel | warmtepomp, daarna eventueel element (natraject) |
+| **Legionella** | wekelijks, of handmatig geforceerd | warmtepomp en element samen, daarna element met hold |
+| **Snelboost** | schakelaar `DHW boost now` | beide warmtepompen en element tegelijk |
+| **Solar boost** | handmatig, HA, goedkoop tarief of PV-export | element, optioneel met warmtepomp |
+| **Natraject** | na de HP-fase, als de tank nog onder het boostdoel zit | element |
 
 ```
 IDLE_CV
-  │
-  ├─ legionellarun verschuldigd of geforceerd  ──► DHW_PREPARE ──► LEGIONELLA ──► IDLE_CV
-  ├─ tank top < startdrempel                   ──► DHW_PREPARE ──► DHW_HEAT_PUMP
-  │                                                                    │
-  │                                               boost ingeschakeld ──► DHW_BOOST ──► IDLE_CV
-  │                                               boost uitgeschakeld ─────────────► IDLE_CV
-  └─ solar boost aangevraagd                  ──► DHW_PREPARE ──► DHW_BOOST ──► IDLE_CV
+  ├─ legionella verschuldigd of geforceerd ──► DHW_PREPARE ──► LEGIONELLA ─────────────► IDLE_CV
+  ├─ DHW boost now aan                      ──► DHW_PREPARE ──► DHW_BOOST (HP's + element) ► IDLE_CV
+  ├─ tanktop < startdrempel                 ──► DHW_PREPARE ──► DHW_HEAT_PUMP
+  │                                                               ├─ natraject aan  ──► DHW_BOOST ──► IDLE_CV
+  │                                                               └─ natraject uit  ───────────────► IDLE_CV
+  └─ solar boost                            ──► DHW_PREPARE ──► DHW_BOOST ──────────────► IDLE_CV
 
-Foutafhandeling: elke toestand ──► FAULT (alleen te verlaten via "Reset DHW fout")
+Elke toestand ──► FAULT (alleen te verlaten met "DHW clear fault")
 ```
 
-Elke overgang naar IDLE_CV registreert een cyclus-eindtijd die wordt gebruikt voor de minimale rusttijd.
+Zijn er meerdere redenen tegelijk, dan geldt deze volgorde: legionella, snelboost, gewone cyclus, solar boost.
 
-## Temperatuurinstellingen
+De regeling rekent elke 2 s (`oq_dhw_loop_s`).
 
-### DHW start top
+---
 
-- Entity: `number.openquatt_dhw_start_top`
-- Standaard: **46 °C**
-- Bereik: 38–50 °C (stap 0,5)
+## Sensoren en bronnen
 
-De bovenste tanksensor moet onder deze waarde zakken voordat een nieuwe warmtepompcyclus start. Een hogere waarde betekent minder vaak opstarten maar een koudere tank bij gebruik. Een lagere waarde levert vaker warm water maar meer cycli.
+| Meting | Eerste bron | Tweede bron | Laatste terugval |
+|---|---|---|---|
+| `DHW tank top` | CWT kanaal 1 (PT1000) | HA-proxy `sensor.openquatt_ext_dhw_tank_top` | `DHW source tank top` (50 °C) |
+| `DHW tank bottom` | CWT kanaal 2 | HA-proxy `..._tank_bottom` | `DHW source tank bottom` (45 °C) |
+| `DHW coil in` | CWT kanaal 3 | HA-proxy `..._coil_in` | `DHW source coil in` (35 °C) |
+| `DHW coil out` | CWT kanaal 4 | HA-proxy `..._coil_out` | `DHW source coil out` (30 °C) |
 
-Pas dit aan als:
-- de tank te snel afkoelt voor normaal gebruik → verlaag de drempel;
-- de warmtepomp te vaak opstart → verhoog de drempel.
+> **Let op de laatste terugval.** Vallen de PT1000-module én de HA-proxy weg, dan krijgt de regeling een vaste, plausibel ogende waarde. Dat levert geen sensorfout op. Voor de tankbodem betekent dit: 45 °C haalt nooit de stopgrens van 52 °C, dus de HP-fase loopt door tot de maximale looptijd van 180 min. Controleer daarom bij twijfel de CWT-kanalen zelf.
 
-### DHW HP stop top
+**Plausibiliteit.** De regeling gaat naar `SENSOR_IMPLAUSIBLE` (zie [Fouten](#fouten)) bij:
+- tanktop ontbreekt of ligt buiten −10…85 °C;
+- tankbodem, spiraal-in of spiraal-uit ligt buiten dat bereik (ontbreken mag);
+- bodem meer dan 12 K warmer dan de top;
+- spiraal-in en -uit meer dan 40 K uit elkaar.
 
-- Entity: `number.openquatt_dhw_hp_stop_top`
-- Standaard: **49 °C**
-- Bereik: 42–56 °C (stap 0,5)
+**Klepstand.** Die komt van het hulpcontact (`DHW valve aux (DHW position)`); het contact sluit in DHW-stand.
 
-Zodra de bovenste tanksensor deze waarde bereikt, stopt de warmtepompfase. Als "Element na HP-fase" aan staat, start daarna de boostelement-fase. Stel dit altijd minimaal 1–2 °C boven de startdrempel in om korte cycli te voorkomen.
+---
 
-### DHW HP aanvoer doel
+## De gewone cyclus
 
-- Entity: `number.openquatt_dhw_hp_target_flow`
-- Standaard: **55 °C**
-- Bereik: 48–60 °C (stap 0,5)
+### 1. Start
 
-De aanvoertemperatuur die de warmtepomp nastreeft tijdens de DHW_HEAT_PUMP- en LEGIONELLA-fase. Een hogere aanvoer laadt de tank sneller maar verlaagt de COP. Pas dit aan op de specificaties van je boiler en spiraal.
+Een nieuwe cyclus start als de tanktop onder de **effectieve startdrempel** zakt en niets blokkeert.
 
-### DHW boost doel
+#### `DHW start top`
 
-- Entity: `number.openquatt_dhw_boost_target`
-- Standaard: **56 °C**
-- Bereik: 55–58 °C (stap 0,5)
+- Standaard **46 °C**, bereik 38–50 °C.
 
-Het temperatuurdoel voor het elektrisch boostelement. Het element schakelt uit zodra de bovenste tanksensor deze waarde bereikt. Relevant als "Element na HP-fase" aan staat of bij een solar-boost aanvraag.
+**Effectieve startdrempel** = `DHW start top` + de verschuivingen uit de smart features: tarief, PV en gebruikspatroon (zie [DHW smart features](dhw-smart-features-v0.32.md)). De drempel blijft altijd tussen 30 °C en `DHW HP stop top` − 1 K.
 
-### DHW legionella doel
+**Wat een start blokkeert:**
+- een gelatchte fout, `DHW lockout`, of een HP-fout (zie [Fouten](#fouten));
+- buiten het [tijdvenster](#tijdvenster), of in het [duurste tariefvenster](#dure-uren-vermijden);
+- de [minimale rusttijd](#dhw-minimum-rest) sinds de vorige cyclus.
 
-- Entity: `number.openquatt_dhw_legionella_target`
-- Standaard: **61 °C**
-- Bereik: 60–62 °C (stap 0,5)
+### 2. Klep
 
-De minimale temperatuur die 15 minuten aangehouden moet worden om de legionellarun als geslaagd te beschouwen. Verlaag dit niet onder 60 °C (wettelijke eis voor legionellapreventie).
+De klep gaat naar DHW. Na 4 s moet het hulpcontact de DHW-stand bevestigen. Lukt dat niet binnen 20 s, dan volgt één nieuwe poging. Mislukt ook die, dan volgt `VALVE_STUCK_CV`. Pas met een bevestigde klep gaat de warmtepomp aan.
 
-## Bedrijfsmode-instellingen
+### 3. HP-fase
 
-### Element na HP-fase
+De warmtepomp laadt met aanvoerdoel `DHW HP target flow`.
 
-- Entity: `switch.openquatt_dhw_boost_after_hp`
-- Standaard: **aan**
+#### `DHW HP target flow`
 
-Bepaalt of het elektrisch boostelement automatisch inschakelt nadat de warmtepompfase klaar is en de tank nog niet op boosttemperatuur zit. Schakel dit uit als je uitsluitend warmtepompcapaciteit wilt gebruiken (hogere COP, mogelijk minder warm water bij hoge vraag).
+- Standaard **55 °C**, bereik 48–60 °C.
+- Geldt in de HP-fase, in de HP-fase van legionella en wanneer een warmtepomp meedraait in een boost.
 
-### DHW HP niveau
+**Stoppen.** De HP-fase stopt zodra de **tankbodem 52 °C** bereikt. Die grens staat vast in de firmware, zodat elke cyclus de hele tank doorwarmt. Alleen als de bodemsensor ontbreekt of onplausibel is, geldt `DHW HP stop top` op de tanktop. Na **180 min** stopt de fase hoe dan ook (vast, geen fout).
 
-- Entity: `number.openquatt_dhw_hp_level`
-- Standaard: **4**
-- Bereik: 1–10
+#### `DHW HP stop top`
 
-Het compressorniveau waarmee de warmtepomp draait tijdens de DHW-fase. Hogere niveaus laden de tank sneller maar verbruiken meer stroom en leveren mogelijk een lagere COP bij hoge aanvoertemperatuur.
+- Standaard **49 °C**, bereik 42–56 °C.
+- Stopgrens op de top; alleen gebruikt zonder bodemsensor.
+- Ook de bovengrens van de effectieve startdrempel (−1 K) en het doel van `DHW estimated time to ready`.
 
-## Anti-kortcyclen
+> **Instellingen zonder effect.** `DHW stop on tank bottom` en `DHW HP stop tank bottom` bestaan nog om oude configuraties niet te breken, maar de firmware negeert ze. De bodemstop op 52 °C is altijd actief.
 
-### DHW minimum rust
+### 4. Compressorniveau
 
-- Entity: `number.openquatt_dhw_minimum_rest`
-- Standaard: **1200 s (20 minuten)**
-- Bereik: 0–3600 s (stap 60)
+Het niveau dat de warmtepomp krijgt, wordt in drie stappen bepaald.
 
-Minimale stilstandstijd tussen twee gewone DHW-cycli. Na het afronden van een cyclus (warmtepomp- of boostelement-fase) wacht de regeling minimaal deze tijd voordat een nieuwe cyclus gestart wordt, ook als de tank al onder de startdrempel zit.
+1. **`DHW HP level`** (standaard **4**, bereik 1–10): het gevraagde niveau.
+2. **`DHW coil-in level mapping`** (standaard **uit**): knijpt het niveau af op de spiraalintrede.
 
-Stel in op 0 om te deactiveren. Een waarde van 1200–1800 s is geschikt voor de meeste boilers. Legionella- en solar-boost-starts worden niet geblokkeerd door deze instelling.
+   | Spiraal-in stijgt boven | Niveau |
+   |---|---|
+   | `DHW coil map T1 (4→3)` (40 °C) | 4 → 3 |
+   | `DHW coil map T2 (3→2)` (44 °C) | 3 → 2 |
+   | `DHW coil map T3 (2→1)` (48 °C) | 2 → 1 |
 
-## Tijdvenster
+   - Hysterese: `DHW coil map hysteresis` (0,5 K).
+   - Nooit onder 1 en nooit boven `DHW HP level`.
+   - Het resultaat staat in `DHW coil mapped level`.
+3. **`DHW soft start step time`** (standaard **3 min**, 0 = uit): de compressor begint op niveau 1 en mag elke stap één niveau hoger, tot wat gevraagd wordt.
 
-Met het tijdvenster beperk je DHW-starts tot een vast uurblok. Een lopende cyclus wordt nooit onderbroken als het venster sluit. Legionellaruns worden niet geblokkeerd.
+Hoe dat niveau over de units wordt verdeeld, staat bij [Warmtepompen tijdens DHW](#warmtepompen-tijdens-dhw-duo).
 
-### DHW tijdvenster inschakelen
+### 5. Natraject met het element
 
-- Entity: `switch.openquatt_dhw_window_enable`
-- Standaard: **uit**
+#### `DHW boost after HP`
 
-Schakel dit in om DHW-starts te beperken tot het geconfigureerde uurblok.
+- Standaard **aan**.
 
-### DHW tijdvenster start uur
+Na de HP-fase gaat het element aan als de tanktop nog onder `DHW boost target` zit. Het element stopt op dat doel. Het natraject duurt hooguit **90 min**. Haalt het het doel niet, dan gaat de regeling terug naar rust **zonder fout**, en telt `DHW boost timeouts` op.
 
-- Entity: `number.openquatt_dhw_window_start_hour`
-- Standaard: **0** (middernacht)
-- Bereik: 0–23 (stap 1)
+#### `DHW boost target`
 
-Het eerste uur van het toegestane venster. Een waarde van 0 met einduur 7 betekent: DHW mag alleen starten tussen 00:00 en 07:00.
+- Standaard **56 °C**, bereik 55–58 °C.
+- Doel van het natraject en van de solar boost.
 
-### DHW tijdvenster eind uur
+### 6. Minimale rust
 
-- Entity: `number.openquatt_dhw_window_end_hour`
-- Standaard: **7**
-- Bereik: 0–23 (stap 1)
+#### `DHW minimum rest`
 
-Het eerste uur buiten het toegestane venster. Een venster van 22:00 tot 06:00 (nachtdal) configureer je door start uur op 22 en eind uur op 6 in te stellen. De regeling herkent automatisch dat dit een nachtvenster is dat over middernacht loopt.
+- Standaard **1200 s**, bereik 0–3600 s (0 = uit).
 
-Voorbeelden:
+Wachttijd na het einde van een cyclus voordat een nieuwe **gewone** cyclus mag starten. Legionella, snelboost en solar boost vallen er niet onder.
 
-| Start uur | Eind uur | Toegestaan |
+---
+
+## Warmtepompen tijdens DHW (Duo)
+
+### Duo of single
+
+#### `DHW single HP mode`
+
+- Standaard **uit**.
+
+**Uit.** Beide units draaien op hetzelfde niveau. Reden in `Request Reason`: `dhw_duo`.
+
+**Aan.** Eén unit, de **lead**, maakt het warme water. Reden: `dhw_single_hp1` of `dhw_single_hp2`, en met assist `dhw_single_hp1_assist` of `dhw_single_hp2_assist`.
+
+- **Lead kiezen.** Bij de start van een cyclus, in deze volgorde:
+  1. Heeft één unit een harde storing (`OT fault`), dan wordt de andere lead.
+  2. Knijpt één unit zichzelf af (`freq limited`), dan wordt de andere lead.
+  3. Anders de unit met de minste draaiuren.
+- **Lead vastzetten.** De lead blijft staan tot het einde van de cyclus. Alleen een harde storing op de lead zet de lead over. Een frequentiebegrenzing doet dat bewust niet: bij DHW-temperaturen knijpen beide units regelmatig af, en wisselen zou elke keer een extra start en stop kosten.
+- **Uitlezen:** `DHW single HP lead`.
+- **Snelboost:** single-HP mode geldt niet; daar draaien altijd beide units.
+
+#### `DHW single HP level bump`
+
+- Standaard **0**, bereik 0–3.
+
+Telt op bij het niveau van de lead, en valt onder de zachte aanloop. De bump geeft extra capaciteit zonder dat er gemeten is dat die nodig is. Voor capaciteit op basis van meting is de assist hieronder bedoeld.
+
+### Tweede-HP assist
+
+Alleen actief als `DHW single HP mode` aan staat, en alleen in de gewone HP-fase; niet tijdens legionella. De andere unit springt stapsgewijs bij als de lead het alleen niet redt.
+
+#### `DHW second HP assist`
+
+- Standaard **aan**.
+
+#### Wanneer de assist inschakelt
+
+"Te kort" betekent dat beide gelden:
+- de lead krijgt al zijn volle `DHW HP level`, dus de zachte aanloop en de coil-mapping knijpen niet meer;
+- de tanktop stijgt langzamer dan `DHW assist min tank rise` (**0,10 K/min**), gemeten per 2 minuten.
+
+Houdt dat **10 min** aan, dan start de tweede unit op **niveau 1**.
+
+#### Opbouwen en afbouwen
+
+| Situatie | Gedrag |
+|---|---|
+| Nog steeds te kort | elke 10 min één niveau erbij, tot `DHW assist max level` (**3**) |
+| Tank stijgt weer goed | elke 10 min één niveau eraf |
+| Op niveau 1 en niet meer nodig | eruit na minimaal 15 min draaien, daarna 15 min wachttijd |
+| Tankbodem ≥ `DHW assist tank bottom stop` (**48 °C**) | meteen eruit, zonder wachttijd; de laatste graden op één compressor |
+| Einde HP-fase | eruit, wachttijd gewist |
+
+#### Bewaking
+
+De assist gaat meteen helemaal uit, met 15 min wachttijd, als:
+- het persgas van een van beide units boven `DHW assist max discharge temp` (**90 °C**) komt, of
+- de water-uit van de assisterende unit boven `DHW assist max water out` (**57 °C**) komt.
+
+**Vrijgeven.** De blokkade vervalt pas als het persgas 5 K en het water 2 K onder de grens zit.
+
+**Vroeger terug na een watertrip.** Was alleen het water te warm, dan mag de assist ook vóór het einde van de wachttijd terug, zodra de water-uit onder `DHW assist water release temp` zakt. Die staat op **50 °C** en is begrensd op maximaal de watergrens − 2 K.
+
+Deze grenzen bepalen alleen of de assist mag draaien. Het afknijpen van niveaus op aanvoertemperatuur blijft bij de [aanvoerbeveiliging](supply-temp-protection-v0.32.md).
+
+**Uitlezen:** `DHW second HP assist status`. Mogelijke waarden: `Standby - lead haalt het alleen`, `Actief - 2e HP op level N`, `Geblokkeerd - persgas of water-uit te hoog`, `Wachttijd na uitschakelen`, `Uit - tank bijna klaar, staart op 1 compressor` en `Uit tijdens legionella`.
+
+> Het criterium "te kort" wordt ook gemeten terwijl de assist draait. Helpt hij goed, dan bouwt hij zichzelf weer af. Het resultaat kan een ritme zijn van ongeveer 15–20 min aan en 25 min uit, ruwweg anderhalve start per uur op de assisterende unit. Houd bij twijfel de starts van die unit in de gaten.
+
+### Wat verder altijd geldt
+
+DHW is voor de rest van de regeling gewone warmtevraag. Supervisory zet de installatie op **CM4**, en alle compressorbeveiligingen blijven gelden:
+
+- **Starts:** minimale uit-tijd per compressor (240 s), minimale looptijd (≥ 300 s), en maximaal **6 starts per uur** per compressor (zie [Instellingen en meetwaarden](instellingen-en-meetwaarden.md)).
+- **Flow:** de systeem-lowflowbewaking (250 L/h, 60 s), ook tijdens de afbouw van een compressor (zie [Regelgedrag](regelgedrag-van-openquatt.md)).
+- **Temperatuur en druk:** [aanvoer](supply-temp-protection-v0.32.md), [persgas](discharge-protection-v0.52.md) en [druk](pressure-protection-v0.32.md).
+- **Pompstoringsbit:** register 2121 bit 13 ("DC water pump failure") telt niet als storing. Sommige pompen zetten dat bit in stilstand, en het zou anders de lead laten wisselen.
+
+---
+
+## Element en boosts
+
+### Solar boost
+
+Een boost met alleen het element, vanuit rust. Doel: `DHW boost target`.
+
+**Blokkades.** Een solar boost start niet bij een fout, lockout, HP-fout, buiten het tijdvenster of in het dure tariefvenster. De minimale rusttijd geldt niet.
+
+| Trigger | Entiteit | Onder `DHW auto boost enable`? |
 |---|---|---|
-| 0 | 7 | 00:00–07:00 (daluren) |
-| 22 | 6 | 22:00–06:00 (nachtdal, over middernacht) |
-| 0 | 0 | nooit (venster van nul uur) |
+| Handmatig | `DHW source solar boost` | nee |
+| HA-proxy | `binary_sensor.openquatt_ext_dhw_solar_boost` | ja |
+| Goedkoop tarief | `DHW solar boost auto` + `DHW solar tariff threshold` (**0,02 EUR/kWh**) | ja |
+| PV-export | `DHW PV self-consumption enable` + `DHW PV boost export threshold` (**2700 W**) | ja |
 
-## Solar boost
+#### `DHW auto boost enable`
 
-### DHW auto boost enable
+- Standaard **uit**.
 
-- Entity: `switch.openquatt_dhw_auto_boost_enable`
-- Standaard: **uit**
+Hoofdschakelaar voor de drie automatische triggers. Hij staat bewust uit: alle drie pieken ze 's middags, en dan ging het element ongevraagd aan.
 
-Hoofdschakelaar boven alle boost-triggers die uit zichzelf starten:
+#### `DHW boost reden`
 
-| Trigger | Entity | Wanneer |
-| --- | --- | --- |
-| HA-proxy | `binary_sensor.openquatt_ext_dhw_solar_boost` | zodra jouw HA-template aan gaat |
-| Goedkoop tarief | `switch.openquatt_dhw_solar_boost_auto` | tarief ≤ drempel |
-| PV-export | `switch.openquatt_dhw_pv_self_consumption_enable` | netto export > drempel |
+Waarom de lopende boost draait, vastgelegd bij de start. Mogelijke waarden: `Handmatige snelboost`, `Natraject na HP-fase - element maakt af`, `Solar boost - bron-schakelaar (handmatig)`, `Solar boost - HA-proxy`, `Solar boost - goedkoop tarief`, `Solar boost - PV-export` en `Geen boost actief`.
 
-Staat deze schakelaar uit, dan komt er alleen nog een boost op expliciet commando — de snelboost-knop of `switch.openquatt_dhw_source_solar_boost` — of als natraject van een gewone HP-fase.
+### Warmtepomp mee in de boost
 
-Standaard uit, en met opzet: alle drie de triggers pieken 's middags. Veel PV op het net betekent tegelijk hoge eigen export én een laag day-ahead tarief, waardoor het 3 kW element er ongevraagd doorheen ging.
+#### `DHW boost HP assist`
 
-### DHW boost reden
+- Standaard **uit**.
 
-- Entity: `sensor.openquatt_dhw_boost_reden`
+Laat een warmtepomp meedraaien in een solar boost of natraject, maar alleen als de tankbodem bij de start van de boost onder `DHW boost HP assist bottom threshold` (**35 °C**) zit. Die keuze wordt bij de start vastgelegd.
 
-Diagnose: waarom draait de lopende boost? De toestand heet in alle gevallen `DHW_BOOST`, dus zonder deze sensor is een automatische boost niet van een handmatige te onderscheiden. Waarden: `Handmatige snelboost`, `Natraject na HP-fase - element maakt af`, `Solar boost - bron-schakelaar (handmatig)`, `Solar boost - HA-proxy`, `Solar boost - goedkoop tarief`, `Solar boost - PV-export`, `Geen boost actief`.
+De warmtepomp stopt bij tanktop ≥ `DHW boost HP assist stop top` (**52 °C**); het element maakt af tot `DHW boost target`.
 
-De reden wordt gelatcht bij de start van de boost, zodat hij niet verspringt als de trigger onderweg wegvalt (wolk voor de zon, tarief dat een uur later omhoog gaat).
+### Snelboost
 
-### DHW PV boost export threshold
+#### `DHW boost now`
 
-- Entity: `number.openquatt_dhw_pv_boost_export_threshold`
-- Standaard: **2700 W**
-- Bereik: 1000–6000 W (stap 50)
+- Schakelaar.
 
-Netto export waarboven de PV-gedreven boost het element inschakelt. Bewust een andere drempel dan `number.openquatt_dhw_pv_export_threshold` (1500 W): die stuurt de geleidelijke setpoint-shift en mag laag staan, terwijl deze het hele 3 kW element aanzet en dus pas zin heeft als de export dat echt dekt.
+Beide warmtepompen en het element tegelijk, voor snel herstel van de tank.
 
-### DHW solar boost auto
+**Starten**
+- Gaat vóór de gewone cyclus.
+- Negeert het tijdvenster en het dure-urenvenster.
+- Start niet bij een fout, lockout of HP-fout, of als de tanktop al op het snelboostdoel zit.
+- Single-HP mode geldt niet.
 
-- Entity: `switch.openquatt_dhw_solar_boost_auto`
-- Standaard: **uit**
+**Tijdens de boost**
+- **Warmtepompen stoppen** bij tanktop ≥ `DHW boost now HP stop` (**55 °C**), of zodra bij een van beide units het persgas boven 90 °C of de water-uit boven 57 °C komt (dezelfde grenzen als de assist). Binnen dezelfde boost starten ze niet opnieuw.
+- **Element** gaat door tot `DHW boost now target` (**60 °C**).
 
-Schakel in om automatisch een solar-boost te starten op basis van het stroomtarief. De tank wordt dan opgeladen met het element zolang het tarief op of onder de drempel staat.
+**Einde**
+- **Afbreken:** zet `DHW boost now` uit, ook tijdens het wachten op de klep.
+- De schakelaar gaat vanzelf uit zodra de snelboost klaar is.
+- Hooguit **90 min**; een timeout is geen fout (`DHW boost timeouts`).
 
-### DHW zon-boost tarief drempel
+---
 
-- Entity: `number.openquatt_dhw_solar_tariff_threshold`
-- Standaard: **0,02 EUR/kWh**
-- Bereik: −0,10–0,20 EUR/kWh (stap 0,01)
+## Legionella
 
-Het stroomtarief waaronder een automatische solar-boost wordt gestart. Stel dit in op de prijs waarbij stroom goedkoop genoeg is om het element te laten draaien. Voorbeelden:
+### Planning
 
-- **0,00**: alleen bij exact nul of negatief tarief
-- **0,02**: tot 2 cent/kWh (typisch dalmoment bij dynamisch tarief)
-- **0,08**: bij elke prijs onder 8 cent/kWh
+- **Interval:** elke 7 dagen na de laatste geslaagde run. Het tijdstip wordt persistent bewaard en overleeft een herstart.
+- **Nog nooit gedraaid:** eerste run 30 min na opstart, zodra de klok (NTP) geldig is.
+- **Uitlezen:** `DHW legionella laatste run` en `DHW legionella volgende run`.
 
-Vereist dat "DHW auto boost enable" én "DHW solar boost auto" aan staan, en dat een stroomtarief-entiteit gekoppeld is aan `${ha_electricity_tariff_entity_id}`.
+### Verloop
+
+1. **Warmtepomp en element samen**
+   - De warmtepomp stopt zodra de **tankbodem** `DHW legionella HP handover temp` (**53 °C**) haalt,
+   - of zodra de **tanktop** `DHW legionella HP top ceiling` (**55 °C**) haalt,
+   - of na 180 min.
+
+   Het plafond op de top is een beveiliging. Het element verwarmt de top mee, waardoor de condensatiedruk van de warmtepomp anders oploopt tot de ODU afslaat. Bij R32 is die marge klein.
+2. **Element alleen** tot `DHW legionella target` (**68 °C**, bereik 60–75 °C; eis van de Inventum-boiler).
+3. **Hold van 15 min** op de tanktop. Een dip tot 1 K onder het doel reset de hold niet.
+
+**Klep tijdens de run.**
+
+#### `DHW legionella coil circulation`
+
+- Standaard **aan**.
+
+De klep blijft de hele run op DHW, zodat de pomp tankwater door de spiraal circuleert en de tank mengt. Zet dit uit zodra er een eigen circulatiepomp tussen top en bodem zit.
+
+**Maximale duur.** Duurt de run langer dan **150 min**, dan volgt de fout `TIMEOUT`.
+
+**Uitlezen:** `DHW legionella ETA` en `DHW legionella elapsed`.
+
+**Warmtepompen.** Tijdens legionella draait de lead volgens [single-HP mode](#duo-of-single); de tweede-HP assist is uit.
+
+### Handmatig forceren
+
+Met `DHW source legionella force`, of de HA-proxy `binary_sensor.openquatt_ext_dhw_legionella_force`. Een handmatige force slaat alle uitstel over. Loopt er al een DHW-cyclus, dan start hij daarna. `DHW legionella deferral status` meldt wat er gebeurt.
+
+### Naar een goedkoop uur trekken
+
+#### `DHW legionella tariff aware`
+
+- Standaard **uit**.
+
+Staat de geplande run binnen `DHW legionella advance window` (**24 u**), en is het nu een goedkoop uur, dan start de run nu. Het goedkope uur komt uit, in volgorde van voorkeur:
+1. HA `input_datetime` start/eind van het goedkoopste venster;
+2. de HA-proxy `binary_sensor.openquatt_ext_dhw_legionella_cheap_window`;
+3. het huidige tarief ten opzichte van het 24-uursgemiddelde, onder `DHW legionella cheap tariff ratio` (**0,7**).
+
+> **Wat dit in de huidige firmware wel en niet doet.** De code bevat ook "wachten op een goedkoop uur" (`DHW legionella max wait for cheap`, 24 u) en "uitstellen na natuurlijke pasteurisatie" (`DHW smart legionella deferral`, `DHW legionella max defer`). Die controles werken alleen op een automatisch **vervroegde** run. De gewone wekelijkse run plant de toestandsmachine zelf, en die kijkt er niet naar.
+>
+> In de praktijk:
+> - de wekelijkse run start op tijd, ook in een duur uur;
+> - na een natuurlijke pasteurisatie start hij evengoed;
+> - smart deferral voorkomt alleen dat een run naar voren wordt getrokken.
+>
+> "Natuurlijke pasteurisatie" betekent dat de **tankbodem** het legionelladoel heeft gehaald.
+
+---
+
+## Starts beperken
+
+### Tijdvenster
+
+#### `DHW window enable`
+
+- Standaard **uit**.
+
+Gewone cycli en solar boosts mogen alleen starten binnen het venster. Een lopende cyclus wordt niet onderbroken. Legionella en snelboost gelden niet.
+
+> Zolang de klok ongeldig is (geen NTP), blokkeert het ingeschakelde venster alle starts.
+
+#### `DHW window start hour` en `DHW window end hour`
+
+- Standaard **0** en **7**.
+- Het eindeuur hoort er niet meer bij.
+- Een venster over middernacht, bijvoorbeeld 22 → 6, wordt herkend.
+- Gelijke uren betekent: nooit starten.
+
+| Start | Eind | Toegestaan |
+|---|---|---|
+| 0 | 7 | 00:00–07:00 |
+| 22 | 6 | 22:00–06:00 |
+| 0 | 0 | nooit |
+
+### Dure uren vermijden
+
+#### `DHW avoid expensive tariff`
+
+- Standaard **uit**.
+
+Binnen het duurste tariefvenster van de dag start geen gewone cyclus en geen solar boost. Het venster komt uit HA (`input_datetime` duurste start/eind, zie [HA-koppelingen](#ha-koppelingen)). Een lopende cyclus loopt door.
+
+**Uitzondering:** zakt de tanktop onder `DHW emergency top temperature` (**35 °C**), dan wordt toch verwarmd.
+
+**Uitlezen:** `DHW avoid expensive status`.
+
+---
 
 ## Flowbewaking
 
-### DHW flow min
+#### `DHW flow min` en `DHW flow max`
 
-- Entity: `number.openquatt_dhw_flow_min`
-- Standaard: **750 l/h**
-- Bereik: 300–1300 l/h
-
-Minimale waterdoorstroming die verwacht wordt terwijl de warmtepomp draait. Daalt de flow gedurende 30 seconden onder deze waarde, dan geeft de regeling een FLOW_OUT_OF_RANGE-fout.
-
-### DHW flow max
-
-- Entity: `number.openquatt_dhw_flow_max`
-- Standaard: **1300 l/h**
-- Bereik: 600–1800 l/h
-
-Maximale waterdoorstroming. Overschrijding gedurende 30 seconden geeft eveneens een FLOW_OUT_OF_RANGE-fout.
-
-Stel min en max ruim genoeg in om pompvariatie op te vangen, maar smal genoeg om echte storingen te detecteren.
-
-## Legionellapreventie
-
-De legionellarun vindt automatisch elke 7 dagen plaats. De run bestaat uit twee fasen:
-
-1. Warmtepompfase: tank opladen tot HP stop top.
-2. Boostfase met element: tank verhogen tot het legionelladoel en dit 15 minuten vasthouden.
-
-De laatste succesvolle run en de geplande volgende run zijn zichtbaar in het dashboard als diagnostische tekstvelden.
-
-Na een herstart van de firmware wordt de legionellatimer gevoed vanuit de persistent opgeslagen datum van de laatste run. De regeling start dus niet onmiddellijk een nieuwe run na een reboot als de vorige run recent was.
-
-Forceer een run handmatig via "DHW source legionella force" of via een HA-automatisering die het bijbehorende HA-broninput-entiteit aanstuurt.
-
-## Fouttoestanden
-
-| Foutcode | Betekenis | Oplossing |
+| | Standaard | Bereik |
 |---|---|---|
-| SENSOR_IMPLAUSIBLE | Tanksensor buiten bereik of onplausibel | Controleer sensorbekabeling en broninstelling |
-| HP_FAULT | Warmtepomp meldt een fout | Zie warmtepompdiagnose; reset via "Reset DHW fout" |
-| VALVE_STUCK_CV | Klep bereikt DHW-positie niet binnen 20 s | Controleer bekabeling relais en klepfeedback |
-| VALVE_MISMATCH | Klep staat in CV-positie terwijl DHW actief is | Controleer klepfeedback en relaiswerking |
-| FLOW_OUT_OF_RANGE | Waterstroom buiten instelbaar bereik | Controleer pompwerking en flow min/max instellingen |
-| TIMEOUT | Fase overschrijdt maximale runtime | Controleer tank, spiraal en warmtepompcapaciteit |
-| LOCKOUT | Lockout actief tijdens lopende cyclus | Schakel lockout uit via HA of DHW-bronentiteit |
+| `DHW flow min` | **750 l/h** | 300–1300 l/h |
+| `DHW flow max` | **1800 l/h** | 600–1800 l/h |
 
-Alle fouten zijn latching: de regeling blijft in FAULT totdat je op "Reset DHW fout" drukt.
+Zolang een warmtepomp voor DHW draait (HP-fase, legionella-HP-fase, boost met warmtepomp), moet de flow tussen deze grenzen liggen. Zit hij er **30 s** aaneengesloten buiten, dan volgt `FLOW_OUT_OF_RANGE`. Staan min en max verkeerd om, dan worden ze omgedraaid.
 
-## Handmatige testmodus
+Daarnaast geldt altijd de systeem-lowflowbewaking (250 L/h, 60 s).
 
-Via "DHW manual test mode" overneem je directe controle over het kleprelais en het elementcontactor. De warmtepomp wordt dan niet aangestuurd door de DHW-regeling.
+---
 
-Gebruik dit uitsluitend voor bekabelingscontrole en inbedrijfstelling. Schakel handmatige modus altijd weer uit na gebruik.
+## Fouten
+
+Alle fouten zijn **gelatcht**: de regeling blijft in `FAULT` tot je op `DHW clear fault` drukt. In `FAULT` staat de klep op CV, is het element uit, en wordt er geen warmtepomp gevraagd.
+
+| Fout | Oorzaak | Wanneer |
+|---|---|---|
+| `SENSOR_IMPLAUSIBLE` | zie [Sensoren en bronnen](#sensoren-en-bronnen) | altijd, ook in rust |
+| `HP_FAULT` | HA-proxy `binary_sensor.openquatt_ext_dhw_hp_fault` (of `DHW source HP fault`), **of de watertemperatuur-trip** van de installatie | altijd, ook in rust |
+| `VALVE_STUCK_CV` | klep niet in DHW-stand na 20 s en één herhaling | bij de start van een cyclus |
+| `VALVE_MISMATCH` | klep meldt 10 s CV terwijl hij op DHW hoort te staan | tijdens een cyclus |
+| `FLOW_OUT_OF_RANGE` | flow 30 s buiten `DHW flow min`/`max` | zolang een warmtepomp voor DHW draait |
+| `TIMEOUT` | legionella-run langer dan 150 min | alleen legionella |
+| `LOCKOUT` | `DHW lockout` gaat aan tijdens een cyclus | tijdens een cyclus; in rust blokkeert lockout alleen nieuwe starts |
+
+> **Geen fout:**
+> - een HP-fase die 180 min haalt: de regeling gaat door naar het natraject of rust;
+> - een boost die 90 min haalt: telt op in `DHW boost timeouts`.
+
+> Een watertemperatuur-trip leidt tot `HP_FAULT`, en die moet je daarna met de hand wissen.
+
+---
+
+## Handmatig en inbedrijfstelling
+
+- **`DHW lockout`:** blokkeert nieuwe starts. Gaat hij aan tijdens een cyclus, dan volgt `LOCKOUT`. Ook via de HA-proxy `binary_sensor.openquatt_ext_dhw_lockout`.
+- **`DHW manual test mode`:**
+  - Met `DHW manual valve relay` en `DHW manual element relay` schakel je klep en element direct.
+  - Er wordt geen warmtepomp gevraagd.
+  - Alleen voor bekabelingscontrole; zet hem daarna weer uit.
+- **`DHW source …`:** handmatige bronnen die gelden als er geen HA-proxy is. Het gaat om `hp fault`, `lockout`, `solar boost`, `legionella force` en de vier temperaturen.
+- **CM6 (element only) en CM97 (ontluchten):** nemen klep en element over, en de DHW-toestandsmachine pauzeert. Zie [CM6](element-only-heating-cm6-v0.40.md) en [CM97](ontluchtingsprotocol-cm97-v0.40.md).
+
+---
 
 ## Diagnostiek
 
 | Entiteit | Inhoud |
 |---|---|
-| `sensor.openquatt_dhw_state` | Huidige toestand als tekst |
-| `sensor.openquatt_dhw_fault` | Huidige fout als tekst |
-| `sensor.openquatt_dhw_state_code` | Toestandscode (0–5) |
-| `sensor.openquatt_dhw_fault_code` | Foutcode (0–7) |
-| `sensor.openquatt_dhw_target_flow_temp` | Aanvoerdoel dat naar de warmtepomp gestuurd wordt |
-| `binary_sensor.openquatt_dhw_hp_request_active` | Of de warmtepomp op dit moment voor DHW draait |
-| `binary_sensor.openquatt_dhw_block_cv_priority` | Of CV-vraag onderdrukt wordt |
-| `sensor.openquatt_dhw_legionella_laatste_run` | Tijdstip van de laatste geslaagde legionellarun |
-| `sensor.openquatt_dhw_legionella_volgende_run` | Verwacht tijdstip van de volgende run |
+| `DHW state` / `DHW state code` | toestand als tekst / code 0–5 |
+| `DHW fault` / `DHW fault code` | fout als tekst / code 0–7 |
+| `DHW target flow temp` | aanvoerdoel dat naar de warmtepomp gaat |
+| `DHW HP request active` | warmtepomp draait nu voor DHW |
+| `DHW block CV priority` | CV-vraag wordt onderdrukt |
+| `DHW Element Active` | element staat aan |
+| `DHW boost reden` | waarom de lopende boost draait |
+| `DHW boost timeouts` | aantal boosts dat 90 min haalde |
+| `DHW single HP lead` | vastgezette lead in single-HP mode |
+| `DHW second HP assist status` | toestand van de tweede-HP assist |
+| `DHW coil mapped level` | niveau na coil-mapping |
+| `DHW HP thermisch vermogen` | geschat thermisch vermogen van de draaiende units |
+| `DHW estimated time to ready` | minuten tot `DHW HP stop top`* |
+| `DHW legionella laatste run` / `volgende run` | planning |
+| `DHW legionella ETA` / `elapsed` | voortgang van een lopende run |
+| `DHW legionella deferral status` | wat er met de legionella-planning gebeurt |
+| `DHW avoid expensive status` | blokkade door het dure tariefvenster |
+| `DHW cyclus COP`, `energie in`, `energie uit` | zie [rendement en tapdetectie](dhw-rendement-en-tapdetectie-v0.54.md) |
+
+\* **Beperking van `DHW estimated time to ready`.** Hij rekent tot `DHW HP stop top` op de tanktop, terwijl de HP-fase stopt op een tankbodem van 52 °C. Tijdens de HP-fase valt hij daardoor meestal te kort uit.
+
+---
+
+## HA-koppelingen
+
+In `openquatt/oq_substitutions_common.yaml`:
+
+| Substitutie | Standaard entiteit | Gebruik |
+|---|---|---|
+| `ha_dhw_tank_top_entity_id` e.a. | `sensor.openquatt_ext_dhw_tank_top` … | terugval voor de vier temperaturen |
+| `ha_dhw_valve_aux_entity_id` | `binary_sensor.openquatt_ext_dhw_valve_aux_cv` | klepstand (ruw) |
+| `ha_dhw_hp_fault_entity_id` | `binary_sensor.openquatt_ext_dhw_hp_fault` | `HP_FAULT` |
+| `ha_dhw_lockout_entity_id` | `binary_sensor.openquatt_ext_dhw_lockout` | lockout |
+| `ha_dhw_solar_boost_entity_id` | `binary_sensor.openquatt_ext_dhw_solar_boost` | solar boost |
+| `ha_dhw_legionella_force_entity_id` | `binary_sensor.openquatt_ext_dhw_legionella_force` | legionella forceren |
+| `ha_dhw_legionella_cheap_window_entity_id` | `binary_sensor.openquatt_ext_dhw_legionella_cheap_window` | goedkoop uur (tweede bron) |
+| `ha_dhw_legionella_cheap_start/end_entity_id` | `input_datetime.house_battery_strategy_dynamic_cheapest_start/end` | goedkoopste venster |
+| `ha_dhw_expensive_start/end_entity_id` | `input_datetime.house_battery_strategy_dynamic_expensive_start/end` | duurste venster |
+| `ha_electricity_tariff_entity_id` | `sensor.zonneplan_current_electricity_tariff` | solar boost op tarief, legionella-tarief |
