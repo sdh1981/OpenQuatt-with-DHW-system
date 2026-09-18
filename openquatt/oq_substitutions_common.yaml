@@ -22,6 +22,7 @@ heating_curve_logic_header: "openquatt/includes/oq_heating_curve_logic.h" # Shar
 dhw_controller_logic_header: "openquatt/includes/oq_dhw_controller_logic.h" # Shared C++ helper include for DHW finite-state control.
 installation_monitor_header: "openquatt/includes/oq_installation_monitoring.h" # Compressor-startenteller; overgenomen van upstream.
 compressor_start_limit_header: "openquatt/includes/oq_compressor_start_limit.h" # Max 6 startopdrachten/uur per compressor; upstream v0.50.0.
+rolling_hour_counter_header: "openquatt/includes/oq_rolling_hour_counter.h" # Gebeurtenissen per voortschrijdend uur, emmers van 10 min; host-getest.
 v050_headers_dir: "openquatt/includes/v050"             # Power House-logica uit upstream v0.50.0 (map, ESPHome-vrij, host-getest).
 power_house_v050_adapter_header: "openquatt/includes/oq_power_house_v050_adapter.h" # Fork-aansluiting v0.50-logica (host-getest).
 power_house_v050_shadow_header: "openquatt/includes/oq_power_house_v050_shadow.h" # Power House v0.50 in schaduw; stuurt niets aan.
