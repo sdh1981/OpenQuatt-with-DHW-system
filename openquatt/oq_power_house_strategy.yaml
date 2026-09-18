@@ -1497,6 +1497,7 @@ interval:
 
             // Apply smart-feature contributions to P_effective.
             // PV boost: additive, no cap beyond Pr*1.2 (over-rated allowed for short bursts).
+            const float P_before_boost = P_effective;
             P_effective = fmaxf(0.0f,
                 fminf(house_power_rating_w * 1.20f, P_effective + P_tariff_w + pv_boost_state));
             // Window-open: hard zero override of P_effective (HP idles).
@@ -1505,7 +1506,14 @@ interval:
             }
 
             id(oq_phouse_req_w) = P_effective;
-            id(oq_phouse_last_w) = P_effective;
+            // The rate limiter remembers the power BEFORE tariff and PV. Remembering
+            // it afterwards makes the boost re-apply on every cycle: as soon as the
+            // boost exceeds what the limiter lets the power fall per cycle, P ratchets
+            // all the way to 1.2x rated, independent of the actual heat demand. At the
+            // 60 s cadence with profile Calm the limiter falls 1404 W per cycle, so the
+            // tariff default (Kp 3000 W/K x 0.5 K = 1500 W) and the PV cap (2000 W) both
+            // qualify. Window-open still stores 0, so the power ramps back up gently.
+            id(oq_phouse_last_w) = id(oq_phouse_window_open_active) ? 0.0f : P_before_boost;
             id(oq_phouse_last_ms) = now_ms;
             id(oq_demand_raw) = clamp_demand((int) lroundf(${oq_strategy_demand_max_f} * (P_effective / house_power_rating_w)));
 

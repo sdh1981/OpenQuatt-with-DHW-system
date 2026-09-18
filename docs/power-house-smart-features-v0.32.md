@@ -94,6 +94,17 @@ template:
 
 **Slewing:** 200 W/s rise/fall, dus boost reageert snel op zonnewolken zonder te whipperen.
 
+**De boost telt eenmalig, niet cumulatief.** Tarief (#1) en PV (#2) worden opgeteld
+ná de vermogensbegrenzer, en de begrenzer onthoudt voor de volgende ronde het
+vermogen *vóór* die optelling. Deed hij dat niet, dan telde de boost elke ronde
+opnieuw mee en liep `P_req` binnen tientallen minuten naar 1,2× nominaal, los van
+de warmtevraag. Zo zat het tot de reparatie van september 2026 wél in elkaar: met
+de standaardwaarden (PV-max 2000 W, tarief 0,5 K × 3000 W/K = 1500 W) is de boost
+groter dan de 1404 W die de begrenzer per minuut laat zakken bij profiel Calm. Wie
+#1 of #2 aan had staan, zag het vermogen dus hoger uitkomen dan bedoeld. Gevonden
+tijdens de overname van de v0.50-logica, zie
+[Power House v0.50-overname](power-house-v050-overname.md).
+
 ---
 
 ## 3. Window-open detectie

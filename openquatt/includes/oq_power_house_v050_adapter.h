@@ -223,12 +223,12 @@ inline oq_power_house::DemandDecision decide_demand_with_extensions(const oq_pow
   if (ext.window_open) requested_w = 0.0f;
 
   out.requested_w = requested_w;
-  // Bewust ANDERS dan de fork-YAML: de begrenzer onthoudt het vermogen VOOR
-  // tarief en PV. De YAML onthoudt het erna, en dan telt de boost elke cyclus
-  // opnieuw mee: zodra de boost groter is dan wat de begrenzer per cyclus laat
-  // zakken, loopt het vermogen op tot 1,2x nominaal, los van de warmtevraag.
-  // Op 60 s gebeurt dat bij profiel Calm (1404 W/min) al met de standaard-
-  // tariefgrens; op dit ritme van 10 s bij elke boost boven 390 W.
+  // De begrenzer onthoudt het vermogen VOOR tarief en PV. Onthoudt hij het erna,
+  // dan telt de boost elke cyclus opnieuw mee: zodra de boost groter is dan wat
+  // de begrenzer per cyclus laat zakken, loopt het vermogen op tot 1,2x nominaal,
+  // los van de warmtevraag. Op 60 s gebeurt dat bij profiel Calm (1404 W/min) al
+  // met de standaard-tariefgrens; op dit ritme van 10 s bij elke boost boven
+  // 390 W. De fork-YAML deed dat eerst wel en is meeverbeterd.
   // Raam open: 0, zodat het vermogen daarna weer rustig opbouwt (zoals de YAML).
   out.next.last_w = ext.window_open ? 0.0f : limited_w;
   out.raw_demand = static_cast<int>(std::lround(tuning.demand_max * (requested_w / input.rated_w)));
