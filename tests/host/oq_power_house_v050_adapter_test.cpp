@@ -7,11 +7,10 @@
 // P_req en oq_demand_raw uitrekent), zonder de toestand van de uitbreidingen zelf
 // (zon-EMA, tariefslew, PV-slew, raamdetectie): die leest de schaduw uit.
 //
-// Op EEN regel na: wat de begrenzer onthoudt voor de volgende cyclus. De YAML
-// onthoudt het vermogen NA tarief en PV, waardoor die boost zich opstapelt tot
-// 1,2x nominaal (zie test_boost_does_not_ratchet). De adapter onthoudt het
-// vermogen ervoor; de referentie hieronder volgt de adapter op dat punt, met
-// KOPPELING_YAML als markering.
+// Let op de regel met KOPPELING_YAML: wat de begrenzer onthoudt voor de volgende
+// cyclus. Dat moet het vermogen VOOR tarief en PV zijn, anders stapelt die boost
+// zich op tot 1,2x nominaal (zie test_boost_does_not_ratchet). De YAML deed dat
+// eerst verkeerd; sinds de reparatie doen beide hetzelfde.
 
 #undef NDEBUG
 #include <assert.h>
@@ -90,7 +89,7 @@ struct ForkReference {
     P_effective = std::fmax(0.0f, std::fmin(kPr * 1.20f, P_effective + P_tariff_w + pv_boost_w));
     if (window_open) P_effective = 0.0f;
 
-    // KOPPELING_YAML: de YAML zet hier last_w = P_effective (na de boost).
+    // KOPPELING_YAML: oq_power_house_strategy.yaml zet hier dezelfde regel.
     last_w = window_open ? 0.0f : P_before_boost;
     last_ms = now_ms;
     long raw = std::lround(20.0f * (P_effective / kPr));

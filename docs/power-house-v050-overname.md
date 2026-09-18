@@ -60,10 +60,10 @@ laat meerekenen en publiceert wat hij zou kiezen, zonder iets aan te sturen.
 | #4 vorstzone-derating | thermisch vermogen per kandidaat |
 | #5 effectieve aanvoer | aanvoertemperatuur voor het prestatiemodel |
 
-**Eén bewuste afwijking van de YAML: tarief en PV stapelen niet op.** De YAML
-onthoudt voor de begrenzer het vermogen *na* tarief en PV. Daardoor telt de boost
-elke cyclus opnieuw mee. Zodra de boost groter is dan wat de begrenzer per cyclus
-laat zakken, loopt het vermogen op tot 1,2× nominaal, los van de warmtevraag:
+**Tarief en PV stapelen niet op.** De begrenzer onthoudt het vermogen *vóór*
+tarief en PV. Onthoudt hij het erna, dan telt de boost elke cyclus opnieuw mee, en
+zodra de boost groter is dan wat de begrenzer per cyclus laat zakken, loopt het
+vermogen op tot 1,2× nominaal, los van de warmtevraag:
 
 | Ritme / profiel | Zakken per cyclus | Stapelt op bij boost boven |
 |---|---|---|
@@ -71,9 +71,14 @@ laat zakken, loopt het vermogen op tot 1,2× nominaal, los van de warmtevraag:
 | 60 s, Calm (fall 5 min) | 1404 W | 1404 W, dus al met PV-max 2000 W of tarief-standaard 1500 W |
 | 10 s (v0.50), Balanced | 390 W | 390 W |
 
-De adapter onthoudt het vermogen *vóór* tarief en PV. Een PV-boost van 900 W is
-dan netto 900 W extra, niet 8424 W na 20 minuten (`test_boost_does_not_ratchet`).
-In de huidige Power House zit het oude gedrag nog. Beide staan standaard uit.
+Een PV-boost van 900 W is nu netto 900 W extra, niet 8424 W na 20 minuten
+(`test_boost_does_not_ratchet`).
+
+Dit is tijdens de overname in de adapter gevonden en daarna ook in de huidige
+Power House gerepareerd (`oq_power_house_strategy.yaml`). Beide motoren doen op
+dit punt hetzelfde; de schaduwvergelijking laat er dus geen verschil meer door
+zien. Tarief en PV staan standaard uit, dus wie ze nooit heeft aangezet merkt van
+de reparatie niets.
 
 De toestand van zon-EMA, tariefverschuiving, PV-boost en raamdetectie wordt
 **gelezen**, niet bijgewerkt. De huidige Power House blijft daar eigenaar van.
