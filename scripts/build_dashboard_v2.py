@@ -688,11 +688,20 @@ V_DIAG = view(
              '**niets** aan.\n\n'
              'Kijk eerst of de frequentietabel gevuld is: zonder tabel rekent het model op '
              'niets. Daarna is "afwijkend" het hoofdcijfer.\n\n'
+             '**"Zou niets starten" hoort 0 te blijven.** Dat is de enige afwijking die een '
+             'koud huis oplevert: hij zou beide units stil laten staan terwijl er wél '
+             'gestookt wordt en de kamer onder setpoint zit. De standwissels per uur zijn '
+             'de maat voor het rekenritme — boven ongeveer zes per uur per unit is 10 s '
+             'te snel.\n\n'
              'Verschillen die erbij horen en dus geen fout zijn: ritme 10 s in plaats van '
              '60 s, geen `Demand filter ramp up`, model op Hz in plaats van op stand, geen '
              'HP gekozen tijdens minimale uit-tijd of startlimiet, en een snellere eerste '
              'start.'),
-        rows('Wat hij nu zou doen',
+        rows('Waar het op aankomt',
+             ('sensor.openquatt_ph_v0_50_schaduw_zou_niets_starten_min', 'Zou niets starten (min)'),
+             ('sensor.openquatt_ph_v0_50_schaduw_standwissels_hp1_per_uur', 'Standwissels HP1/uur'),
+             ('sensor.openquatt_ph_v0_50_schaduw_standwissels_hp2_per_uur', 'Standwissels HP2/uur'),
+             'Wat hij nu zou doen',
              ('binary_sensor.openquatt_ph_v0_50_schaduw_wijkt_af', 'Wijkt af'),
              ('sensor.openquatt_ph_v0_50_schaduw_verschil_huidig_v0_50', 'Verschil'),
              ('sensor.openquatt_ph_v0_50_schaduw_reden', 'Reden'),

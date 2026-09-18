@@ -1120,12 +1120,26 @@ views:
         "afwijkend" het hoofdcijfer.
 
 
+        **"Zou niets starten" hoort 0 te blijven.** Dat is de enige afwijking die een koud huis oplevert:
+        hij zou beide units stil laten staan terwijl er wél gestookt wordt en de kamer onder setpoint
+        zit. De standwissels per uur zijn de maat voor het rekenritme — boven ongeveer zes per uur per
+        unit is 10 s te snel.
+
+
         Verschillen die erbij horen en dus geen fout zijn: ritme 10 s in plaats van 60 s, geen `Demand
         filter ramp up`, model op Hz in plaats van op stand, geen HP gekozen tijdens minimale uit-tijd
         of startlimiet, en een snellere eerste start.'
     - type: entities
       show_header_toggle: false
       entities:
+      - type: section
+        label: Waar het op aankomt
+      - entity: sensor.openquatt_ph_v0_50_schaduw_zou_niets_starten_min
+        name: Zou niets starten (min)
+      - entity: sensor.openquatt_ph_v0_50_schaduw_standwissels_hp1_per_uur
+        name: Standwissels HP1/uur
+      - entity: sensor.openquatt_ph_v0_50_schaduw_standwissels_hp2_per_uur
+        name: Standwissels HP2/uur
       - type: section
         label: Wat hij nu zou doen
       - entity: binary_sensor.openquatt_ph_v0_50_schaduw_wijkt_af
