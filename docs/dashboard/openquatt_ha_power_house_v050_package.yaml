@@ -1,0 +1,153 @@
+# ==============================================================================
+# OpenQuatt - Power House v0.50 schaduwvergelijking (Home Assistant)
+# ==============================================================================
+#
+# Waarvoor:
+#   De firmware rekent de v0.50-Power-House naast de huidige mee en publiceert
+#   wat hij zou kiezen, zonder iets aan te sturen. De firmware telt zelf op
+#   hoeveel minuten de twee het oneens waren, maar die teller begint bij elke
+#   herstart opnieuw. Dit pakket maakt daar een dagcijfer van, plus twee
+#   verschilsensoren om op te grafieken.
+#
+#   Zonder dit pakket werkt de schaduw gewoon; je kijkt dan naar de losse
+#   momentwaarden in plaats van naar een optelling.
+#
+# Installeren:
+#   1) Zet packages aan in /config/configuration.yaml:
+#        homeassistant:
+#          packages: !include_dir_named packages
+#   2) Kopieer dit bestand naar /config/packages/openquatt_power_house_v050.yaml
+#   3) Herstart Home Assistant (history_stats laadt niet met een reload).
+#
+# Vereist firmware met openquatt/oq_power_house_v050_shadow.yaml erin.
+#
+# Wat je krijgt:
+#   sensor.ph_v050_afwijkend_vandaag        uren oneens sinds middernacht
+#   sensor.ph_v050_afwijkend_vandaag_min    hetzelfde in minuten
+#   sensor.ph_v050_aandeel_vandaag          % van de dag oneens
+#   sensor.ph_v050_afwijkend_7d             uren oneens over 7 dagen
+#   sensor.ph_v050_aandeel_7d               % van 7 dagen oneens
+#   sensor.ph_v050_p_req_verschil           v0.50 min huidig, in W
+#   sensor.ph_v050_p_req_verschil_abs       zelfde, absoluut
+#   sensor.ph_v050_standverschil            |dHP1| + |dHP2|, in standen
+#   sensor.ph_v050_p_req_verschil_24u       gemiddeld absoluut verschil, 24 uur
+#
+# Let op: history_stats leest uit de recorder. Staan de schaduwentiteiten in je
+# recorder-exclude, dan blijven deze sensoren op 0 staan.
+# ==============================================================================
+
+sensor:
+  # ---------------------------------------------------------------- dagcijfer
+  - platform: history_stats
+    name: PH v050 afwijkend vandaag
+    unique_id: ph_v050_afwijkend_vandaag
+    entity_id: binary_sensor.openquatt_ph_v0_50_schaduw_wijkt_af
+    state: "on"
+    type: time
+    start: "{{ today_at() }}"
+    end: "{{ now() }}"
+
+  - platform: history_stats
+    name: PH v050 aandeel vandaag
+    unique_id: ph_v050_aandeel_vandaag
+    entity_id: binary_sensor.openquatt_ph_v0_50_schaduw_wijkt_af
+    state: "on"
+    type: ratio
+    start: "{{ today_at() }}"
+    end: "{{ now() }}"
+
+  # ------------------------------------------------------------- weekcijfer
+  # Zeven dagen is het ijkpunt waar de beslissing op hangt: een week met zowel
+  # een vorstnacht als een zachte dag dekt de hoeken waar de twee modellen
+  # kunnen uiteenlopen.
+  - platform: history_stats
+    name: PH v050 afwijkend 7d
+    unique_id: ph_v050_afwijkend_7d
+    entity_id: binary_sensor.openquatt_ph_v0_50_schaduw_wijkt_af
+    state: "on"
+    type: time
+    end: "{{ now() }}"
+    duration:
+      days: 7
+
+  - platform: history_stats
+    name: PH v050 aandeel 7d
+    unique_id: ph_v050_aandeel_7d
+    entity_id: binary_sensor.openquatt_ph_v0_50_schaduw_wijkt_af
+    state: "on"
+    type: ratio
+    end: "{{ now() }}"
+    duration:
+      days: 7
+
+  # --------------------------------------------- gemiddeld verschil over 24 uur
+  # Eén getal om de vraagberekening op te beoordelen. De bron wordt elke 5 min
+  # bemonsterd (zie het trigger-template hieronder), dus 300 monsters dekken
+  # ruim 24 uur.
+  - platform: statistics
+    name: PH v050 P_req verschil 24u
+    unique_id: ph_v050_p_req_verschil_24u
+    entity_id: sensor.ph_v050_p_req_verschil_abs
+    state_characteristic: mean
+    sampling_size: 300
+    max_age:
+      hours: 24
+
+template:
+  # Eenvoudige afgeleide van de history_stats-uren. Minuten lezen makkelijker
+  # dan "0.37 uur".
+  - sensor:
+      - name: PH v050 afwijkend vandaag min
+        unique_id: ph_v050_afwijkend_vandaag_min
+        unit_of_measurement: min
+        state_class: measurement
+        icon: mdi:not-equal-variant
+        state: >-
+          {% set h = states('sensor.ph_v050_afwijkend_vandaag') %}
+          {% if is_number(h) %}{{ (h | float * 60) | round(0) }}{% endif %}
+
+  # Bewust trigger-gestuurd en niet op elke statuswijziging: de schaduw rekent
+  # elke 10 s, en dan loopt de statistiekbuffer hierboven binnen een paar uur
+  # vol. Elke 5 minuten een monster is genoeg voor een gemiddelde en voor een
+  # grafiek over een week.
+  - trigger:
+      - platform: time_pattern
+        minutes: "/5"
+      - platform: homeassistant
+        event: start
+    sensor:
+      - name: PH v050 P_req verschil
+        unique_id: ph_v050_p_req_verschil
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        state: >-
+          {% set s = states('sensor.openquatt_ph_v0_50_schaduw_p_req') %}
+          {% set l = states('sensor.openquatt_power_house_p_req') %}
+          {% if is_number(s) and is_number(l) %}{{ (s | float - l | float) | round(0) }}{% endif %}
+
+      - name: PH v050 P_req verschil abs
+        unique_id: ph_v050_p_req_verschil_abs
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        state: >-
+          {% set s = states('sensor.openquatt_ph_v0_50_schaduw_p_req') %}
+          {% set l = states('sensor.openquatt_power_house_p_req') %}
+          {% if is_number(s) and is_number(l) %}{{ (s | float - l | float) | abs | round(0) }}{% endif %}
+
+      # Hoe ver de standkeuze uiteenloopt, niet alleen of. Eén stand verschil op
+      # één unit is iets anders dan twee units die allebei twee standen schelen.
+      - name: PH v050 standverschil
+        unique_id: ph_v050_standverschil
+        unit_of_measurement: standen
+        state_class: measurement
+        icon: mdi:stairs
+        state: >-
+          {% set s1 = states('sensor.openquatt_ph_v0_50_schaduw_hp1_stand') %}
+          {% set s2 = states('sensor.openquatt_ph_v0_50_schaduw_hp2_stand') %}
+          {% set l1 = states('sensor.openquatt_hp1_compressor_level') %}
+          {% set l2 = states('sensor.openquatt_hp2_compressor_level') %}
+          {% if is_number(s1) and is_number(s2) and is_number(l1) and is_number(l2) %}
+          {{ ((s1 | float - l1 | float) | abs + (s2 | float - l2 | float) | abs) | round(0) }}
+          {% endif %}

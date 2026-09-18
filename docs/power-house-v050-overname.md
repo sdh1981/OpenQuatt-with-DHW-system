@@ -100,4 +100,22 @@ eigenaarwissels.
 - `- reden`, `- snelle start`, `- verwacht thermisch vermogen`, `- capaciteit`.
 - `PH v0.50 - HPx frequentietabel verwarmen`: welke Hz het model gebruikt.
 
+Begin altijd bij de frequentietabel. Staat daar binnen een minuut na opstart niet
+`30, 39, 49, 55, 61, 67, 72, 79, 85, 90` Hz, dan rekent het Hz-model op een andere
+tabel dan de fabriekstabel en zegt het verschil weinig.
+
+Beide dashboards hebben hiervoor de sectie **Power House v0.50 (schaduw)**: in V1
+op de tab Diagnostiek, in V2 op Uitzoeken. Met twee grafieken ernaast — gevraagd
+vermogen en standkeuze, huidig tegen v0.50.
+
+De firmwareteller begint bij elke herstart opnieuw. Voor een dag- en weekcijfer
+staat er een optioneel Home Assistant-pakket bij:
+`docs/dashboard/openquatt_ha_power_house_v050_package.yaml`. Dat levert
+`sensor.ph_v050_afwijkend_vandaag_min`, `..._aandeel_vandaag`, `..._afwijkend_7d`,
+`..._p_req_verschil_24u` en `..._standverschil`.
+
+Een week met zowel een vorstnacht als een zachte dag is het ijkpunt: juist de
+vorstzone-factor en de effectieve aanvoertemperatuur zijn de plekken waar de twee
+modellen uiteen kunnen lopen.
+
 Stap 3 (later): een omschakelaar "Power House engine: fork / v0.50".

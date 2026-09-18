@@ -67,7 +67,22 @@ def firmware_entities():
     return found
 
 
-ENTS = firmware_entities()
+# Deze maakt Home Assistant aan uit het optionele pakket
+# docs/dashboard/openquatt_ha_power_house_v050_package.yaml, niet de firmware.
+# De controle hierboven kent ze dus niet. Wie het pakket niet installeert, ziet
+# op die ene kaart "Entiteit niet gevonden"; de rest van het dashboard staat er
+# los van.
+PAKKET_PH_V050 = {
+    'sensor.ph_v050_afwijkend_vandaag_min',
+    'sensor.ph_v050_aandeel_vandaag',
+    'sensor.ph_v050_afwijkend_7d',
+    'sensor.ph_v050_aandeel_7d',
+    'sensor.ph_v050_p_req_verschil',
+    'sensor.ph_v050_p_req_verschil_24u',
+    'sensor.ph_v050_standverschil',
+}
+
+ENTS = firmware_entities() | PAKKET_PH_V050
 
 # --------------------------------------------------------------------------
 # Bouwstenen
@@ -664,6 +679,59 @@ V_DIAG = view(
         rows('Verwarmen HP2, Hz per stand',
              *[('number.openquatt_hp2_experimenteel_verwarmen_f%d_hz' % i, 'F%d' % i)
                for i in range(1, 11)]),
+    ),
+    # De schaduw stuurt niets aan. Hij hoort daarom hier en niet op Verwarmen:
+    # er valt niets te bedienen, alleen iets uit te zoeken.
+    grid(
+        head('mdi:ab-testing', 'Power House v0.50 (schaduw)'),
+        note('De v0.50-rekenkern draait mee en publiceert wat hij zou kiezen. Hij stuurt '
+             '**niets** aan.\n\n'
+             'Kijk eerst of de frequentietabel gevuld is: zonder tabel rekent het model op '
+             'niets. Daarna is "afwijkend" het hoofdcijfer.\n\n'
+             'Verschillen die erbij horen en dus geen fout zijn: ritme 10 s in plaats van '
+             '60 s, geen `Demand filter ramp up`, model op Hz in plaats van op stand, geen '
+             'HP gekozen tijdens minimale uit-tijd of startlimiet, en een snellere eerste '
+             'start.'),
+        rows('Wat hij nu zou doen',
+             ('binary_sensor.openquatt_ph_v0_50_schaduw_wijkt_af', 'Wijkt af'),
+             ('sensor.openquatt_ph_v0_50_schaduw_verschil_huidig_v0_50', 'Verschil'),
+             ('sensor.openquatt_ph_v0_50_schaduw_reden', 'Reden'),
+             ('sensor.openquatt_ph_v0_50_schaduw_snelle_start', 'Snelle start'),
+             ('sensor.openquatt_ph_v0_50_schaduw_hp1_stand', 'HP1 stand'),
+             ('sensor.openquatt_ph_v0_50_schaduw_hp2_stand', 'HP2 stand'),
+             'Waar dat vandaan komt',
+             ('sensor.openquatt_ph_v0_50_schaduw_p_req', 'P_req'),
+             ('sensor.openquatt_ph_v0_50_schaduw_vraag_f', 'Vraag f'),
+             ('sensor.openquatt_ph_v0_50_schaduw_verwacht_thermisch_vermogen', 'Verwacht vermogen'),
+             ('sensor.openquatt_ph_v0_50_schaduw_capaciteit', 'Capaciteit'),
+             ('sensor.openquatt_ph_v0_50_schaduw_aanvoer_voor_model', 'Aanvoer voor model'),
+             ('sensor.openquatt_ph_v0_50_schaduw_vorstzone_factor', 'Vorstzone-factor'),
+             'Frequentietabel uit de ODU',
+             ('sensor.openquatt_ph_v0_50_hp1_frequentietabel_verwarmen', 'HP1'),
+             ('sensor.openquatt_ph_v0_50_hp2_frequentietabel_verwarmen', 'HP2')),
+        graph(24,
+              ('sensor.openquatt_power_house_p_req', 'Huidig'),
+              ('sensor.openquatt_ph_v0_50_schaduw_p_req', 'v0.50'),
+              title='Gevraagd vermogen, huidig tegen v0.50'),
+        graph(24,
+              ('sensor.openquatt_hp1_compressor_level', 'HP1 huidig'),
+              ('sensor.openquatt_ph_v0_50_schaduw_hp1_stand', 'HP1 v0.50'),
+              ('sensor.openquatt_hp2_compressor_level', 'HP2 huidig'),
+              ('sensor.openquatt_ph_v0_50_schaduw_hp2_stand', 'HP2 v0.50'),
+              title='Standkeuze, huidig tegen v0.50'),
+        rows('Opgeteld',
+             ('sensor.openquatt_ph_v0_50_schaduw_afwijkend_min', 'Sinds herstart (min)'),
+             ('sensor.ph_v050_afwijkend_vandaag_min', 'Vandaag (min)'),
+             ('sensor.ph_v050_aandeel_vandaag', 'Vandaag (%)'),
+             ('sensor.ph_v050_afwijkend_7d', '7 dagen (uur)'),
+             ('sensor.ph_v050_aandeel_7d', '7 dagen (%)'),
+             ('sensor.ph_v050_p_req_verschil', 'P_req-verschil nu'),
+             ('sensor.ph_v050_p_req_verschil_24u', 'P_req-verschil gemiddeld 24u'),
+             ('sensor.ph_v050_standverschil', 'Standverschil')),
+        note('De rij "Sinds herstart" komt uit de firmware en begint bij elke herstart '
+             'opnieuw. De rest komt uit het optionele pakket '
+             '`openquatt_ha_power_house_v050_package.yaml`; zonder dat pakket staat daar '
+             '"Entiteit niet gevonden".'),
     ),
     grid(
         head('mdi:tag-text', 'Systeem'),

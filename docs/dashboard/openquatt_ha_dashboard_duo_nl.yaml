@@ -4075,6 +4075,123 @@ views:
                 name: Werkelijke aanvoer (gekozen)
               - entity: button.openquatt_reset_heating_curve_pid_integral
                 name: Reset PID-integraal
+      - type: grid
+        cards:
+          - type: heading
+            icon: mdi:ab-testing
+            heading: Power House v0.50 (schaduw)
+            heading_style: title
+          - type: markdown
+            content: >-
+              <details>
+
+              <summary><strong>Uitleg</strong></summary>
+
+
+              De v0.50-rekenkern draait mee en publiceert wat hij zou kiezen. Hij
+              stuurt **niets** aan.
+
+
+              - Kijk eerst of `HP1/HP2 frequentietabel` gevuld is (30, 39, 49,
+              55, 61, 67, 72, 79, 85, 90 Hz). Zonder tabel rekent het model op
+              niets.
+
+              - `Wijkt af` en `Afwijkend (min)` zijn het hoofdcijfer: hoe vaak de
+              twee motoren een andere stand zouden kiezen.
+
+              - `Verschil` zegt welke kant het op gaat, `Reden` waarom.
+
+
+              Verschillen die erbij horen en dus geen fout zijn: ritme 10 s in
+              plaats van 60 s, geen `Demand filter ramp up`, model op Hz in
+              plaats van op stand, geen HP gekozen tijdens minimale uit-tijd of
+              startlimiet, en een snellere eerste start.
+
+
+              De rijen onder `Opgeteld` komen uit het optionele pakket
+              `openquatt_ha_power_house_v050_package.yaml`. Zonder dat pakket
+              staat daar "Entiteit niet gevonden".
+
+
+              </details>
+            text_only: true
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - type: section
+                label: Wat hij nu zou doen
+              - entity: binary_sensor.openquatt_ph_v0_50_schaduw_wijkt_af
+                name: Wijkt af
+              - entity: sensor.openquatt_ph_v0_50_schaduw_verschil_huidig_v0_50
+                name: Verschil
+              - entity: sensor.openquatt_ph_v0_50_schaduw_reden
+                name: Reden
+              - entity: sensor.openquatt_ph_v0_50_schaduw_snelle_start
+                name: Snelle start
+              - entity: sensor.openquatt_ph_v0_50_schaduw_hp1_stand
+                name: HP1 stand
+              - entity: sensor.openquatt_ph_v0_50_schaduw_hp2_stand
+                name: HP2 stand
+              - type: section
+                label: Waar dat vandaan komt
+              - entity: sensor.openquatt_ph_v0_50_schaduw_p_req
+                name: P_req
+              - entity: sensor.openquatt_ph_v0_50_schaduw_vraag_f
+                name: Vraag f
+              - entity: sensor.openquatt_ph_v0_50_schaduw_verwacht_thermisch_vermogen
+                name: Verwacht vermogen
+              - entity: sensor.openquatt_ph_v0_50_schaduw_capaciteit
+                name: Capaciteit
+              - entity: sensor.openquatt_ph_v0_50_schaduw_aanvoer_voor_model
+                name: Aanvoer voor model
+              - entity: sensor.openquatt_ph_v0_50_schaduw_vorstzone_factor
+                name: Vorstzone-factor
+              - type: section
+                label: Frequentietabel uit de ODU
+              - entity: sensor.openquatt_ph_v0_50_hp1_frequentietabel_verwarmen
+                name: HP1
+              - entity: sensor.openquatt_ph_v0_50_hp2_frequentietabel_verwarmen
+                name: HP2
+              - type: section
+                label: Opgeteld
+              - entity: sensor.openquatt_ph_v0_50_schaduw_afwijkend_min
+                name: Sinds herstart (min)
+              - entity: sensor.ph_v050_afwijkend_vandaag_min
+                name: Vandaag (min)
+              - entity: sensor.ph_v050_aandeel_vandaag
+                name: Vandaag (%)
+              - entity: sensor.ph_v050_afwijkend_7d
+                name: 7 dagen (uur)
+              - entity: sensor.ph_v050_aandeel_7d
+                name: 7 dagen (%)
+              - entity: sensor.ph_v050_p_req_verschil_24u
+                name: P_req-verschil gemiddeld 24u
+              - entity: sensor.ph_v050_standverschil
+                name: Standverschil
+          - type: history-graph
+            title: Gevraagd vermogen, huidig tegen v0.50
+            hours_to_show: 24
+            entities:
+              - entity: sensor.openquatt_power_house_p_req
+                name: Huidig
+              - entity: sensor.openquatt_ph_v0_50_schaduw_p_req
+                name: v0.50
+            grid_options:
+              columns: full
+          - type: history-graph
+            title: Standkeuze, huidig tegen v0.50
+            hours_to_show: 24
+            entities:
+              - entity: sensor.openquatt_hp1_compressor_level
+                name: HP1 huidig
+              - entity: sensor.openquatt_ph_v0_50_schaduw_hp1_stand
+                name: HP1 v0.50
+              - entity: sensor.openquatt_hp2_compressor_level
+                name: HP2 huidig
+              - entity: sensor.openquatt_ph_v0_50_schaduw_hp2_stand
+                name: HP2 v0.50
+            grid_options:
+              columns: full
     cards: []
     header:
       card:
