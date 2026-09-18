@@ -81,6 +81,24 @@ Installatie in Home Assistant:
 2. Kopieer het pakket naar `/config/packages/openquatt_dynamic_sources.yaml`.
 3. Herlaad de template-entiteiten of herstart Home Assistant.
 
+## Optioneel: dagcijfers voor de Power House v0.50-schaduw
+
+`openquatt_ha_power_house_v050_package.yaml` telt op hoe lang de meerekenende v0.50-motor een andere stand zou kiezen dan de motor die werkelijk stuurt. De firmware houdt dat zelf ook bij, maar begint bij elke herstart opnieuw; dit pakket maakt er een dag- en weekcijfer van, plus twee verschilsensoren om op te grafieken.
+
+Het pakket voegt onder meer toe:
+
+- `sensor.ph_v050_afwijkend_vandaag_min` en `sensor.ph_v050_aandeel_vandaag`
+- `sensor.ph_v050_afwijkend_7d` en `sensor.ph_v050_aandeel_7d`
+- `sensor.ph_v050_p_req_verschil_24u` en `sensor.ph_v050_standverschil`
+
+Installatie:
+
+1. Zet packages aan in `/config/configuration.yaml`.
+2. Kopieer het pakket naar `/config/packages/openquatt_power_house_v050.yaml`.
+3. Herstart Home Assistant. `history_stats` komt niet mee met een reload.
+
+Beide dashboards tonen deze rijen in de sectie **Power House v0.50 (schaduw)** op de tab Diagnostiek (V1) of Uitzoeken (V2). Zonder het pakket werkt die kaart gewoon; alleen de opgetelde rijen blijven dan leeg.
+
 ## Belangrijk om te onthouden
 
 - De dashboards gaan uit van de entiteitsnamen uit deze repository.
