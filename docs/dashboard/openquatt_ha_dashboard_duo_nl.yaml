@@ -4096,6 +4096,13 @@ views:
               55, 61, 67, 72, 79, 85, 90 Hz). Zonder tabel rekent het model op
               niets.
 
+              - `Zou niets starten` hoort **0** te blijven. Dat is de enige
+              afwijking die een koud huis oplevert: beide units stil terwijl er
+              wél gestookt wordt en de kamer onder setpoint zit.
+
+              - `Standwissels per uur` is de maat voor het rekenritme. Boven
+              ongeveer zes per uur per unit is 10 s te snel.
+
               - `Wijkt af` en `Afwijkend (min)` zijn het hoofdcijfer: hoe vaak de
               twee motoren een andere stand zouden kiezen.
 
@@ -4118,6 +4125,14 @@ views:
           - type: entities
             show_header_toggle: false
             entities:
+              - type: section
+                label: Waar het op aankomt
+              - entity: sensor.openquatt_ph_v0_50_schaduw_zou_niets_starten_min
+                name: Zou niets starten (min)
+              - entity: sensor.openquatt_ph_v0_50_schaduw_standwissels_hp1_per_uur
+                name: Standwissels HP1/uur
+              - entity: sensor.openquatt_ph_v0_50_schaduw_standwissels_hp2_per_uur
+                name: Standwissels HP2/uur
               - type: section
                 label: Wat hij nu zou doen
               - entity: binary_sensor.openquatt_ph_v0_50_schaduw_wijkt_af

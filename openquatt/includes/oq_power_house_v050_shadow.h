@@ -34,12 +34,14 @@
 #include "oq_compressor_start_limit.h"
 #include "oq_odu_runtime_frequency_table.h"
 #include "oq_power_house_v050_adapter.h"
+#include "oq_rolling_hour_counter.h"
 #include "oq_thermal_request_logic.h"
 #include "v050/control/oq_heat_intent_logic.h"
 #include "v050/control/oq_power_house_dispatch_logic.h"
 #include "v050/performance/hp_perf_frequency.h"
 
 #include "esphome/core/hal.h"
+#include "esphome/core/log.h"
 
 #if defined(OQ_TOPOLOGY_DUO)
 namespace oq_ph_v050 {
@@ -78,6 +80,13 @@ struct Output {
   int active_hp1_level{0};
   int active_hp2_level{0};
   float differs_minutes{0.0f};
+  // Twee cijfers voor de beslissing bij stap 3, zie
+  // docs/power-house-v050-stap3-omschakelaar.md:
+  //   no_start_minutes  de enige afwijking die een koud huis oplevert
+  //   level_changes_*   de maat voor de ritmekeuze (10 s of trager)
+  float no_start_minutes{0.0f};
+  int level_changes_hp1{0};
+  int level_changes_hp2{0};
 };
 
 class Shadow {
@@ -295,8 +304,40 @@ class Shadow {
     this->out_.differs = differs;
     this->out_.active_hp1_level = active_hp1;
     this->out_.active_hp2_level = active_hp2;
-    if (differs && std::isfinite(elapsed_min) && elapsed_min > 0.0f && elapsed_min < 5.0f)
-      this->out_.differs_minutes += elapsed_min;
+    const bool elapsed_usable = std::isfinite(elapsed_min) && elapsed_min > 0.0f && elapsed_min < 5.0f;
+    if (differs && elapsed_usable) this->out_.differs_minutes += elapsed_min;
+
+    // Standwissels per uur: hoe vaak deze motor de stand zou verzetten. In
+    // Power House-modus staat de slew-begrenzing van ±1 stand downstream uit
+    // (oq_thermal_request_control.yaml), dus wat hier beweegt, beweegt straks
+    // ook echt. Dit is de maat waarop het rekenritme wordt gekozen.
+    if (this->prev_hp1_level_ >= 0 && dispatch.hp1_level != this->prev_hp1_level_)
+      this->changes_hp1_.record(now_ms);
+    if (this->prev_hp2_level_ >= 0 && dispatch.hp2_level != this->prev_hp2_level_)
+      this->changes_hp2_.record(now_ms);
+    this->prev_hp1_level_ = dispatch.hp1_level;
+    this->prev_hp2_level_ = dispatch.hp2_level;
+    this->out_.level_changes_hp1 = this->changes_hp1_.count(now_ms);
+    this->out_.level_changes_hp2 = this->changes_hp2_.count(now_ms);
+
+    // De enige afwijking die een koud huis oplevert: v0.50 zou beide units stil
+    // laten staan terwijl de huidige motor wél stookt en de kamer onder het
+    // setpoint zit. Alles daarbuiten is een verschil, dit is een risico.
+    // output_valid moet erbij: zolang de frequentietabel onbekend is, zegt een
+    // keuze van 0 niets over de logica, alleen over de tabel.
+    const bool would_idle = dispatch.output_valid && (dispatch.hp1_level + dispatch.hp2_level) == 0;
+    const bool now_heating = (active_hp1 + active_hp2) > 0;
+    const bool room_below = std::isfinite(room_c) && std::isfinite(setpoint_c) && room_c < setpoint_c;
+    if (would_idle && now_heating && room_below) {
+      if (elapsed_usable) this->out_.no_start_minutes += elapsed_min;
+      if (!this->no_start_logged_) {
+        this->no_start_logged_ = true;
+        ESP_LOGW("quatt", "PH v0.50 schaduw zou niets draaien terwijl er gestookt wordt (%s); kamer %.1f < %.1f",
+                 oq_power_house_dispatch::request_reason_name(static_cast<int>(dispatch.reason)), room_c, setpoint_c);
+      }
+    } else {
+      this->no_start_logged_ = false;
+    }
   }
 
  private:
@@ -362,17 +403,30 @@ class Shadow {
     this->demand_state_ = {};
     this->fast_floor_w_ = 0.0f;
     this->last_loop_ms_ = 0;
+    this->prev_hp1_level_ = -1;
+    this->prev_hp2_level_ = -1;
+    this->no_start_logged_ = false;
+    // De optelling over de hele looptijd blijft staan; anders wist een uurtje
+    // koelen of warm water het cijfer waar de beslissing op hangt. De
+    // uurtellers lopen vanzelf leeg.
     const float differs_minutes = this->out_.differs_minutes;
+    const float no_start_minutes = this->out_.no_start_minutes;
     this->out_ = {};
     this->out_.differs_minutes = differs_minutes;
+    this->out_.no_start_minutes = no_start_minutes;
   }
 
   Output out_;
   oq_power_house_dispatch::DispatchState dispatch_state_;
   oq_heat_intent::State intent_state_;
   oq_power_house::DemandState demand_state_;
+  oq_rate::RollingHourCounter changes_hp1_;
+  oq_rate::RollingHourCounter changes_hp2_;
   float fast_floor_w_{0.0f};
   uint32_t last_loop_ms_{0};
+  int prev_hp1_level_{-1};
+  int prev_hp2_level_{-1};
+  bool no_start_logged_{false};
 };
 
 inline Shadow& shadow() {

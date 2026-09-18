@@ -105,6 +105,17 @@ eigenaarwissels.
 - `- reden`, `- snelle start`, `- verwacht thermisch vermogen`, `- capaciteit`.
 - `PH v0.50 - HPx frequentietabel verwarmen`: welke Hz het model gebruikt.
 
+Twee cijfers zijn geen verschil maar een oordeel:
+
+| Entiteit | Wat het zegt | Wat je wil zien |
+|---|---|---|
+| `- zou niets starten (min)` | v0.50 zou beide units stil laten staan terwijl er wél gestookt wordt en de kamer onder setpoint zit | **0**. Dit is de enige afwijking die een koud huis oplevert; de eerste keer dat het gebeurt staat het ook in de log, met de reden erbij |
+| `- standwissels HP1/HP2 (per uur)` | hoe vaak de v0.50-keuze de stand zou verzetten, over een voortschrijdend uur | onder ongeveer 6 per uur per unit. Daarboven is het rekenritme van 10 s te snel — in Power House-modus staat de slew-begrenzing van ±1 stand downstream namelijk uit |
+
+Het tweede cijfer beantwoordt een van de twee open vragen voor stap 3 met data in
+plaats van met een vermoeden. Zolang de frequentietabel onbekend is, blijven beide
+op 0 respectievelijk leeg: een keuze van 0 zegt dan niets over de logica.
+
 Begin altijd bij de frequentietabel. Staat daar binnen een minuut na opstart niet
 `30, 39, 49, 55, 61, 67, 72, 79, 85, 90` Hz, dan rekent het Hz-model op een andere
 tabel dan de fabriekstabel en zegt het verschil weinig.

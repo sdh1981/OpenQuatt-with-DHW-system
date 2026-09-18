@@ -10,6 +10,9 @@
 # Waar kijken:
 #   "wijkt af" en "verschil"   waar en hoe de keuze verschilt van de huidige
 #   "afwijkend (min)"          opgeteld, sinds de laatste herstart
+#   "zou niets starten (min)"  hij zou stilstaan terwijl er wél gestookt wordt
+#                              en de kamer onder setpoint zit -- moet 0 blijven
+#   "standwissels HPx"         hoe vaak de keuze beweegt, per voortschrijdend uur
 #   "reden"                    waarom de v0.50-dispatch deze keuze maakt
 #   "snelle start"             room_demand / setpoint_raise als hij direct zou starten
 #   "HPx frequentietabel"      de Hz per stand zoals de ODU ze nu gebruikt
@@ -172,6 +175,58 @@ sensor:
     web_server:
       sorting_group_id: oq_power_house_v050
       sorting_weight: 31
+
+  # De enige afwijking die een koud huis oplevert. Elk ander verschil is een
+  # keuze die je kunt wegen; deze niet. Blijft 0 tot de frequentietabel er is.
+  - platform: template
+    id: oq_ph_v050_no_start_minutes
+    name: "PH v0.50 schaduw - zou niets starten (min)"
+    icon: mdi:snowflake-alert
+    unit_of_measurement: "min"
+    state_class: total_increasing
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: |-
+      return oq_ph_v050::shadow().output().no_start_minutes;
+    web_server:
+      sorting_group_id: oq_power_house_v050
+      sorting_weight: 4
+
+  # Maat voor de ritmekeuze bij stap 3: in Power House-modus staat de
+  # slew-begrenzing van ±1 stand downstream uit, dus deze wissels gaan straks
+  # ongefilterd de actuator in.
+  - platform: template
+    id: oq_ph_v050_level_changes_hp1
+    name: "PH v0.50 schaduw - standwissels HP1 (per uur)"
+    icon: mdi:stairs
+    unit_of_measurement: "/h"
+    state_class: measurement
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: |-
+      const auto &o = oq_ph_v050::shadow().output();
+      return o.active ? (float) o.level_changes_hp1 : NAN;
+    web_server:
+      sorting_group_id: oq_power_house_v050
+      sorting_weight: 5
+
+  - platform: template
+    id: oq_ph_v050_level_changes_hp2
+    name: "PH v0.50 schaduw - standwissels HP2 (per uur)"
+    icon: mdi:stairs
+    unit_of_measurement: "/h"
+    state_class: measurement
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: |-
+      const auto &o = oq_ph_v050::shadow().output();
+      return o.active ? (float) o.level_changes_hp2 : NAN;
+    web_server:
+      sorting_group_id: oq_power_house_v050
+      sorting_weight: 6
 
   - platform: template
     id: oq_ph_v050_differs_minutes
