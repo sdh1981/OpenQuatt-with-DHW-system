@@ -134,4 +134,12 @@ Een week met zowel een vorstnacht als een zachte dag is het ijkpunt: juist de
 vorstzone-factor en de effectieve aanvoertemperatuur zijn de plekken waar de twee
 modellen uiteen kunnen lopen.
 
-Stap 3 (later): een omschakelaar "Power House engine: fork / v0.50".
+## Stap 3: de omschakelaar
+
+`Power House engine` bepaalt welke motor de aanvraag schrijft, en staat standaard
+op **v0.50**. Beide motoren blijven altijd rekenen — dat moet ook, want de
+v0.32-uitbreidingen worden in de fork-lus bijgewerkt en door de adapter gelezen.
+
+De hele uitwerking, inclusief de beveiliging bij een draaiende compressor, de
+automatische terugval en wat er bij het bouwen anders werd dan gepland, staat in
+[stap 3: de omschakelaar](power-house-v050-stap3-omschakelaar.md).

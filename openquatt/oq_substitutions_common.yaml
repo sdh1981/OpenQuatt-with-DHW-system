@@ -25,7 +25,8 @@ compressor_start_limit_header: "openquatt/includes/oq_compressor_start_limit.h" 
 rolling_hour_counter_header: "openquatt/includes/oq_rolling_hour_counter.h" # Gebeurtenissen per voortschrijdend uur, emmers van 10 min; host-getest.
 v050_headers_dir: "openquatt/includes/v050"             # Power House-logica uit upstream v0.50.0 (map, ESPHome-vrij, host-getest).
 power_house_v050_adapter_header: "openquatt/includes/oq_power_house_v050_adapter.h" # Fork-aansluiting v0.50-logica (host-getest).
-power_house_v050_shadow_header: "openquatt/includes/oq_power_house_v050_shadow.h" # Power House v0.50 in schaduw; stuurt niets aan.
+power_house_v050_shadow_header: "openquatt/includes/oq_power_house_v050_shadow.h" # De v0.50-motor; stuurt als hij eigenaar is, anders schaduw.
+power_house_engine_header: "openquatt/includes/oq_power_house_engine.h" # Welke Power House-motor stuurt, met terugval en waakhond.
 odu_runtime_freq_table_logic_header: "openquatt/includes/oq_odu_runtime_frequency_table_logic.h" # Rekenwerk en grenzen van de frequentietabel, ESPHome-vrij en host-getest.
 odu_runtime_freq_table_header: "openquatt/includes/oq_odu_runtime_frequency_table.h" # EXPERIMENTEEL: frequentiekromme tijdelijk in de ODU zetten.
 # GRENDEL op het schrijven van de frequentiekromme. "0" = vergrendeld: de knop

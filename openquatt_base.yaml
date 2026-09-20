@@ -56,6 +56,9 @@ esphome:
     - ${installation_monitor_header}
     - ${compressor_start_limit_header}
     - ${rolling_hour_counter_header}
+    # Moet voor de beide Power House-lussen staan: allebei vragen hem of ze mogen
+    # schrijven.
+    - ${power_house_engine_header}
     # Logica voor de tabel zelf: die includeert hem met een relatief pad, en
     # ESPHome kopieert alleen wat hier staat naar src/.
     - ${odu_runtime_freq_table_logic_header}

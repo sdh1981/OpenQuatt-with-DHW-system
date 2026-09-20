@@ -46,7 +46,7 @@ Cooling en DHW worden beschreven in:
 - [Power House thermisch model v0.32](power-house-thermisch-model-v0.32.md): UA-leerroutine, zonnewinst-correctie, voorspellend voorconditioneren, frost-zone derating en effectieve aanvoertemperatuur voor de perf_map.
 - [Power House smart features v0.32](power-house-smart-features-v0.32.md): dynamisch tarief, PV-zelfconsumptie, window-open detectie, adaptieve Kp en SCOP/health/heat-up tracking.
 - [Power House v0.50-overname](power-house-v050-overname.md): de overgenomen upstream-logica, de schaduwberekening die ernaast meerekent en hoe je die uitleest.
-- [Power House v0.50 — stap 3, de omschakelaar](power-house-v050-stap3-omschakelaar.md): **voorstel**, nog geen firmware — wat er wisselt, hoe de overgang bij een draaiende compressor veilig verloopt, en de drempels om om te zetten.
+- [Power House v0.50 — de omschakelaar](power-house-v050-stap3-omschakelaar.md): `Power House engine` zet de v0.50-motor aan het stuur — wat er wisselt, hoe de overgang bij een draaiende compressor veilig verloopt, de automatische terugval en de terugweg.
 - [DHW-rendement en tapdetectie v0.54](dhw-rendement-en-tapdetectie-v0.54.md): cyclus-COP uit gemeten warmte en elektrisch verbruik, plus tapdetectie op de daalsnelheid van de tanktop.
 - [DHW smart features v0.32](dhw-smart-features-v0.32.md): tariff-aware DHW, PV-zelfconsumptie DHW, adaptive usage pattern learning, tank standby-loss tracker, smart legionella deferral, time-to-ready en single-HP mode.
 - [Pressure protection v0.32](pressure-protection-v0.32.md): R32 drukbeveiliging per HP — soft/hard caps, HPS-mirror, peak EMA en fouling-trend monitoring.

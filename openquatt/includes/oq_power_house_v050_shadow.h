@@ -75,6 +75,11 @@ struct Output {
   float model_supply_c{NAN};
   float frost_derate{1.0f};
   int intent{0};
+  // intent is alleen gevuld bij een snelle start. intent_reason staat er altijd,
+  // dus ook tijdens room_recovery -- en juist die toestand houdt het vermogen op
+  // de ondergrens, wat anders onverklaarbaar lijkt.
+  int intent_reason{0};
+  float floor_w{NAN};
   // Vergelijking met de huidige Power House (oq_ph_request_hp1/2_level).
   bool differs{false};
   int active_hp1_level{0};
@@ -242,6 +247,7 @@ class Shadow {
                               (oq_hp_candidate::may_serve_candidate(hp2_candidate) && hp2_runnable);
     dispatch_input.performance_valid = performance_valid && any_servable && !active_model_missing;
 
+    float floor_w = NAN;
     float minimum_viable_w = NAN;
     const auto include_minimum = [&](const oq_power_house_dispatch::HpInput& hp) {
       if (!oq_hp_candidate::may_serve_candidate(hp.candidate)) return;
@@ -260,6 +266,7 @@ class Shadow {
     if ((intent.fast_start || intent.room_recovery_active) && std::isfinite(minimum_viable_w) &&
         id(oq_water_temp_limit_factor) >= 0.999f) {
       requested_w = std::max(requested_w, minimum_viable_w);
+      floor_w = minimum_viable_w;
       this->fast_floor_w_ = requested_w;
       if (std::isfinite(rated_w) && rated_w > 0.0f && config.demand_max_f > 0)
         raw_demand = std::max(raw_demand, std::min(config.demand_max_f, static_cast<int>(std::ceil(
@@ -285,8 +292,11 @@ class Shadow {
 
     // ---- Uitvoer (alleen eigen) ----
     const float elapsed_min = cadence.dt_s / 60.0f;
-    const int active_hp1 = id(oq_ph_request_hp1_level);
-    const int active_hp2 = id(oq_ph_request_hp2_level);
+    // Vergelijken met wat de FORK wil, niet met de gepubliceerde aanvraag. Stuurt
+    // de v0.50-motor, dan staat daar zijn eigen keuze en zou het verschil altijd
+    // nul zijn. Zo blijft het dezelfde vergelijking, welke motor er ook stuurt.
+    const int active_hp1 = id(oq_ph_fork_request_hp1_level);
+    const int active_hp2 = id(oq_ph_fork_request_hp2_level);
     const bool differs = dispatch.hp1_level != active_hp1 || dispatch.hp2_level != active_hp2;
     this->out_.active = true;
     this->out_.output_valid = dispatch.output_valid;
@@ -301,6 +311,8 @@ class Shadow {
     this->out_.model_supply_c = supply_c;
     this->out_.frost_derate = frost_derate;
     this->out_.intent = intent.fast_start ? static_cast<int>(intent.reason) : 0;
+    this->out_.intent_reason = static_cast<int>(intent.reason);
+    this->out_.floor_w = floor_w;
     this->out_.differs = differs;
     this->out_.active_hp1_level = active_hp1;
     this->out_.active_hp2_level = active_hp2;

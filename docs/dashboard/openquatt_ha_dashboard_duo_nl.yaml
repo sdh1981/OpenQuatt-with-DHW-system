@@ -4088,8 +4088,16 @@ views:
               <summary><strong>Uitleg</strong></summary>
 
 
-              De v0.50-rekenkern draait mee en publiceert wat hij zou kiezen. Hij
-              stuurt **niets** aan.
+              Twee motoren rekenen altijd allebei; `Motor kiezen` bepaalt wie de
+              aanvraag schrijft. Staat die op `fork`, dan is de v0.50-kant een
+              schaduwberekening die niets aanstuurt. `Motor nu` zegt wie er
+              werkelijk stuurt — dat kan afwijken van de keuze, bijvoorbeeld
+              zolang de frequentietabel nog niet gelezen is.
+
+
+              De entiteiten houden het woord "schaduw" in hun naam; dat is de
+              v0.50-kant, of hij nu stuurt of niet. `Wijkt af` vergelijkt hem
+              altijd met wat de fork zou doen.
 
 
               - Kijk eerst of `HP1/HP2 frequentietabel` gevuld is (30, 39, 49,
@@ -4126,6 +4134,12 @@ views:
             show_header_toggle: false
             entities:
               - type: section
+                label: Wie stuurt er
+              - entity: select.openquatt_power_house_engine
+                name: Motor kiezen
+              - entity: sensor.openquatt_power_house_motor
+                name: Motor nu
+              - type: section
                 label: Waar het op aankomt
               - entity: sensor.openquatt_ph_v0_50_schaduw_zou_niets_starten_min
                 name: Zou niets starten (min)
@@ -4141,6 +4155,8 @@ views:
                 name: Verschil
               - entity: sensor.openquatt_ph_v0_50_schaduw_reden
                 name: Reden
+              - entity: sensor.openquatt_ph_v0_50_schaduw_startintentie
+                name: Startintentie
               - entity: sensor.openquatt_ph_v0_50_schaduw_snelle_start
                 name: Snelle start
               - entity: sensor.openquatt_ph_v0_50_schaduw_hp1_stand
@@ -4151,6 +4167,8 @@ views:
                 label: Waar dat vandaan komt
               - entity: sensor.openquatt_ph_v0_50_schaduw_p_req
                 name: P_req
+              - entity: sensor.openquatt_ph_v0_50_schaduw_ondergrens
+                name: Ondergrens
               - entity: sensor.openquatt_ph_v0_50_schaduw_vraag_f
                 name: Vraag f
               - entity: sensor.openquatt_ph_v0_50_schaduw_verwacht_thermisch_vermogen

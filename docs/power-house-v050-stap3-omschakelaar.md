@@ -1,11 +1,21 @@
-# Stap 3: de omschakelaar fork / v0.50 (voorstel)
+# Stap 3: de omschakelaar fork / v0.50
 
-Dit is een **voorstel**, nog geen firmware. Stap 1 (de logica) en stap 2 (de
-schaduw) staan er; zie [Power House v0.50-overname](power-house-v050-overname.md).
-Stap 3 geeft de v0.50-rekenkern de besturing, met een knop om terug te gaan.
+**Gebouwd.** `Power House engine` staat standaard op **v0.50**: de overgenomen
+upstream-rekenkern stuurt, de fork rekent mee als schaduw. Eén klik terug naar
+`fork` zet het om, en er is een automatische terugval als de v0.50-motor niet kan
+rekenen.
 
-Lees dit voor je iets bouwt: de keuzes hieronder zijn de keuzes, en de drempels
-onderaan bepalen wanneer het verstandig is om om te zetten.
+Stap 1 (de logica) en stap 2 (de schaduw) staan beschreven in
+[Power House v0.50-overname](power-house-v050-overname.md).
+
+> **De drempels uit §8 zijn niet afgewacht.** Dit is op verzoek omgezet na één dag
+> schaduwdraaien in plaats van na een week met vorst én zachte dagen. De
+> beveiligingen hieronder staan er wel; wat ontbreekt is de statistiek die zegt
+> dat het ook over een heel weerbereik klopt. Wie dat alsnog wil: zet de
+> omschakelaar op `fork` en laat hem een week meerekenen.
+
+Wat er bij het bouwen anders is geworden dan in dit voorstel stond, staat in
+§11 — inclusief één fout die de uitwerking nog niet zag.
 
 ## 1. Waar de naad zit
 
@@ -81,13 +91,14 @@ koeling (die lopen sowieso langs Power House heen), en de actuator zelf.
 ## 4. Wat ervoor nodig is
 
 1. **`select.openquatt_power_house_engine`** — opties `fork` en `v0.50`,
-   `restore_value: true`, standaard `fork`.
-2. **`sensor.openquatt_power_house_engine_active`** — wie er wérkelijk stuurt, plus
+   `restore_value: true`, standaard `v0.50`.
+2. **`sensor.openquatt_power_house_motor`** — wie er wérkelijk stuurt, plus
    de reden als dat afwijkt van de keuze (zie terugval hieronder). Zonder deze
    sensor is een stille terugval onzichtbaar, en dat is precies het soort ding dat
    je een week later niet meer terugvindt.
-3. **Publicatiestap** aan het eind van de verwarmingslus: kopieert de acht globals
-   uit de winnende motor. Eén plek, één `if`.
+3. **Publicatiestap** in de lus van de motor die eigenaar is: die schrijft de
+   gedeelde globals, de ander schrijft ze niet. Zo maakt de volgorde waarin de
+   twee intervallen vuren niet uit.
 4. **Eigen filtertoestand voor de fork** (§2).
 5. **Redencodes.** Gelukkig bijna gratis: upstream's `Reason` 0–14 in
    `oq_power_house_dispatch_logic.h:18` is **identiek** aan de codes die
@@ -136,20 +147,23 @@ Het moment van omschakelen is het enige echt nieuwe risico. De nieuwe motor heef
 een warme toestand, maar kan meteen een andere stand willen — en in Power
 House-modus zit er geen ±1-begrenzing tussen.
 
-Voorstel, drie regels, alle drie host-testbaar:
+Drie regels, alle drie host-getest:
 
 1. **Settletijd 180 s** (gelijk aan upstream's topologie-hold). In dat venster mag
    de binnenkomende motor geen draaiende HP stoppen en geen stilstaande HP
-   starten. Alleen standwijzigingen binnen de al draaiende set.
+   starten. Alleen standwijzigingen binnen de al draaiende set. Het venster gaat
+   alleen aan als er op het moment van de wissel werkelijk een compressor draait.
 2. **Maximaal ±1 stand per ronde** in dat venster, per unit.
 3. **Uitstel tijdens defrost of oliehold.** De keuze in de select geldt meteen,
    maar wordt pas doorgevoerd op de eerste ronde waarin geen van beide units in
-   defrost of oliehold zit. `Power House engine active` publiceert dan
-   "omschakeling in behandeling".
+   defrost of oliehold zit. `Power House motor` publiceert dan "omschakeling in
+   behandeling".
 
-Uitzondering op alle drie: een beschermingsstop (low-flow, watertemperatuur,
-druk, persgas) gaat altijd voor. Die zit achter de naad en hoeft dus niets te
-weten van de omschakeling.
+Een beschermingsstop (low-flow, watertemperatuur, druk, persgas) gaat hier
+dwars doorheen zonder dat deze begrenzing daar iets van hoeft te weten: die
+grijpt verderop in de keten in, op de aanvraag die hier uitkomt. De begrenzing
+hierboven kan een stand dus wel vasthouden in de *aanvraag*, maar niet in wat de
+actuator uiteindelijk schrijft.
 
 ## 7. Automatische terugval
 
@@ -157,13 +171,15 @@ De v0.50-motor stuurt niet als:
 
 | Voorwaarde | Wat er gebeurt |
 |---|---|
-| Frequentietabel van een HP onbekend | fork stuurt, reden "tabel onbekend" |
-| `output_valid` onwaar (ongeldige invoer) | fork stuurt, reden "ongeldige invoer" |
+| Frequentietabel van een HP onbekend | fork stuurt, reden "frequentietabel onbekend" |
+| De v0.50-lus meldt zich een minuut niet | fork neemt over, reden "v0.50-lus zwijgt" |
 | Power House niet actief (koelen, DHW, CM5) | niemand; dit pad ligt stil |
 
-Terugval is stil in de regeling maar luid in de diagnostiek: de reden staat in
-`Power House engine active` en gaat naar de log. Zonder tabel is het Hz-model
-namelijk blind, en dan is doorgaan erger dan terugvallen.
+Terugval is stil in de regeling maar zichtbaar in de diagnostiek: de reden staat
+in `Power House motor`. Zonder tabel is het Hz-model namelijk blind, en dan is
+doorgaan erger dan terugvallen.
+
+**Een onbruikbaar prestatiemodel geeft de besturing níet terug** — zie §11.
 
 Na een herstart geldt de keuze weer (`restore_value: true`). De tabel wordt
 ongeveer 20 s na opstart gelezen; tot dat moment stuurt de fork. Dat is meteen het
@@ -185,13 +201,16 @@ sensoren die er nu al zijn (zie
 | 5 | Nul keuzes boven `Day max level` / `Silent max level` of op een uitgesloten stand | de standregels moeten door de adapter heen komen |
 | 6 | Elk verschil valt in een van de vijf bekende categorieën (ritme, filter, Hz-model, minimale uit-tijd/startlimiet, snelle start) | een verschil dat je niet kunt verklaren, is een bug tot het tegendeel blijkt |
 
-Drempel 4 en 6 zijn met de huidige entiteiten alleen met de hand te controleren.
-Twee kleine tellers maken dat een getal — die horen in stap 3a thuis, of eerder
-als je de week nog moet gaan draaien:
+Voor drempel 4 en 6 bestaan de tellers inmiddels:
 
-- `PH v0.50 schaduw - zou niets starten terwijl er gestookt wordt (min)`
-- `PH v0.50 schaduw - standwissels per uur` (per unit), ook de maat voor de
+- `PH v0.50 schaduw - zou niets starten (min)` — hoort 0 te blijven
+- `PH v0.50 schaduw - standwissels HP1/HP2 (per uur)` — ook de maat voor de
   ritmekeuze in §5
+
+Ze blijven ook ná het omzetten werken: de vergelijking draait dan om. De
+schaduwentiteiten tonen nog steeds wat v0.50 kiest, en `wijkt af` vergelijkt dat
+met wat de fork zou hebben gedaan — die blijft doorrekenen in
+`oq_ph_fork_request_hp1/hp2_level`.
 
 ## 9. De terugweg
 
@@ -203,22 +222,62 @@ beide motoren er staan, kost terugschakelen een klik. Ruim je de fork-rekenkern
 op, dan kost het een flash. Dat is pas verstandig na een heel stookseizoen op
 v0.50.
 
-## 10. Opdeling en tests
+## 10. Wat er gebouwd is
 
-| PR | Inhoud | Risico |
-|---|---|---|
-| 3a | select, engine-active-sensor, publicatiestap, eigen filtertoestand, redencode 15, omschakelbeveiliging, de twee tellers uit §8 | standaard `fork`, dus geen gedragswijziging tot je zelf omzet |
-| 3b | eventueel de standaard omzetten naar `v0.50` | pas na de drempels van §8 |
-| 4 | opruimen van de fork-rekenkern | pas na een stookseizoen |
+| Bestand | Rol |
+|---|---|
+| `openquatt/includes/oq_power_house_engine.h` | eigenaarskeuze, terugval, waakhond en de begrenzing na een wissel; ESPHome-vrij |
+| `tests/host/oq_power_house_engine_test.cpp` | host-test daarvan |
+| `openquatt/oq_power_house_v050_shadow.yaml` | de select, `Power House motor`, en de publicatiestap van de v0.50-motor |
+| `openquatt/oq_power_house_strategy.yaml` | schrijft alleen nog als de fork eigenaar is; eigen filtertoestand |
+| `openquatt/oq_thermal_request_control.yaml` | redencodes 14 en 15 erbij |
 
-Host-tests bij 3a:
+Entiteiten:
 
-- omschakelbeveiliging: geen start en geen stop binnen de settletijd, ±1 per
-  ronde, venster loopt af, beschermingsstop gaat er dwars doorheen
-- uitstel tijdens defrost en oliehold, en dat de omschakeling daarna alsnog
-  doorgaat
-- terugval bij onbekende tabel en bij ongeldige invoer, in beide richtingen
-- redencode 15 vertaalt naar `oil_return_hold`
+| Entiteit | Wat |
+|---|---|
+| `select.openquatt_power_house_engine` | `fork` of `v0.50`, standaard v0.50, blijft over een herstart |
+| `sensor.openquatt_power_house_motor` | wie er werkelijk stuurt, plus de reden als dat afwijkt |
+| `PH v0.50 schaduw - startintentie` | `none` / `room_demand` / `setpoint_raise` / `room_recovery` — altijd, niet alleen bij een snelle start |
+| `PH v0.50 schaduw - ondergrens` | het vermogen waarop de vraag blijft hangen tijdens room_recovery |
 
-Alles in `tests/host/`, zoals de rest. Lokaal is er geen compiler; CI is de
-bouwcontrole.
+Host-tests dekken: geen venster bij het opstarten, terugval zonder tabel en
+terug, een hold die de eigenaar juist niet verandert, een wissel zonder
+draaiende compressor (geen venster), uitstel tijdens defrost, de begrenzing zelf
+(geen start, geen stop, ±1 per ronde, venster loopt af), de waakhond en een
+`millis()`-omslag.
+
+Stap 4 — het opruimen van de fork-rekenkern — blijft staan waar het stond: pas na
+een heel stookseizoen. Zolang beide motoren er zijn, kost terugschakelen een klik
+in plaats van een flash.
+
+## 11. Afwijkingen van dit voorstel
+
+Drie dingen zijn bij het bouwen anders geworden. De eerste was een fout in het
+voorstel.
+
+**1. Een onbruikbaar prestatiemodel geeft de besturing niet terug.** Het voorstel
+zei: `output_valid` onwaar → fork stuurt. Dat zou om de haverklap wisselen. Staan
+beide units stil in hun minimale uit-tijd, dan is er geen kandidaat die kan
+draaien, en dan meldt de dispatch `performance_valid = false` — precies de
+toestand die na élke stop optreedt. Upstream houdt in dat geval de draaiende
+standen vast (`oq_power_house_dispatch_logic.h`, de `!in.performance_valid`-tak),
+en dat is het gewenste gedrag. De v0.50-motor blijft dus eigenaar en publiceert
+die vastgehouden standen; `Power House motor` meldt "model op hold". Alleen een
+onbekende frequentietabel geeft de besturing echt terug.
+
+**2. Het settle-venster gaat alleen aan als er een compressor draait.** Anders
+zou de eerste wissel na het opstarten — de fork stuurt tot de tabel binnen is,
+daarna v0.50 — elke start drie minuten tegenhouden. Er valt niets te beschermen
+als er niets draait.
+
+**3. De entiteitsnamen houden het woord "schaduw".** Hernoemen breekt dashboards,
+het HA-pakket en de historie waarin je de twee motoren juist vergelijkt. `Power
+House motor` zegt wie er stuurt; de schaduwnamen slaan op de v0.50-motor,
+ongeacht of hij aan het stuur zit.
+
+Verder: de v0.50-motor publiceert de **begrensde** vraag in `oq_demand_filtered`
+(na `oq_power_cap_f`), waar de fork daar de onbegrensde zet. Dat raakt de
+OpenTherm-modulatie en de sensor `Demand filtered`, niet de standkeuze —
+`oq_thermal_request_control.yaml` zegt zelf dat producenten de cap al toepassen
+voor ze publiceren.

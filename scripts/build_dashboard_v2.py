@@ -684,8 +684,13 @@ V_DIAG = view(
     # er valt niets te bedienen, alleen iets uit te zoeken.
     grid(
         head('mdi:ab-testing', 'Power House v0.50 (schaduw)'),
-        note('De v0.50-rekenkern draait mee en publiceert wat hij zou kiezen. Hij stuurt '
-             '**niets** aan.\n\n'
+        note('Twee motoren rekenen altijd allebei; **Motor kiezen** bepaalt wie de aanvraag '
+             'schrijft. Staat die op `fork`, dan is de v0.50-kant een schaduwberekening die '
+             'niets aanstuurt. **Motor nu** zegt wie er werkelijk stuurt — die kan afwijken '
+             'van de keuze, bijvoorbeeld zolang de frequentietabel nog niet gelezen is.\n\n'
+             'De entiteiten houden het woord "schaduw" in hun naam; dat is de v0.50-kant, '
+             'of hij nu stuurt of niet. `Wijkt af` vergelijkt hem altijd met wat de fork '
+             'zou doen.\n\n'
              'Kijk eerst of de frequentietabel gevuld is: zonder tabel rekent het model op '
              'niets. Daarna is "afwijkend" het hoofdcijfer.\n\n'
              '**"Zou niets starten" hoort 0 te blijven.** Dat is de enige afwijking die een '
@@ -697,7 +702,10 @@ V_DIAG = view(
              '60 s, geen `Demand filter ramp up`, model op Hz in plaats van op stand, geen '
              'HP gekozen tijdens minimale uit-tijd of startlimiet, en een snellere eerste '
              'start.'),
-        rows('Waar het op aankomt',
+        rows('Wie stuurt er',
+             ('select.openquatt_power_house_engine', 'Motor kiezen'),
+             ('sensor.openquatt_power_house_motor', 'Motor nu'),
+             'Waar het op aankomt',
              ('sensor.openquatt_ph_v0_50_schaduw_zou_niets_starten_min', 'Zou niets starten (min)'),
              ('sensor.openquatt_ph_v0_50_schaduw_standwissels_hp1_per_uur', 'Standwissels HP1/uur'),
              ('sensor.openquatt_ph_v0_50_schaduw_standwissels_hp2_per_uur', 'Standwissels HP2/uur'),
@@ -705,11 +713,13 @@ V_DIAG = view(
              ('binary_sensor.openquatt_ph_v0_50_schaduw_wijkt_af', 'Wijkt af'),
              ('sensor.openquatt_ph_v0_50_schaduw_verschil_huidig_v0_50', 'Verschil'),
              ('sensor.openquatt_ph_v0_50_schaduw_reden', 'Reden'),
+             ('sensor.openquatt_ph_v0_50_schaduw_startintentie', 'Startintentie'),
              ('sensor.openquatt_ph_v0_50_schaduw_snelle_start', 'Snelle start'),
              ('sensor.openquatt_ph_v0_50_schaduw_hp1_stand', 'HP1 stand'),
              ('sensor.openquatt_ph_v0_50_schaduw_hp2_stand', 'HP2 stand'),
              'Waar dat vandaan komt',
              ('sensor.openquatt_ph_v0_50_schaduw_p_req', 'P_req'),
+             ('sensor.openquatt_ph_v0_50_schaduw_ondergrens', 'Ondergrens'),
              ('sensor.openquatt_ph_v0_50_schaduw_vraag_f', 'Vraag f'),
              ('sensor.openquatt_ph_v0_50_schaduw_verwacht_thermisch_vermogen', 'Verwacht vermogen'),
              ('sensor.openquatt_ph_v0_50_schaduw_capaciteit', 'Capaciteit'),
