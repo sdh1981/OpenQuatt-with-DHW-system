@@ -17,7 +17,7 @@ Elf tabs die de firmware-modules volgen: Overzicht, DHW, Energie, Flow, Warmtere
 
 ### V2
 
-> **Vereist firmware v0.60.0 of nieuwer.** V2 verwijst naar entiteiten uit de cycling monitor (v0.58) en het instellingen-vangnet (v0.60). Draait er oudere firmware, dan zie je bij die kaarten "Entiteit niet gevonden" — en verschijnt de rustmelding op de eerste tab nooit, omdat haar conditie aan twee van die entiteiten hangt. **Flash eerst, importeer daarna.**
+> **Vereist firmware v0.63.0 of nieuwer.** V2 verwijst naar entiteiten uit de cycling monitor (v0.58), het instellingen-vangnet (v0.60), de ODU-frequentiekromme (v0.62) en de Power House-omschakelaar (v0.63). Draait er oudere firmware, dan zie je bij die kaarten "Entiteit niet gevonden" — en verschijnt de rustmelding op de eerste tab nooit, omdat haar conditie aan twee van die entiteiten hangt. **Flash eerst, importeer daarna.**
 
 Zeven tabs, ingedeeld naar wat je aan het doen bent in plaats van naar waar de code staat:
 
