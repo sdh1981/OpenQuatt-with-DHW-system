@@ -248,7 +248,7 @@ Hoofdschakelaar voor de drie automatische triggers. Hij staat bewust uit: alle d
 
 #### `DHW boost reden`
 
-Waarom de lopende boost draait, vastgelegd bij de start. Mogelijke waarden: `Handmatige snelboost`, `Natraject na HP-fase - element maakt af`, `Solar boost - bron-schakelaar (handmatig)`, `Solar boost - HA-proxy`, `Solar boost - goedkoop tarief`, `Solar boost - PV-export` en `Geen boost actief`.
+Waarom de lopende boost draait, vastgelegd bij de start. Mogelijke waarden: `Handmatige snelboost`, `Natraject na HP-fase - element maakt af`, `Snelboost genegeerd - tank al op doel`, `Solar boost - bron-schakelaar (handmatig)`, `Solar boost - HA-proxy`, `Solar boost - goedkoop tarief`, `Solar boost - PV-export` en `Geen boost actief`.
 
 ### Warmtepomp mee in de boost
 
@@ -273,6 +273,18 @@ Beide warmtepompen en het element tegelijk, voor snel herstel van de tank.
 - Negeert het tijdvenster en het dure-urenvenster.
 - Start niet bij een fout, lockout of HP-fout, of als de tanktop al op het snelboostdoel zit.
 - Single-HP mode geldt niet.
+
+**Midden in een lopende cyclus**
+- Mag. Draait er al een gewone cyclus of een natraject, dan gaat die meteen over
+  in een snelboost: het element erbij en het doel omhoog naar 60 °C. De klep
+  staat dan al op DHW, dus er is geen wachttijd.
+- De warmtepompen komen erbij zolang de tanktop onder de 55 °C zit. Heeft de
+  persgas- of water-uitbewaking ze er net uitgehaald, dan blijven ze eruit en
+  maakt het element het alleen af — opnieuw opstarten in een hete tank levert
+  alleen drukpieken op.
+- De 90 minuten beginnen opnieuw bij het omschakelen, want het doel verandert.
+- Is de tank al op het snelboostdoel, dan gebeurt er niets en meldt
+  `DHW boost reden` dat ook: "Snelboost genegeerd - tank al op doel".
 
 **Tijdens de boost**
 - **Warmtepompen stoppen** bij tanktop ≥ `DHW boost now HP stop` (**55 °C**), of zodra bij een van beide units het persgas boven 90 °C of de water-uit boven 57 °C komt (dezelfde grenzen als de assist). Binnen dezelfde boost starten ze niet opnieuw.

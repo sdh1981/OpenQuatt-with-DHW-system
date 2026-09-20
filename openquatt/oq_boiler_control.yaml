@@ -2718,6 +2718,7 @@ text_sensor:
       switch (id(oq_dhw_boost_reason_code)) {
         case 1:  return std::string("Handmatige snelboost");
         case 2:  return std::string("Natraject na HP-fase - element maakt af");
+        case 3:  return std::string("Snelboost genegeerd - tank al op doel");
         case 10: return std::string("Solar boost - bron onbekend");
         case 11: return std::string("Solar boost - bron-schakelaar (handmatig)");
         case 12: return std::string("Solar boost - HA-proxy");
@@ -3955,10 +3956,18 @@ interval:
           id(oq_dhw_max_boost_active) = max_boost_now;
           // Knop dooft zodra de boost voorbij is, zodat hij niet blijft staan
           // en meteen een volgende cyclus forceert.
-          if (!max_boost_now && id(oq_dhw_boost_now).state &&
-              out.state == oq_dhw::State::IDLE_CV) {
+          //
+          // Pas vanaf de TWEEDE tik in IDLE_CV. Deze regel liep in dezelfde tik
+          // waarin de machine naar IDLE_CV sprong, dus voordat IDLE_CV ooit de
+          // startvoorwaarden had gezien. Een druk op de knop tijdens een lopende
+          // cyclus werd daardoor aan het eind stilletjes weggegooid.
+          static bool boost_off_state_was_idle = true;
+          const bool boost_off_state_is_idle = out.state == oq_dhw::State::IDLE_CV;
+          if (!max_boost_now && id(oq_dhw_boost_now).state && boost_off_state_is_idle &&
+              boost_off_state_was_idle) {
             id(oq_dhw_boost_now).turn_off();
           }
+          boost_off_state_was_idle = boost_off_state_is_idle;
 
           // ----- Boost-reden vastleggen -----
           // De solar-trigger wordt gelatcht bij het begin van de boost. Zonder
@@ -3975,7 +3984,13 @@ interval:
           }
 
           if (out.state != oq_dhw::State::DHW_BOOST) {
-            id(oq_dhw_boost_reason_code) = 0;
+            // Knop aan terwijl er geen boost loopt: zeg waarom. Anders staat er
+            // "Geen boost actief" en lijkt de knop kapot terwijl hij netjes
+            // weigert omdat er niets te verwarmen valt.
+            const bool boost_requested_idle =
+                id(oq_dhw_boost_now).state && !max_boost_now &&
+                !std::isnan(in.tank_top_c) && in.tank_top_c >= cfg.max_boost_target_c;
+            id(oq_dhw_boost_reason_code) = boost_requested_idle ? 3 : 0;
           } else if (max_boost_now) {
             id(oq_dhw_boost_reason_code) = 1;
           } else if (solar_boost_now) {

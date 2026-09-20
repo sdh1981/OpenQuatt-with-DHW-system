@@ -316,6 +316,20 @@ class Controller {
         break;
 
       case State::DHW_HEAT_PUMP: {
+        // Snelboost tijdens een lopende cyclus. De klep staat al op DHW, dus het
+        // element mag meteen aan; er is geen reden de gebruiker te laten wachten
+        // tot de HP-fase klaar is. Dezelfde blokkades als bij een start vanuit
+        // IDLE_CV, en alleen zinvol onder het snelboost-doel.
+        //
+        // De vlag wordt hier gezet en niet in de YAML. Dat was juist het bezwaar
+        // tegen opwaarderen: vanuit de YAML krijg je duo-inzet zonder de
+        // bijbehorende grenzen. Vanuit de controller komen de snelboost-grenzen
+        // (HP-stop en elementdoel) meteen mee.
+        if (upgrade_to_max_boost_(in, cfg)) {
+          transition_(State::DHW_BOOST, in.now_ms);
+          break;
+        }
+
         // Decide which tank sensor drives the HP stop. Bottom-based stop
         // (when enabled and bottom sensor is plausible) ensures the full tank
         // is reheated through every cycle. Falls back to top-stop transparently
@@ -353,6 +367,13 @@ class Controller {
           transition_(State::IDLE_CV, in.now_ms);
           reset_cycle_flags_();
           break;
+        }
+        // Opwaarderen van een gewone of solar boost naar een snelboost: hoger
+        // elementdoel en de HP's erbij. De looptijd begint opnieuw, want het
+        // doel verandert -- anders kan een druk op minuut 80 meteen in de
+        // 90-minuten-grens lopen en lijkt de knop stuk.
+        if (upgrade_to_max_boost_(in, cfg)) {
+          transition_(State::DHW_BOOST, in.now_ms);
         }
         // Bij de snelboost geldt een eigen, hogere HP-grens (default 55 C) en
         // een hogere doeltemperatuur voor het element (default 60 C). De HP's
@@ -559,6 +580,26 @@ class Controller {
         (in.now_ms - cycle_end_ms_) < cfg.min_cycle_rest_ms)
       return false;
     return plausible_temp_(in.tank_top_c, cfg) && (in.tank_top_c < cfg.start_top_c);
+  }
+
+  // Opwaarderen naar snelboost vanuit een lopende cyclus. Geeft true als de
+  // vlaggen zijn gezet; de aanroeper regelt de toestandsovergang.
+  //
+  // De HP-assist komt er alleen bij als dat ook veilig is: onder de eigen
+  // snelboost-grens voor de tanktop, en niet terwijl de persgas-/water-uit
+  // bewaking de HP's er net heeft uitgehaald. Zo blijft de regel overeind dat
+  // opnieuw opstarten in een al hete tank alleen drukpieken oplevert, zonder de
+  // expliciete opdracht van de gebruiker te negeren.
+  bool upgrade_to_max_boost_(const Inputs &in, const Config &cfg) {
+    if (active_max_boost_ || !in.max_boost_request) return false;
+    if (fault_latched_ || in.lockout_active || in.hp_fault_active) return false;
+    if (!plausible_temp_(in.tank_top_c, cfg) || in.tank_top_c >= cfg.max_boost_target_c) return false;
+    active_max_boost_ = true;
+    active_solar_boost_ = false;
+    if (!in.hp_thermal_limit_active && in.tank_top_c < cfg.max_boost_hp_stop_top_c) {
+      boost_hp_assist_active_ = true;
+    }
+    return true;
   }
 
   // Handmatige snelboost. Zelfde blokkades als de andere starts, en alleen
