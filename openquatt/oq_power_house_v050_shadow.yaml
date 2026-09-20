@@ -2,10 +2,18 @@
 # OpenQuatt - Power House v0.50.0 in SCHADUW
 # ==============================================================================
 #
-# Rekent upstream's Power House (v0.50.0) naast de huidige Power House mee en
-# laat zien wat hij zou kiezen. Stuurt NIETS aan: de warmtepompen blijven op de
-# huidige Power House lopen. Zie openquatt/includes/oq_power_house_v050_shadow.h
-# en docs/power-house-v050-overname.md.
+# Upstream's Power House (v0.50.0) als tweede motor. Beide motoren rekenen
+# altijd; "Power House engine" bepaalt wie de aanvraag mag schrijven. Staat hij
+# op fork, dan is dit een schaduwberekening die niets aanstuurt.
+#
+# De entiteitsnamen houden het woord "schaduw" -- die zijn niet hernoemd toen de
+# omschakelaar erbij kwam, zodat dashboards en historie blijven werken. "Power
+# House motor" zegt wie er werkelijk stuurt.
+#
+# Zie openquatt/includes/oq_power_house_v050_shadow.h,
+# openquatt/includes/oq_power_house_engine.h,
+# docs/power-house-v050-overname.md en
+# docs/power-house-v050-stap3-omschakelaar.md.
 #
 # Waar kijken:
 #   "wijkt af" en "verschil"   waar en hoe de keuze verschilt van de huidige
@@ -46,6 +54,57 @@ interval:
               (int) roundf(${oq_defrost_comp_min_f}),
               (int) roundf(${oq_defrost_comp_boost_steps}),
           });
+
+          // ----- Wie stuurt er -----
+          // Deze aanroep is ook de hartslag voor de waakhond: hoort de fork hier
+          // een minuut niets van, dan neemt hij het over.
+          const auto &o = oq_ph_v050::shadow().output();
+          const bool tables_known = oq_odu_runtime_frequency::snapshot_reader(true).known() &&
+                                    oq_odu_runtime_frequency::snapshot_reader(false).known();
+          const bool handover_blocked = id(hp1_4_way_valve).state || id(hp2_4_way_valve).state ||
+                                        id(hp1_prot_oil_return).state || id(hp2_prot_oil_return).state;
+          const uint8_t selected = (id(oq_ph_engine_select).has_state() &&
+                                    id(oq_ph_engine_select).current_option() == "v0.50")
+                                       ? oq_ph_engine::V050
+                                       : oq_ph_engine::FORK;
+          const bool compressors_running =
+              id(hp1_last_applied_level) > 0 || id(hp2_last_applied_level) > 0;
+          oq_ph_engine::decide_owner(
+              {now_ms, selected, o.active, o.output_valid, tables_known, handover_blocked, compressors_running});
+
+          // ----- Aansturen -----
+          // Alleen als deze motor eigenaar is. De fork-lus schrijft dan niet en
+          // blijft doorrekenen; zie openquatt/includes/oq_power_house_engine.h.
+          // Ook bij een hold publiceren: de dispatch geeft dan de vastgehouden
+          // standen terug, en dat is beter dan een bevroren oude aanvraag.
+          if (oq_ph_engine::v050_drives(now_ms) && o.active) {
+            const auto levels = oq_ph_engine::settle_clamp(now_ms, id(hp1_last_applied_level),
+                                                           id(hp2_last_applied_level), o.hp1_level, o.hp2_level);
+            id(oq_ph_request_hp1_level) = levels.hp1;
+            id(oq_ph_request_hp2_level) = levels.hp2;
+            id(oq_ph_request_owner_hp) = o.owner_hp;
+            // 6 = hold_active: de begrenzing na een wissel, niet de dispatchreden.
+            id(oq_ph_request_reason_code) =
+                (levels.hp1 != o.hp1_level || levels.hp2 != o.hp2_level) ? 6 : o.reason;
+            id(oq_demand_filtered) = o.demand;
+            id(oq_heating_demand_filtered) = o.demand;
+          }
+
+select:
+  - platform: template
+    id: oq_ph_engine_select
+    name: "Power House engine"
+    icon: mdi:engine-outline
+    optimistic: true
+    restore_value: true
+    options:
+      - "fork"
+      - "v0.50"
+    initial_option: "v0.50"
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_power_house_v050
+      sorting_weight: 0
 
 sensor:
   - platform: template
@@ -178,6 +237,25 @@ sensor:
 
   # De enige afwijking die een koud huis oplevert. Elk ander verschil is een
   # keuze die je kunt wegen; deze niet. Blijft 0 tot de frequentietabel er is.
+  # De ondergrens waar de vraag op blijft hangen tijdens room_recovery: het
+  # thermisch vermogen van de laagste stand die je toestaat. Leeg als hij niet telt.
+  - platform: template
+    id: oq_ph_v050_floor_w
+    name: "PH v0.50 schaduw - ondergrens"
+    icon: mdi:arrow-collapse-down
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: 10s
+    lambda: |-
+      const auto &o = oq_ph_v050::shadow().output();
+      return o.active ? o.floor_w : NAN;
+    web_server:
+      sorting_group_id: oq_power_house_v050
+      sorting_weight: 22
+
   - platform: template
     id: oq_ph_v050_no_start_minutes
     name: "PH v0.50 schaduw - zou niets starten (min)"
@@ -296,6 +374,47 @@ text_sensor:
     web_server:
       sorting_group_id: oq_power_house_v050
       sorting_weight: 13
+
+  # "snelle start" hierboven staat per definitie op none zodra er een compressor
+  # draait. Deze staat er altijd, en verklaart daarmee het vlakke vermogen:
+  # tijdens room_recovery ligt er een ondergrens op de vraag.
+  - platform: template
+    id: oq_ph_v050_intent_reason
+    name: "PH v0.50 schaduw - startintentie"
+    icon: mdi:target
+    entity_category: diagnostic
+    update_interval: 10s
+    lambda: |-
+      const auto &o = oq_ph_v050::shadow().output();
+      if (!o.active) return std::string("inactief");
+      return std::string(oq_heat_intent::reason_name(static_cast<oq_heat_intent::Reason>(o.intent_reason)));
+    web_server:
+      sorting_group_id: oq_power_house_v050
+      sorting_weight: 14
+
+  - platform: template
+    id: oq_ph_engine_active
+    name: "Power House motor"
+    icon: mdi:engine-outline
+    entity_category: diagnostic
+    update_interval: 10s
+    lambda: |-
+      const uint32_t now_ms = (uint32_t) millis();
+      const auto &s = oq_ph_engine::state();
+      const bool fork = oq_ph_engine::fork_drives(now_ms);
+      std::string text = fork ? std::string("fork stuurt") : std::string("v0.50 stuurt");
+      // Bewust zonder settling(): die zet het venster uit als bijwerking, en een
+      // sensor hoort niets te veranderen.
+      if (s.settle_armed && (uint32_t)(now_ms - s.owner_since_ms) < oq_ph_engine::kSettleMs)
+        text += " (omschakelen)";
+      const char *why = (fork && s.owner == oq_ph_engine::V050)
+                            ? oq_ph_engine::fallback_name(oq_ph_engine::WATCHDOG)
+                            : oq_ph_engine::fallback_name(s.fallback);
+      if (why[0] != '\0') text += std::string(" - ") + why;
+      return text;
+    web_server:
+      sorting_group_id: oq_power_house_v050
+      sorting_weight: 0
 
   - platform: template
     id: oq_ph_v050_hp1_table

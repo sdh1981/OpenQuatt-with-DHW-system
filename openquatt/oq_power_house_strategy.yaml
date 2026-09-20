@@ -62,6 +62,25 @@ globals:
     restore_value: false
     initial_value: '0'
 
+  # Wat deze motor zou willen, los van de vraag of hij mag schrijven. Stuurt de
+  # v0.50-motor, dan is dit de schaduw -- dezelfde vergelijking, andersom.
+  - id: oq_ph_fork_request_hp1_level
+    type: int
+    restore_value: false
+    initial_value: '0'
+
+  - id: oq_ph_fork_request_hp2_level
+    type: int
+    restore_value: false
+    initial_value: '0'
+
+  # Eigen filtertoestand van het stappenfilter. oq_demand_filtered is gedeeld en
+  # kan van de andere motor zijn.
+  - id: oq_ph_fork_demand_filtered
+    type: int
+    restore_value: false
+    initial_value: '0'
+
   - id: oq_ph_request_owner_hp
     type: int
     restore_value: false
@@ -1183,10 +1202,16 @@ interval:
           const bool active = (cm_code != 5) && (id(oq_heat_mode_code) != 1);
           if (!active) {
             id(oq_ph_request_last_loop_ms) = 0;
+            // Onvoorwaardelijk, ook als de v0.50-motor stuurt: Power House ligt
+            // stil, dus via dit pad hoort er niets te draaien. Beide motoren
+            // zijn het daar altijd over eens.
             id(oq_ph_request_hp1_level) = 0;
             id(oq_ph_request_hp2_level) = 0;
             id(oq_ph_request_owner_hp) = 0;
             id(oq_ph_request_reason_code) = 0;
+            id(oq_ph_fork_request_hp1_level) = 0;
+            id(oq_ph_fork_request_hp2_level) = 0;
+            id(oq_ph_fork_demand_filtered) = 0;
             id(oq_phouse_last_ms) = 0;
             id(oq_phouse_last_w) = 0.0f;
             id(oq_phouse_comfort_memory_c) = 0.0f;
@@ -1603,7 +1628,10 @@ interval:
           if (ramp_up_step_min < 1) ramp_up_step_min = 1;
           if (ramp_up_step_min > demand_max_f) ramp_up_step_min = demand_max_f;
 
-          int f = id(oq_demand_filtered);
+          // Eigen filtertoestand, niet de gedeelde global: stuurt de v0.50-motor,
+          // dan staat in oq_demand_filtered diens vraag en zou dit filter zichzelf
+          // op andermans getal baseren.
+          int f = id(oq_ph_fork_demand_filtered);
           f = std::max(0, std::min(demand_max_f, f));
           id(oq_demand_filtered_prev) = f;
 
@@ -1622,8 +1650,12 @@ interval:
           }
 
           f = std::max(0, std::min(demand_max_f, f));
-          id(oq_demand_filtered) = f;
-          id(oq_heating_demand_filtered) = f;
+          id(oq_ph_fork_demand_filtered) = f;
+          const bool fork_drives = oq_ph_engine::fork_drives(now_ms);
+          if (fork_drives) {
+            id(oq_demand_filtered) = f;
+            id(oq_heating_demand_filtered) = f;
+          }
 
           int f_cap = id(oq_power_cap_f);
           f_cap = std::max(0, std::min(demand_max_f, f_cap));
@@ -2234,10 +2266,26 @@ interval:
           hp2_req = 0;
           #endif
 
-          id(oq_ph_request_hp1_level) = hp1_req;
-          id(oq_ph_request_hp2_level) = hp2_req;
-          id(oq_ph_request_owner_hp) = request_owner_hp;
-          id(oq_ph_request_reason_code) = request_reason_code;
+          // Alleen schrijven als deze motor stuurt. Doet hij dat niet, dan blijft
+          // alles hierboven wel doorrekenen: de v0.32-uitbreidingen (zon-EMA,
+          // tariefslew, PV-slew, raamdetectie) wonen in deze lus en worden door
+          // de v0.50-adapter gelezen. Zie openquatt/includes/oq_power_house_engine.h.
+          id(oq_ph_fork_request_hp1_level) = hp1_req;
+          id(oq_ph_fork_request_hp2_level) = hp2_req;
+          if (fork_drives) {
+            // Vlak na een wissel geen compressor starten of stoppen.
+            const auto levels = oq_ph_engine::settle_clamp(now_ms, id(hp1_last_applied_level),
+                                                           id(${ph_secondary_last_applied_level_id}), hp1_req, hp2_req);
+            if (levels.hp1 != hp1_req || levels.hp2 != hp2_req) {
+              hp1_req = levels.hp1;
+              hp2_req = levels.hp2;
+              request_reason_code = 6;  // hold_active
+            }
+            id(oq_ph_request_hp1_level) = hp1_req;
+            id(oq_ph_request_hp2_level) = hp2_req;
+            id(oq_ph_request_owner_hp) = request_owner_hp;
+            id(oq_ph_request_reason_code) = request_reason_code;
+          }
 
           // ===== v0.32 #1: Self-learning UA estimator =====
           // Estimates the house heat-loss coefficient (W/K) from observed

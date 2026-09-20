@@ -1233,6 +1233,10 @@ interval:
               case 11: request_reason = "no_candidate"; break;
               case 12: request_reason = "defrost_boost"; break;
               case 13: request_reason = "runtime_lead"; break;
+              // 14 en 15 komen alleen van de v0.50-motor; de codes 0-13 zijn in
+              // beide motoren dezelfde (oq_power_house_dispatch_logic.h).
+              case 14: request_reason = "ph_single_topology"; break;
+              case 15: request_reason = "oil_return_hold"; break;
               default: request_reason = "ph_idle"; break;
             }
           }
