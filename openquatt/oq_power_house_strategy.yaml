@@ -2410,11 +2410,20 @@ interval:
             id(oq_phouse_ua_skip_reason) = ua_skip;
           }
 
-          id(oq_strategy_phase_code) = (f > 0) ? 1 : 0;
-          id(oq_strategy_requested_power_w) = id(oq_phouse_req_w);
-          id(oq_strategy_supply_target_temp) = NAN;
-          id(oq_strategy_heat_request_active) = (f > 0);
-          id(oq_strategy_phase_text).publish_state((f > 0) ? "heat" : "idle");
+          // Deze vier horen bij de naad, niet bij de motor. De supervisory beslist
+          // er mee of hij uit CM0 mag komen: oq_strategy_requested_power_w voedt
+          // de low-load-grendel (P_req >= on_w) en heat_request_active de
+          // warmtevraag zelf. Schrijft de verkeerde motor ze, dan vraagt de ene
+          // motor warmte terwijl de supervisory naar het vermogen van de andere
+          // kijkt -- en blijft het systeem in standby staan.
+          if (fork_drives) {
+            id(oq_strategy_phase_code) = (f > 0) ? 1 : 0;
+            id(oq_strategy_requested_power_w) = id(oq_phouse_req_w);
+            id(oq_strategy_supply_target_temp) = NAN;
+            id(oq_strategy_heat_request_active) = (f > 0);
+            const char* phase = (f > 0) ? "heat" : "idle";
+            if (id(oq_strategy_phase_text).state != phase) id(oq_strategy_phase_text).publish_state(phase);
+          }
 
           char debug_buf[200];
           snprintf(

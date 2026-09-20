@@ -34,10 +34,20 @@ Daarnaast vier waarden die de rest van het systeem voedt:
 
 | Global | Waarvoor |
 |---|---|
-| `oq_phouse_req_w` | sensor `Power House – P_req` |
-| `oq_demand_raw` | sensor `Demand raw` |
+| `oq_phouse_req_w` | sensor `Power House – P_req` (blijft van de fork) |
+| `oq_demand_raw` | sensor `Demand raw` (blijft van de fork) |
 | `oq_demand_filtered` | sensor `Demand filtered`, en `oq_ot_slave.yaml:113` (OpenTherm-modulatie) |
 | `oq_heating_demand_filtered` | verwarmingsvraag voor de rest van de keten |
+
+En de strategie-interface, waar de **supervisory** op beslist of hij uit CM0 mag
+komen. Die hoort er net zo goed bij, en dat was bij het bouwen niet meteen
+duidelijk (zie §12):
+
+| Global | Waarvoor |
+|---|---|
+| `oq_strategy_heat_request_active` | de warmtevraag zelf: `heating_req_raw` in `oq_supervisory_controlmode.yaml` |
+| `oq_strategy_requested_power_w` | de low-load-grendel. Die laat pas los boven ongeveer het thermisch vermogen van de laagste stand (`on_w`, tot 2200 W) en valt terug onder `off_w` |
+| `oq_strategy_phase_code` / `oq_strategy_phase_text` | diagnostiek |
 
 **Dat is de hele naad.** De omschakelaar hoeft niets anders te raken.
 
@@ -281,3 +291,38 @@ Verder: de v0.50-motor publiceert de **begrensde** vraag in `oq_demand_filtered`
 OpenTherm-modulatie en de sensor `Demand filtered`, niet de standkeuze —
 `oq_thermal_request_control.yaml` zegt zelf dat producenten de cap al toepassen
 voor ze publiceren.
+
+## 12. Wat er op de hardware misging
+
+Twee dingen kwamen pas boven water toen de v0.50-motor voor het eerst echt
+stuurde. Allebei zaten ze niet in de logica maar in de aansluiting, en allebei
+waren ze in de schaduw onzichtbaar.
+
+**1. De online-vlag stond altijd op false.** `${hp_id}_is_online` begon op false
+en werd alleen gezet door de `on_online`-trigger van `modbus_controller`. Die
+vuurt uitsluitend bij de overgang offline → online, en ESPHome start zelf in de
+online-toestand. Werkte de bus vanaf het opstarten gewoon, dan vuurde die trigger
+nooit. Niemand gebruikte die vlag — behalve de v0.50-kandidaatlogica. Gevolg:
+beide units golden als "mag niet starten", geen kandidaat kon draaien,
+`performance_valid` werd false en de dispatch hield de standen vast op 0. Voor
+altijd. De kandidaatlogica vraagt het nu rechtstreeks aan de controller
+(`get_module_offline()`).
+
+**2. De strategie-interface bleef van de fork.** De supervisory beslist met
+`oq_strategy_heat_request_active` en `oq_strategy_requested_power_w` of hij uit
+CM0 mag komen. Die stonden nog op de waarden van de fork terwijl de v0.50-motor
+de standen schreef. Dus: v0.50 vroeg HP2 op stand 1, en de supervisory keek naar
+het vermogen van de fork, zag dat onder de low-load-grendel liggen en bleef in
+standby. De warmtepomp bleef uit terwijl alle schaduwentiteiten er gezond
+uitzagen.
+
+Wat beide gevallen gemeen hebben: **de schaduw kan een aansluiting niet testen
+die hij niet gebruikt.** Hij rekende jarenlang keurig P_req uit zonder ooit een
+compressor te hoeven starten of een supervisory te hoeven overtuigen. Voor het
+volgende stuk overname is de les: kijk niet alleen of de getallen kloppen, maar
+loop de lijst af van alles wat de oude motor schrijft en zoek uit wie het leest.
+
+Het vangnet uit §7 is hierop toegevoegd: laat de v0.50-motor een kwartier lang
+beide units stilstaan terwijl de fork wil stoken en de kamer onder setpoint zit,
+dan gaat de besturing terug naar de fork en blijft daar tot de gebruiker de keuze
+aanraakt.
