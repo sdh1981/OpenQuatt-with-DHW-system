@@ -88,6 +88,18 @@ interval:
                 (levels.hp1 != o.hp1_level || levels.hp2 != o.hp2_level) ? 6 : o.reason;
             id(oq_demand_filtered) = o.demand;
             id(oq_heating_demand_filtered) = o.demand;
+            // De strategie-interface waar de supervisory op beslist of hij uit
+            // CM0 mag komen. oq_strategy_requested_power_w voedt de
+            // low-load-grendel: die laat pas los boven het thermisch vermogen van
+            // de laagste stand. Stond hier het vermogen van de andere motor, dan
+            // vraagt v0.50 warmte terwijl de supervisory naar de fork kijkt.
+            const bool heat = o.demand > 0;
+            id(oq_strategy_phase_code) = heat ? 1 : 0;
+            id(oq_strategy_requested_power_w) = o.requested_w;
+            id(oq_strategy_supply_target_temp) = NAN;
+            id(oq_strategy_heat_request_active) = heat;
+            const char* phase = heat ? "heat" : "idle";
+            if (id(oq_strategy_phase_text).state != phase) id(oq_strategy_phase_text).publish_state(phase);
           }
 
 select:
