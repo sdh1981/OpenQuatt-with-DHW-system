@@ -38,8 +38,10 @@ Inputs make_inputs(uint32_t now_ms, float top_c, float bottom_c) {
   return in;
 }
 
-// Draait de machine van IDLE_CV naar DHW_HEAT_PUMP: koude tank, klep bevestigt.
+// Draait de machine van IDLE_CV naar DHW_HEAT_PUMP: klep bevestigt, en top_c
+// moet onder de startdrempel (46 C) liggen, anders begint er niets.
 uint32_t run_to_heat_pump(Controller &c, const Config &cfg, uint32_t now_ms, float top_c, float bottom_c) {
+  assert(top_c < cfg.start_top_c && "tank te warm om een cyclus te starten");
   for (int i = 0; i < 20; ++i) {
     const auto out = c.tick(make_inputs(now_ms, top_c, bottom_c), cfg);
     if (out.state == State::DHW_HEAT_PUMP) return now_ms;
@@ -109,19 +111,19 @@ void test_upgrade_from_regular_boost() {
   cfg.hp_max_runtime_ms = 1000U;  // duw de HP-fase snel naar het natraject
   Controller c;
   uint32_t now = 1000U;
-  now = run_to_heat_pump(c, cfg, now, 50.0f, 40.0f);
+  now = run_to_heat_pump(c, cfg, now, 44.0f, 35.0f);
 
   // HP-fase loopt af op de tijd; tank onder boost_target, dus natraject.
   now += 5000U;
-  auto out = c.tick(make_inputs(now, 50.0f, 40.0f), cfg);
+  auto out = c.tick(make_inputs(now, 44.0f, 35.0f), cfg);
   assert(out.state == State::DHW_BOOST);
   assert(!c.max_boost_active());
   assert(out.element_on);          // element maakt af tot boost_target_c (56)
   assert(!out.hp_dhw_request);     // geen assist: die stond uit
 
-  // Nu de knop. Doel wordt 60 en de HP's komen erbij, want 50 < 55.
+  // Nu de knop. Doel wordt 60 en de HP's komen erbij, want 44 < 55.
   now += 2000U;
-  Inputs in = make_inputs(now, 50.0f, 40.0f);
+  Inputs in = make_inputs(now, 44.0f, 35.0f);
   in.max_boost_request = true;
   out = c.tick(in, cfg);
   assert(out.state == State::DHW_BOOST);
@@ -147,13 +149,13 @@ void test_upgrade_respects_thermal_limit() {
   cfg.hp_max_runtime_ms = 1000U;
   Controller c;
   uint32_t now = 1000U;
-  now = run_to_heat_pump(c, cfg, now, 50.0f, 40.0f);
+  now = run_to_heat_pump(c, cfg, now, 44.0f, 35.0f);
   now += 5000U;
-  auto out = c.tick(make_inputs(now, 50.0f, 40.0f), cfg);
+  auto out = c.tick(make_inputs(now, 44.0f, 35.0f), cfg);
   assert(out.state == State::DHW_BOOST);
 
   now += 2000U;
-  Inputs in = make_inputs(now, 50.0f, 40.0f);
+  Inputs in = make_inputs(now, 44.0f, 35.0f);
   in.max_boost_request = true;
   in.hp_thermal_limit_active = true;
   out = c.tick(in, cfg);
