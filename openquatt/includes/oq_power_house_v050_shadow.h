@@ -92,6 +92,10 @@ struct Output {
   float no_start_minutes{0.0f};
   int level_changes_hp1{0};
   int level_changes_hp2{0};
+  // Nu, op dit moment: hij zou beide units stil laten staan terwijl de andere
+  // motor wil stoken en de kamer onder setpoint zit. De vangnet in
+  // oq_power_house_engine.h hangt hieraan.
+  bool starving{false};
 };
 
 class Shadow {
@@ -196,10 +200,14 @@ class Shadow {
     auto& limits = oq_thermal_actuator::shared_start_limits();
     const bool must_stop = id(oq_lowflow_fault_active) || id(oq_water_temp_hard_trip_active);
     const bool startup_inhibit = id(oq_boot_startup_inhibit_active);
-    CandidateInputs c1{hp1_applied,     id(hp1_is_online),    must_stop,
+    // Rechtstreeks aan de modbus_controller vragen in plaats van via de globals:
+    // die hangen aan de on_online-trigger, en die vuurt alleen bij een overgang.
+    const bool hp1_online = !id(hp1).get_module_offline();
+    const bool hp2_online = !id(hp2).get_module_offline();
+    CandidateInputs c1{hp1_applied,     hp1_online,           must_stop,
                        startup_inhibit, now_ms,               id(hp1_last_stop_ms),
                        config.minimum_off_ms, limits[0].remaining_ms(now_ms)};
-    CandidateInputs c2{hp2_applied,     id(hp2_is_online),    must_stop,
+    CandidateInputs c2{hp2_applied,     hp2_online,           must_stop,
                        startup_inhibit, now_ms,               id(hp2_last_stop_ms),
                        config.minimum_off_ms, limits[1].remaining_ms(now_ms)};
     const auto hp1_candidate = candidate_state(c1);
@@ -335,12 +343,15 @@ class Shadow {
     // De enige afwijking die een koud huis oplevert: v0.50 zou beide units stil
     // laten staan terwijl de huidige motor wél stookt en de kamer onder het
     // setpoint zit. Alles daarbuiten is een verschil, dit is een risico.
-    // output_valid moet erbij: zolang de frequentietabel onbekend is, zegt een
-    // keuze van 0 niets over de logica, alleen over de tabel.
-    const bool would_idle = dispatch.output_valid && (dispatch.hp1_level + dispatch.hp2_level) == 0;
+    // Voorwaarde is de tabel, NIET output_valid. Juist als de dispatch zegt dat
+    // hij geen bruikbaar besluit heeft en de standen vasthoudt op 0, moet dit
+    // gaan tellen -- dat is precies de toestand die het huis koud laat.
+    const bool would_idle = frequency.hp1.known && frequency.hp2.known &&
+                            (dispatch.hp1_level + dispatch.hp2_level) == 0;
     const bool now_heating = (active_hp1 + active_hp2) > 0;
     const bool room_below = std::isfinite(room_c) && std::isfinite(setpoint_c) && room_c < setpoint_c;
-    if (would_idle && now_heating && room_below) {
+    this->out_.starving = would_idle && now_heating && room_below;
+    if (this->out_.starving) {
       if (elapsed_usable) this->out_.no_start_minutes += elapsed_min;
       if (!this->no_start_logged_) {
         this->no_start_logged_ = true;

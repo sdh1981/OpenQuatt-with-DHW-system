@@ -154,6 +154,55 @@ void test_inactive_strategy_is_reported() {
   assert(state().fallback == STRATEGY_INACTIVE);
 }
 
+// Het vangnet: laat v0.50 het huis te lang koud staan, dan gaat de besturing
+// terug naar de fork en blijft daar tot de gebruiker de keuze aanraakt.
+void test_starvation_hands_back_and_latches() {
+  reset_state();
+  decide_owner(good(1000U, V050));
+  assert(state().owner == V050);
+
+  auto starve = good(2000U, V050);
+  starve.starving = true;
+  decide_owner(starve);
+  assert(state().owner == V050);  // nog binnen de tijd
+
+  starve.now_ms = 2000U + kStarveMs - 1U;
+  decide_owner(starve);
+  assert(state().owner == V050);
+
+  starve.now_ms = 2000U + kStarveMs;
+  decide_owner(starve);
+  assert(state().owner == FORK);
+  assert(state().fallback == STARVED);
+
+  // Blijft vastzitten, ook als het probleem "weg" lijkt: anders loopt hetzelfde
+  // gat elk kwartier opnieuw.
+  decide_owner(good(2000U + kStarveMs + 60000U, V050));
+  assert(state().owner == FORK);
+  assert(state().fallback == STARVED);
+
+  // De gebruiker raakt de keuze aan: eerst fork, dan weer v0.50 -> vrij.
+  decide_owner(good(2000U + kStarveMs + 70000U, FORK));
+  decide_owner(good(2000U + kStarveMs + 80000U, V050));
+  assert(state().owner == V050);
+  assert(state().fallback == OK);
+}
+
+// Een korte onderbreking mag het vangnet niet laten klappen.
+void test_short_starvation_resets() {
+  reset_state();
+  decide_owner(good(1000U, V050));
+  auto starve = good(2000U, V050);
+  starve.starving = true;
+  decide_owner(starve);
+  decide_owner(good(300000U, V050));  // weer normaal
+  starve.now_ms = 400000U;
+  decide_owner(starve);               // opnieuw beginnen met tellen
+  starve.now_ms = 400000U + kStarveMs - 1U;
+  decide_owner(starve);
+  assert(state().owner == V050);
+}
+
 // millis() loopt om: de waakhond mag daar geen uur van maken.
 void test_watchdog_survives_millis_wrap() {
   reset_state();
@@ -175,6 +224,8 @@ int main() {
   test_settle_window_blocks_start_and_stop();
   test_no_clamp_without_switch();
   test_watchdog_hands_back_to_fork();
+  test_starvation_hands_back_and_latches();
+  test_short_starvation_resets();
   test_inactive_strategy_is_reported();
   test_watchdog_survives_millis_wrap();
   return 0;
