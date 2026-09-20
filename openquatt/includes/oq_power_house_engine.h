@@ -33,6 +33,7 @@ inline constexpr uint8_t MODEL_HOLD = 2;        // prestatiemodel even onbruikba
 inline constexpr uint8_t HANDOVER_PENDING = 3;  // defrost of oliehold: nu niet wisselen
 inline constexpr uint8_t STRATEGY_INACTIVE = 4; // Power House draait niet (koelen, DHW)
 inline constexpr uint8_t WATCHDOG = 5;          // v0.50-lus zwijgt; fork heeft overgenomen
+inline constexpr uint8_t STARVED = 6;           // v0.50 startte niets terwijl het huis afkoelde
 
 // Gelijk aan upstream's topologie-hold: drie minuten waarin een wissel geen
 // compressor start of stopt.
@@ -40,14 +41,24 @@ inline constexpr uint32_t kSettleMs = 180000UL;
 // Zwijgt de v0.50-lus langer dan dit, dan neemt de fork het over. Zonder deze
 // waakhond zou een vastgelopen lus de laatste standen eeuwig laten staan.
 inline constexpr uint32_t kStaleMs = 60000UL;
+// Laat de v0.50-motor zo lang achtereen beide units stilstaan terwijl de fork wil
+// stoken en de kamer onder setpoint zit, dan geeft hij de besturing af -- en
+// krijgt hem niet vanzelf terug. Een regelfout mag een log-regel kosten, geen
+// koud huis. Vijftien minuten is ruim langer dan elke legitieme wachttijd in de
+// keten (minimale uit-tijd 240 s, startlimiet hooguit een kwartier bij zes
+// starts, defrost een paar minuten).
+inline constexpr uint32_t kStarveMs = 900000UL;
 
 struct State {
   uint8_t owner{FORK};
   uint8_t fallback{OK};
   bool initialized{false};
   bool settle_armed{false};
+  bool starve_latched{false};  // vangnet geklapt; pas los als de gebruiker de keuze aanraakt
   uint32_t owner_since_ms{0};
-  uint32_t heartbeat_ms{0};  // laatste teken van leven van de v0.50-lus
+  uint32_t heartbeat_ms{0};    // laatste teken van leven van de v0.50-lus
+  uint32_t starving_since_ms{0};
+  uint8_t last_selected{FORK};
 };
 
 inline State& state() {
@@ -63,6 +74,7 @@ struct OwnerInput {
   bool tables_known{false};        // beide frequentietabellen gelezen
   bool handover_blocked{false};    // defrost of oliehold: een wissel uitstellen
   bool compressors_running{false}; // draait er iets dat een wissel kan verstoren
+  bool starving{false};            // v0.50 laat alles stilstaan terwijl het huis afkoelt
 };
 
 // Aangeroepen door de v0.50-lus, elke tik. Dubbele rol: hartslag voor de
@@ -77,15 +89,36 @@ inline void decide_owner(const OwnerInput& in) {
   State& s = state();
   s.heartbeat_ms = in.now_ms == 0 ? 1U : in.now_ms;
 
+  // Het vangnet: laat v0.50 het huis te lang koud staan, dan gaat de besturing
+  // terug naar de fork en blijft daar. Alleen de gebruiker zet hem terug, door de
+  // keuze aan te raken -- anders zou hetzelfde probleem in een lus blijven lopen.
+  if (in.selected != s.last_selected) {
+    s.starve_latched = false;
+    s.starving_since_ms = 0;
+  }
+  s.last_selected = in.selected;
+  if (in.starving && !s.starve_latched) {
+    if (s.starving_since_ms == 0) {
+      s.starving_since_ms = in.now_ms == 0 ? 1U : in.now_ms;
+    } else if (static_cast<uint32_t>(in.now_ms - s.starving_since_ms) >= kStarveMs) {
+      s.starve_latched = true;
+    }
+  } else if (!in.starving) {
+    s.starving_since_ms = 0;
+  }
+
   uint8_t wanted = in.selected;
   uint8_t status = OK;
-  if (wanted == V050 && !in.tables_known) {
+  if (wanted == V050 && s.starve_latched) {
+    wanted = FORK;
+    status = STARVED;
+  } else if (wanted == V050 && !in.tables_known) {
     wanted = FORK;
     status = TABLE_UNKNOWN;
   } else if (wanted == V050 && !in.output_valid) {
     status = MODEL_HOLD;
   }
-  if (!in.strategy_active) status = STRATEGY_INACTIVE;
+  if (!in.strategy_active && status != STARVED) status = STRATEGY_INACTIVE;
 
   if (!s.initialized) {
     s.initialized = true;
@@ -169,6 +202,7 @@ inline const char* fallback_name(uint8_t fallback) {
     case HANDOVER_PENDING: return "omschakeling in behandeling";
     case STRATEGY_INACTIVE: return "Power House niet actief";
     case WATCHDOG: return "v0.50-lus zwijgt";
+    case STARVED: return "v0.50 startte niets terwijl het huis afkoelde";
     default: return "";
   }
 }

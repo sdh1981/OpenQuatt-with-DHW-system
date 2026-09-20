@@ -121,11 +121,17 @@ globals:
     restore_value: false
     initial_value: '0'
 
-  # Modbus controller online/offline
+  # Modbus controller online/offline.
+  #
+  # Begint op TRUE, en dat is geen slordigheid. ESPHome's modbus_controller start
+  # zelf in de online-toestand (module_offline_{false}) en roept on_online alleen
+  # aan bij de overgang offline -> online. Werkt de bus gewoon vanaf het opstarten,
+  # dan vuurt die trigger dus nooit. Met initial_value false bleef deze vlag na
+  # een herstart voor altijd op false staan terwijl de bus prima liep.
   - id: ${hp_id}_is_online
     type: bool
     restore_value: no
-    initial_value: 'false'
+    initial_value: 'true'
 
 # ----------------------------
 # SELECT

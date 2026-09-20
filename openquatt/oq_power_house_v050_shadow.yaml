@@ -69,8 +69,8 @@ interval:
                                        : oq_ph_engine::FORK;
           const bool compressors_running =
               id(hp1_last_applied_level) > 0 || id(hp2_last_applied_level) > 0;
-          oq_ph_engine::decide_owner(
-              {now_ms, selected, o.active, o.output_valid, tables_known, handover_blocked, compressors_running});
+          oq_ph_engine::decide_owner({now_ms, selected, o.active, o.output_valid, tables_known, handover_blocked,
+                                      compressors_running, o.starving});
 
           // ----- Aansturen -----
           // Alleen als deze motor eigenaar is. De fork-lus schrijft dan niet en
