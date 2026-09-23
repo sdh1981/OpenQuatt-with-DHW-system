@@ -13,7 +13,7 @@
 device_name: "openquatt"                              # Internal ESPHome device ID / hostname base.
 friendly_name: OpenQuatt                              # Display name in Home Assistant / UI.
 project_name: "openquatt.openquatt"                   # ESPHome project identifier shown in firmware metadata.
-project_version: "v0.64.0"                          # Firmware version shown in firmware metadata. Loopt los van de
+project_version: "v0.65.0"                          # Firmware version shown in firmware metadata. Loopt los van de
                                                        # protocol/hardware directory versie (v0.29.0 in de mapnaam).
 release_channel: "main"                               # Firmware release channel shown in diagnostics (`main` or `dev`).
 hp_perf_map_header: "openquatt/includes/hp_perf_map.h" # C++ performance-map header include path.
@@ -29,6 +29,7 @@ power_house_v050_shadow_header: "openquatt/includes/oq_power_house_v050_shadow.h
 power_house_engine_header: "openquatt/includes/oq_power_house_engine.h" # Welke Power House-motor stuurt, met terugval en waakhond.
 odu_runtime_freq_table_logic_header: "openquatt/includes/oq_odu_runtime_frequency_table_logic.h" # Rekenwerk en grenzen van de frequentietabel, ESPHome-vrij en host-getest.
 odu_runtime_freq_table_header: "openquatt/includes/oq_odu_runtime_frequency_table.h" # EXPERIMENTEEL: frequentiekromme tijdelijk in de ODU zetten.
+odu_halfstep_logic_header: "openquatt/includes/oq_odu_halfstep_levels_logic.h" # Halve compressorstanden: rekenwerk en grenzen, ESPHome-vrij en host-getest.
 # GRENDEL op het schrijven van de frequentiekromme. "0" = vergrendeld: de knop
 # "tabel toepassen" doet niets en meldt dat. Ophalen en bewerken blijft altijd
 # werken, want lezen is ongevaarlijk.

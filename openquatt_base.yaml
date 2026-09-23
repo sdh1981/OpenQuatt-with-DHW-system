@@ -63,6 +63,7 @@ esphome:
     # ESPHome kopieert alleen wat hier staat naar src/.
     - ${odu_runtime_freq_table_logic_header}
     - ${odu_runtime_freq_table_header}
+    - ${odu_halfstep_logic_header}
     # Power House-logica uit upstream v0.50.0, als map: ESPHome kopieert de boom
     # met submappen naar src/, zodat de relatieve includes (../odu/, ../../)
     # kloppen. Zie openquatt/includes/v050/.
