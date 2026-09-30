@@ -1,0 +1,185 @@
+# ============================================================================
+# OpenQuatt - halve compressorstanden, FASE 1: droge proef
+# ============================================================================
+#
+# De buitenunit kent tien standen. Door tussen twee frequentiekrommen te
+# wisselen ontstaan halve stappen (kromme A is de fabriekskromme, kromme B ligt
+# er per stand een halve stap boven). Zie oq_odu_halfstep_levels_logic.h.
+#
+# Deze fase SCHRIJFT NIETS. Ze rekent elke 10 s uit welke halve stand het best
+# bij de warmtevraag past, welke kromme daarbij hoort, of een wisseling zou
+# mogen en waarom niet. Het doel is een getal: hoe vaak zou er per uur gewisseld
+# worden. Dat is de enige aanname uit het voorstel die niet uit de firmware
+# komt, en die willen we weten voordat er iets naar een unit gaat.
+#
+# De gesimuleerde kromme wisselt in deze fase wel mee, zodat de teller het
+# ritme laat zien dat je in fase 2 en 3 zou krijgen.
+# ============================================================================
+
+globals:
+  # 0 = kromme A, 1 = kromme B. Gesimuleerd: de unit staat altijd op A.
+  - id: ${hp_id}_hs_curve
+    type: int
+    restore_value: false
+    initial_value: "0"
+  - id: ${hp_id}_hs_request
+    type: int
+    restore_value: false
+    initial_value: "0"
+  - id: ${hp_id}_hs_request_since_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: "0"
+  - id: ${hp_id}_hs_last_switch_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: "0"
+  - id: ${hp_id}_hs_defrost_end_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: "0"
+  - id: ${hp_id}_hs_defrost_prev
+    type: bool
+    restore_value: false
+    initial_value: "false"
+
+sensor:
+  - platform: template
+    id: ${hp_id}_hs_half_level
+    name: "${prefix}Halve stand (proef)"
+    icon: "mdi:stairs"
+    accuracy_decimals: 0
+    update_interval: never
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: template
+    id: ${hp_id}_hs_target_hz
+    name: "${prefix}Halve stand frequentie (proef)"
+    icon: "mdi:sine-wave"
+    unit_of_measurement: "Hz"
+    accuracy_decimals: 0
+    update_interval: never
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+  - platform: template
+    id: ${hp_id}_hs_switches_hour
+    name: "${prefix}Krommewisselingen per uur (proef)"
+    icon: "mdi:swap-horizontal"
+    accuracy_decimals: 0
+    update_interval: never
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+text_sensor:
+  - platform: template
+    id: ${hp_id}_hs_status
+    name: "${prefix}Halve stand status (proef)"
+    icon: "mdi:information-outline"
+    update_interval: never
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: oq_${hp_id}
+
+interval:
+  - interval: 10s
+    then:
+      - lambda: |-
+          using namespace oq_odu_halfstep;
+          const uint32_t now_ms = millis();
+          // Geen global: ESPHome zet esphome.includes achter de globals in main.cpp,
+          // dus een global van een eigen type compileert niet. Deze lambda bestaat
+          // per warmtepomp (het package wordt per unit opgenomen), dus de static ook.
+          static oq_rate::RollingHourCounter switch_counter;
+
+          // --- Ontdooien: de aflopende flank onthouden ---
+          const bool defrosting = id(${hp_id}_defrost).state;
+          if (id(${hp_id}_hs_defrost_prev) && !defrosting) id(${hp_id}_hs_defrost_end_ms) = now_ms;
+          id(${hp_id}_hs_defrost_prev) = defrosting;
+
+          // --- Kromme A: wat er nu in de unit staat, anders de fabriekswaarden ---
+          FrequencyCurve a{0, 30, 39, 49, 55, 61, 67, 72, 79, 85, 90};
+          auto &reader = oq_odu_runtime_frequency::snapshot_reader(${hp_index} == 1);
+          if (reader.known()) {
+            const auto &hz = reader.heating_hz();
+            for (size_t i = 0; i < CURVE_POINTS; i++) a[i] = (float) hz[i];
+          }
+          FrequencyCurve b{};
+          const bool curve_b_usable = build_curve_b(a, b);
+
+          // --- Welke halve stand past het best bij de vraag ---
+          // Doel: wat deze unit nu levert plus het tekort dat de regeling ziet.
+          const float delivering_w = id(${hp_id}_heat_power).has_state() ? id(${hp_id}_heat_power).state : NAN;
+          const float deficit_w = id(oq_P_deficit_w);
+          const float t_amb = id(${hp_id}_outside_temp).has_state() ? id(${hp_id}_outside_temp).state : NAN;
+          const float t_sup = id(${hp_id}_water_out_temp).has_state() ? id(${hp_id}_water_out_temp).state : NAN;
+          const int applied = id(${hp_id}_last_applied_level);
+
+          int want_half = applied > 0 ? (applied * 2 - 1) : 0;  // terugval: de hele stand van nu
+          bool target_known = false;
+          if (curve_b_usable && applied > 0 && !isnan(delivering_w) && !isnan(t_amb) && !isnan(t_sup)) {
+            float target_w = delivering_w + deficit_w;
+            if (target_w < 0.0f) target_w = 0.0f;
+            float best_err = NAN;
+            for (int half = 1; half <= MAX_HALF_LEVEL; half++) {
+              const float hz = frequency_of_half(a, b, half);
+              const float pth = oq_perf::interp_power_th_w_hz(hz, t_amb, t_sup);
+              if (isnan(pth)) continue;
+              const float err = fabsf(pth - target_w);
+              if (isnan(best_err) || err < best_err) {
+                best_err = err;
+                want_half = half;
+                target_known = true;
+              }
+            }
+          }
+
+          // --- Hoe lang staat die aanvraag al stabiel ---
+          if (want_half != id(${hp_id}_hs_request)) {
+            id(${hp_id}_hs_request) = want_half;
+            id(${hp_id}_hs_request_since_ms) = now_ms;
+          }
+
+          // --- De beslissing ---
+          Inputs in{};
+          in.now_ms = now_ms;
+          in.working_mode = id(${hp_id}_working_mode).has_state() ? (uint16_t) id(${hp_id}_working_mode).state : 0;
+          in.defrosting = defrosting;
+          in.oil_return = id(${hp_id}_prot_oil_return).state;
+          in.frequency_limited = id(${hp_id}_freq_limited).state;
+          in.last_start_ms = id(${hp_id}_last_start_ms);
+          in.last_defrost_end_ms = id(${hp_id}_hs_defrost_end_ms);
+          in.requested_half_level = want_half;
+          in.request_since_ms = id(${hp_id}_hs_request_since_ms);
+          in.active_curve = id(${hp_id}_hs_curve) == 1 ? Curve::B : Curve::A;
+          in.last_switch_ms = id(${hp_id}_hs_last_switch_ms);
+          in.curve_b_usable = curve_b_usable;
+          const Decision d = evaluate(in);
+
+          // --- Gesimuleerd wisselen, alleen om het ritme te meten ---
+          if (d.may_switch) {
+            id(${hp_id}_hs_curve) = (d.curve == Curve::B) ? 1 : 0;
+            id(${hp_id}_hs_last_switch_ms) = now_ms;
+            switch_counter.record(now_ms);
+            ESP_LOGI("oq_halfstep", "${prefix}zou wisselen naar kromme %s, stand %d", curve_text(d.curve), d.level);
+          }
+
+          // --- Tonen ---
+          char status[96];
+          if (!target_known && applied > 0) {
+            snprintf(status, sizeof(status), "geen model: terugval op stand %d", applied);
+          } else if (d.may_switch) {
+            snprintf(status, sizeof(status), "zou wisselen naar kromme %s", curve_text(d.curve));
+          } else if (d.switch_needed) {
+            snprintf(status, sizeof(status), "wil kromme %s: %s", curve_text(d.curve), block_text(d.block));
+          } else {
+            snprintf(status, sizeof(status), "kromme %s volstaat", curve_text(d.curve));
+          }
+          id(${hp_id}_hs_status).publish_state(status);
+          id(${hp_id}_hs_half_level).publish_state((float) want_half);
+          id(${hp_id}_hs_target_hz).publish_state(frequency_of_half(a, b, want_half));
+          id(${hp_id}_hs_switches_hour).publish_state((float) switch_counter.count(now_ms));
