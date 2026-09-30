@@ -1,0 +1,160 @@
+# =============================================================================
+# Innova AirLeaf SL 400 fancoil(s) via Modbus RTU op een LilyGo T-CAN485
+#
+# Hardware (geverifieerd tegen Xinyuan-LilyGO/T-CAN485, examples/RS485/RS485.ino):
+#   MCU        ESP32 (klassiek, ESP32-D0WD), 4 MB flash, geen PSRAM  -> board esp32dev
+#   RS485      MAX13487E, half-duplex met AutoDirection:
+#                GPIO22  TX  -> DI
+#                GPIO21  RX  <- RO
+#                GPIO17  RE  hoog = AutoDirection bestuurt de ontvanger (geen echo van eigen TX)
+#                GPIO19  SHDN hoog = transceiver aan
+#              Er is GEEN DE-pin: de chip schakelt zelf tussen zenden en ontvangen, dus
+#              modbus heeft hier geen flow_control_pin nodig.
+#   Voeding    GPIO16 schakelt de ME2107-boost (5 V voor RS485/CAN-transceivers) in.
+#   CAN        SN65HVD231 op GPIO26/27 — niet gebruikt.
+#   RGB-led    WS2812 op GPIO4 — niet gebruikt.
+#
+# VERIFIEREN (board-revisie): de LilyGo-README noemt bij de pinout "EN = IO9", terwijl de
+# voorbeeldcode GPIO19 als SHDN gebruikt. GPIO9 is op een ESP32-WROOM de interne flash en
+# kan dat niet zijn; volg de code (19). Werkt ontvangen niet, meet dan op de print of pin 3
+# (SHDN) van de MAX13487E op GPIO19 zit.
+#
+# Meerdere fancoils: voeg per unit een package toe (onderaan). Alle units delen één bus.
+# =============================================================================
+
+substitutions:
+  device_name: airleaf-fancoils
+  friendly_name: AirLeaf fancoils
+
+  # --- RS485 / Modbus -------------------------------------------------------
+  # Innova N273025C: 9600 baud, 8 databits, geen pariteit, 1 stopbit (8N1).
+  modbus_baud_rate: "9600"
+  modbus_parity: NONE        # NONE | EVEN | ODD   (8E1: EVEN + stop_bits 1)
+  modbus_stop_bits: "1"      # 1 | 2  (Modbus-norm: zonder pariteit eigenlijk 2; Innova zegt 1)
+  # Hoe lang ESPHome op een antwoord wacht voordat het een time-out telt. Een antwoord op één
+  # register duurt bij 9600 baud ~8 ms plus de verwerkingstijd van de print.
+  modbus_send_wait_time: 500ms
+  # Extra rust op de bus na elk frame vóór het volgende verzoek (ESPHome-standaard 600 ms is
+  # met 10 reads per fancoil x 3 fancoils te traag voor een pollinterval van 10 s).
+  modbus_turnaround_time: 100ms
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+  min_version: 2026.5.0
+
+esp32:
+  board: esp32dev
+  variant: esp32
+  flash_size: 4MB
+  framework:
+    type: esp-idf
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [innova_airleaf]
+
+logger:
+  level: DEBUG
+  logs:
+    # Per-register leesregels zijn te veel ruis bij drie fancoils; zet op DEBUG bij het testen.
+    modbus_controller.sensor: INFO
+    sensor: INFO
+    climate: INFO
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    # Uploads worden versleuteld met de api-encryptiesleutel hierboven.
+    encryption: {}
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "${device_name} fallback"
+    password: !secret ap_password
+
+captive_portal:
+
+# --- Transceiver en boost inschakelen -----------------------------------------
+switch:
+  - platform: gpio
+    id: rs485_boost_enable
+    pin: GPIO16
+    restore_mode: ALWAYS_ON
+    internal: true
+  - platform: gpio
+    id: rs485_shutdown_n
+    pin: GPIO19
+    restore_mode: ALWAYS_ON
+    internal: true
+  - platform: gpio
+    id: rs485_re_autodirection
+    pin: GPIO17
+    restore_mode: ALWAYS_ON
+    internal: true
+
+uart:
+  id: rs485_uart
+  tx_pin: GPIO22
+  rx_pin:
+    number: GPIO21
+    # RO is hoogohmig zolang de MAX13487E zelf zendt; pull-up houdt de RX-lijn dan in rust.
+    mode:
+      input: true
+      pullup: true
+  baud_rate: ${modbus_baud_rate}
+  data_bits: 8
+  parity: ${modbus_parity}
+  stop_bits: ${modbus_stop_bits}
+
+modbus:
+  id: rs485_bus
+  uart_id: rs485_uart
+  send_wait_time: ${modbus_send_wait_time}
+  turnaround_time: ${modbus_turnaround_time}
+  # Geen flow_control_pin: MAX13487E AutoDirection.
+
+sensor:
+  - platform: wifi_signal
+    name: WiFi-signaal
+    update_interval: 60s
+    entity_category: diagnostic
+  - platform: uptime
+    name: Uptime
+    entity_category: diagnostic
+
+button:
+  - platform: restart
+    name: Herstart
+    entity_category: config
+
+# --- Fancoils -------------------------------------------------------------
+# Innova raadt aan adres 001 vrij te houden (reserve voor vervanging) en units vanaf 002 te
+# nummeren. Stel het adres in op het toetsenbord (in stand-by AUTO 5 s ingedrukt) of via
+# register 200; deze config schrijft register 200 bewust niet.
+packages:
+  fancoil_1: !include
+    file: packages/innova_fancoil.yaml
+    vars:
+      fc_id: fc1
+      fc_name: "Fancoil 1"
+      fc_address: "1"
+  # fancoil_2: !include
+  #   file: packages/innova_fancoil.yaml
+  #   vars:
+  #     fc_id: fc2
+  #     fc_name: "Fancoil 2"
+  #     fc_address: "2"
+  # fancoil_3: !include
+  #   file: packages/innova_fancoil.yaml
+  #   vars:
+  #     fc_id: fc3
+  #     fc_name: "Fancoil 3"
+  #     fc_address: "3"

@@ -1,0 +1,405 @@
+# =============================================================================
+# Eén Innova AirLeaf-fancoil (ESE645II / INN-FR-B32) op de gedeelde RS485-bus.
+#
+# Gebruik vanuit de hoofdconfig, één keer per fancoil:
+#   packages:
+#     fancoil_1: !include
+#       file: packages/innova_fancoil.yaml
+#       vars: { fc_id: fc1, fc_name: "Fancoil woonkamer", fc_address: 2 }
+#
+# Variabelen:
+#   fc_id          korte unieke id-prefix (fc1, fc2, ...); wordt deel van elke entity-id
+#   fc_name        naam in Home Assistant
+#   fc_address     Modbus-slaveadres (register 200 / keypad; 1..255)
+#   fc_poll        pollinterval (optioneel, standaard 10s)
+#   fc_offline_s   seconden zonder antwoord voordat alles "onbekend" wordt (standaard 45)
+#   fc_sp_min/max  setpointgrenzen in HA (standaard 16/28 = fabriekswaarden SPL/SPH)
+#
+# Registerbron: Innova N273025C rev.01 "Installation, connection and settings wall mounted
+# control EDA649, EDB649, ECA644, ECA647 for use in a Modbus RTU serial network"
+# (identiek in beide referentieprojecten). Registers met * in die tabel zijn volgens Innova
+# "only for INN-FR-B32 board" — zie VERIFIEREN-noten hieronder.
+#
+# Registernummer = PDU-adres (geen -1-offset). Lezen met FC03 (holding), schrijven met FC06.
+# Elke read staat in een eigen range (reuse_previous_range: false): de print geeft bij een fout geen
+# exception maar zwijgt, en één niet-bestaand register in een blok-read zou dan het hele blok
+# laten time-outen. jjdejong/esphome-airleaf doet om dezelfde reden hetzelfde.
+# =============================================================================
+
+defaults:
+  fc_poll: 10s
+  fc_offline_s: "45"
+  fc_sp_min: "16.0"
+  fc_sp_max: "28.0"
+
+modbus_controller:
+  - id: ${fc_id}
+    modbus_id: rs485_bus
+    address: ${fc_address}
+    update_interval: ${fc_poll}
+    # Na 2 herhaalpogingen zonder antwoord markeert ESPHome het apparaat offline en slaat het
+    # 2 pollrondes over; zo blokkeert één dode fancoil de bus niet voor de andere.
+    max_cmd_retries: 2
+    offline_skip_updates: 2
+    on_offline:
+      - logger.log:
+          level: WARN
+          format: "[${fc_name}] Modbus slave %d reageert niet (time-out; Innova stuurt geen exceptions)"
+          args: ["${fc_address}"]
+    on_online:
+      - logger.log:
+          level: INFO
+          format: "[${fc_name}] Modbus slave %d antwoordt weer"
+          args: ["${fc_address}"]
+
+globals:
+  - id: ${fc_id}_last_ok_ms
+    type: uint32_t
+    initial_value: "0"
+  - id: ${fc_id}_seen
+    type: bool
+    initial_value: "false"
+
+climate:
+  - platform: innova_airleaf
+    id: ${fc_id}_climate
+    name: "${fc_name}"
+    air_temperature: ${fc_id}_air_temp
+    setpoint: ${fc_id}_setpoint
+    program_register: ${fc_id}_prg
+    season_register: ${fc_id}_man
+    fan_speed: ${fc_id}_fan_rpm
+    online: ${fc_id}_online
+    min_setpoint: ${fc_sp_min}
+    max_setpoint: ${fc_sp_max}
+
+sensor:
+  # ---------------------------------------------------------------------------
+  # REG 000  T1  Luchttemperatuur            FC03 R   x0.1 °C   bereik 0..100.0
+  # Dient ook als hartslag: elke geslaagde read zet de communicatie-watchdog terug.
+  # ---------------------------------------------------------------------------
+  - platform: modbus_controller
+    modbus_controller_id: ${fc_id}
+    id: ${fc_id}_air_temp
+    name: "${fc_name} kamertemperatuur"
+    register_type: holding
+    address: 0
+    reuse_previous_range: false
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    on_raw_value:
+      - lambda: |-
+          id(${fc_id}_last_ok_ms) = millis();
+          id(${fc_id}_seen) = true;
+    filters:
+      - multiply: 0.1
+      - lambda: 'return (x < 0.0f || x > 60.0f) ? NAN : x;'
+
+  # ---------------------------------------------------------------------------
+  # REG 001* T2  Watertemperatuur batterij (sensor H2)   FC03 R   x0.1 °C   0..100.0
+  # VERIFIEREN: met * gemarkeerd = volgens Innova alleen op de INN-FR-B32-print. Als uw
+  # ESE645II via een EDA649/EDB649-wandbediening op de bus zit, kan het register ontbreken
+  # (time-out) of 0 geven. Controle: zie README, stap "Watertemperatuur". Bij een ontbrekende
+  # H2-probe zet de print bovendien STAT bit 13 ("H2 asnt").
+  # Dit is de sensor voor de latere delta-T-regeling (id: ${fc_id}_water_temp).
+  # ---------------------------------------------------------------------------
+  - platform: modbus_controller
+    modbus_controller_id: ${fc_id}
+    id: ${fc_id}_water_temp
+    name: "${fc_name} watertemperatuur"
+    register_type: holding
+    address: 1
+    reuse_previous_range: false
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+      - lambda: 'return (x <= 0.0f || x > 90.0f) ? NAN : x;'
+
+  # ---------------------------------------------------------------------------
+  # REG 008  SP  Werkelijk (actief) setpoint   FC03 R   x0.1 °C
+  # Kan afwijken van 231 door de aanwezigheids-/stand-by-offset E_SAVING (reg 209).
+  # ---------------------------------------------------------------------------
+  - platform: modbus_controller
+    modbus_controller_id: ${fc_id}
+    id: ${fc_id}_real_setpoint
+    name: "${fc_name} actief setpoint"
+    entity_category: diagnostic
+    register_type: holding
+    address: 8
+    reuse_previous_range: false
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  # ---------------------------------------------------------------------------
+  # REG 015* MOT_SET  Ventilatortoerental (gevraagd)   FC03 R   1 rpm   0..1700
+  # VERIFIEREN (*): alleen INN-FR-B32 volgens Innova. Wordt ook gebruikt voor de climate-
+  # "actie" (verwarmen/koelen/idle). 0 = ventilator stil.
+  # ---------------------------------------------------------------------------
+  - platform: modbus_controller
+    modbus_controller_id: ${fc_id}
+    id: ${fc_id}_fan_rpm
+    name: "${fc_name} ventilatortoerental"
+    register_type: holding
+    address: 15
+    reuse_previous_range: false
+    value_type: U_WORD
+    unit_of_measurement: "rpm"
+    state_class: measurement
+    icon: "mdi:fan"
+    accuracy_decimals: 0
+
+  # Doeltemperatuur als gewone sensor (kopie van number ${fc_id}_setpoint, register 231).
+  - platform: template
+    id: ${fc_id}_setpoint_sensor
+    name: "${fc_name} doeltemperatuur"
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+
+  # ---------------------------------------------------------------------------
+  # REG 009* OUT  Relaisuitgangen   FC03 R   bitveld (ruw, intern)
+  #   bit 0 EV1 (waterklep), bit 1 EV2, bit 2 CHILLER-vraag, bit 3 BOILER-vraag
+  # VERIFIEREN (*): alleen INN-FR-B32 volgens Innova.
+  # ---------------------------------------------------------------------------
+  - platform: modbus_controller
+    modbus_controller_id: ${fc_id}
+    id: ${fc_id}_out_raw
+    name: "${fc_name} OUT (009)"
+    internal: true
+    register_type: holding
+    address: 9
+    reuse_previous_range: false
+    value_type: U_WORD
+    accuracy_decimals: 0
+    on_value:
+      - lambda: |-
+          if (std::isnan(x)) return;
+          const uint16_t v = (uint16_t) x;
+          id(${fc_id}_ev1).publish_state(v & 0x0001);
+          id(${fc_id}_chiller).publish_state(v & 0x0004);
+          id(${fc_id}_boiler).publish_state(v & 0x0008);
+
+  # ---------------------------------------------------------------------------
+  # REG 104* STAT  Statusflags   FC03 R   bitveld (ruw, intern)
+  #   bit 0 koelmodus actief, bit 1 verwarmmodus actief, bit 4 ventilator stop: water H2
+  #   ongeschikt, bit 5 idem H4, bit 6 stop ongeschikt water (45 min), bit 8 vorstbeveiliging,
+  #   bit 9 alarm aanwezig, bit 10 testmodus, bit 11 stand-by, bit 12 master-time-out (300 s),
+  #   bit 13 H2-probe afwezig bij opstart, bit 14 H4-probe afwezig
+  # VERIFIEREN (*): alleen INN-FR-B32 volgens Innova.
+  # ---------------------------------------------------------------------------
+  - platform: modbus_controller
+    modbus_controller_id: ${fc_id}
+    id: ${fc_id}_stat_raw
+    name: "${fc_name} STAT (104)"
+    internal: true
+    register_type: holding
+    address: 104
+    reuse_previous_range: false
+    value_type: U_WORD
+    accuracy_decimals: 0
+    on_value:
+      - lambda: |-
+          if (std::isnan(x)) return;
+          const uint16_t v = (uint16_t) x;
+          std::string s;
+          if (v & 0x0001) s += "koelen, ";
+          if (v & 0x0002) s += "verwarmen, ";
+          if (v & 0x0800) s += "stand-by, ";
+          if (v & 0x0010) s += "ventilator stop (water H2 ongeschikt), ";
+          if (v & 0x0020) s += "ventilator stop (water H4 ongeschikt), ";
+          if (v & 0x0040) s += "stop ongeschikt water (45 min), ";
+          if (v & 0x0100) s += "vorstbeveiliging, ";
+          if (v & 0x0400) s += "testmodus, ";
+          if (v & 0x1000) s += "master-time-out, ";
+          if (v & 0x2000) s += "H2-probe afwezig, ";
+          if (v & 0x4000) s += "H4-probe afwezig, ";
+          if (v & 0x0200) s += "ALARM, ";
+          if (s.size() > 2) s.resize(s.size() - 2);
+          if (s.empty()) s = "ok";
+          id(${fc_id}_status).publish_state(s);
+
+  # ---------------------------------------------------------------------------
+  # REG 105  ALR_STAT  Alarmflags   FC03 R   bitveld (ruw, intern)
+  #   bit 0 communicatie, 1 luchtprobe, 2 H4-probe, 3 schadelijk water, 4 H2-probe,
+  #   5 H4-watertemp ongeschikt, 6 hoge temp. weerstand, 7 motorfout, 8 GRID-contact open,
+  #   9 H2-watertemp ongeschikt, 10 filteronderhoud, 11 2e luchtprobe/communicatie (E2)
+  # ---------------------------------------------------------------------------
+  - platform: modbus_controller
+    modbus_controller_id: ${fc_id}
+    id: ${fc_id}_alarm_raw
+    name: "${fc_name} ALR_STAT (105)"
+    internal: true
+    register_type: holding
+    address: 105
+    reuse_previous_range: false
+    value_type: U_WORD
+    accuracy_decimals: 0
+    on_value:
+      - lambda: |-
+          if (std::isnan(x)) return;
+          const uint16_t v = (uint16_t) x;
+          static const char *const names[] = {
+            "communicatie", "luchtprobe", "H4-probe", "schadelijk water", "H2-probe",
+            "H4-watertemp", "hoge temp. weerstand", "motorfout", "GRID-contact",
+            "H2-watertemp", "filteronderhoud", "E2 luchtprobe"};
+          std::string s;
+          for (int b = 0; b < 12; b++) {
+            if (v & (1u << b)) { s += names[b]; s += ", "; }
+          }
+          if (s.size() > 2) s.resize(s.size() - 2);
+          if (s.empty()) s = "geen";
+          id(${fc_id}_alarms).publish_state(s);
+          id(${fc_id}_alarm).publish_state(v != 0);
+
+# Schrijfbare registers. Ze zijn intern (niet zichtbaar in HA): de climate-entiteit is de enige
+# die ze schrijft, en doet dat met read-modify-write en begrenzing.
+number:
+  # ---------------------------------------------------------------------------
+  # REG 231  SP  Absoluut setpoint (doeltemperatuur)   FC03 R / FC06 W   x0.1 °C
+  # Grenzen SPL..SPH (reg 202/203, fabriek 16.0..28.0) of SPL_W..SPH_W (245/246) als WEB-flag 5
+  # actief is. De climate schrijft nooit buiten fc_sp_min..fc_sp_max.
+  # ---------------------------------------------------------------------------
+  - platform: modbus_controller
+    modbus_controller_id: ${fc_id}
+    id: ${fc_id}_setpoint
+    name: "${fc_name} SP (231)"
+    internal: true
+    register_type: holding
+    address: 231
+    reuse_previous_range: false
+    value_type: U_WORD
+    multiply: 10
+    min_value: ${fc_sp_min}
+    max_value: ${fc_sp_max}
+    step: 0.5
+    on_value:
+      - sensor.template.publish:
+          id: ${fc_id}_setpoint_sensor
+          state: !lambda "return x;"
+
+  # ---------------------------------------------------------------------------
+  # REG 201  PRG  Bedrijfsflags   FC03 R / FC06 W   bitveld
+  #   bit 0-2  programma: 000 auto, 001 stil (MIN), 010 nacht, 011 maximum
+  #   bit 4    LOCK: 1 = toetsenbord lokaal geblokkeerd
+  #   bit 7    Stby: 1 = stand-by (climate "uit")
+  #   bit 8-15 systeemflags, gereserveerd: NIET wijzigen -> alleen read-modify-write
+  # ---------------------------------------------------------------------------
+  - platform: modbus_controller
+    modbus_controller_id: ${fc_id}
+    id: ${fc_id}_prg
+    name: "${fc_name} PRG (201)"
+    internal: true
+    register_type: holding
+    address: 201
+    reuse_previous_range: false
+    value_type: U_WORD
+    min_value: 0
+    max_value: 65535
+    step: 1
+
+  # ---------------------------------------------------------------------------
+  # REG 233  Man  Seizoen   FC03 R / FC06 W   0 = automatisch, 3 = winter/verwarmen,
+  #                                           5 = zomer/koelen (fabriek: 3)
+  # ---------------------------------------------------------------------------
+  - platform: modbus_controller
+    modbus_controller_id: ${fc_id}
+    id: ${fc_id}_man
+    name: "${fc_name} seizoen (233)"
+    internal: true
+    register_type: holding
+    address: 233
+    reuse_previous_range: false
+    value_type: U_WORD
+    min_value: 0
+    max_value: 5
+    step: 1
+
+binary_sensor:
+  # Communicatiestatus, gezet door de watchdog hieronder. Dit is de bron van waarheid:
+  # uit = alle waarden van deze fancoil zijn "onbekend" gemaakt.
+  - platform: template
+    id: ${fc_id}_online
+    name: "${fc_name} Modbus-verbinding"
+    device_class: connectivity
+    entity_category: diagnostic
+
+  - platform: template
+    id: ${fc_id}_boiler
+    name: "${fc_name} boilervraag"
+    device_class: heat
+  - platform: template
+    id: ${fc_id}_chiller
+    name: "${fc_name} chillervraag"
+    device_class: cold
+  - platform: template
+    id: ${fc_id}_ev1
+    name: "${fc_name} waterklep EV1"
+    device_class: opening
+    entity_category: diagnostic
+  - platform: template
+    id: ${fc_id}_alarm
+    name: "${fc_name} alarm"
+    device_class: problem
+
+text_sensor:
+  - platform: template
+    id: ${fc_id}_status
+    name: "${fc_name} status"
+    entity_category: diagnostic
+  - platform: template
+    id: ${fc_id}_alarms
+    name: "${fc_name} alarmen"
+    entity_category: diagnostic
+
+interval:
+  # Communicatie-watchdog. modbus_controller houdt bij een time-out de laatste waarden vast;
+  # hier maken we alles expliciet "onbekend" zodra er fc_offline_s geen antwoord meer kwam,
+  # en loggen we zolang dat duurt elke minuut een waarschuwing.
+  - interval: 5s
+    then:
+      - lambda: |-
+          static uint32_t last_warn = 0;
+          const uint32_t age_ms = millis() - id(${fc_id}_last_ok_ms);
+          const bool ok = id(${fc_id}_seen) && age_ms < ${fc_offline_s} * 1000UL;
+          auto *online = id(${fc_id}_online);
+
+          if (!ok && (millis() - last_warn >= 60000UL || !online->has_state() || online->state)) {
+            last_warn = millis();
+            if (id(${fc_id}_seen))
+              ESP_LOGW("innova", "[${fc_name}] slave %d: geen geldig Modbus-antwoord sinds %u s",
+                       ${fc_address}, (unsigned) (age_ms / 1000));
+            else
+              ESP_LOGW("innova", "[${fc_name}] slave %d: nog nooit geantwoord (bedrading, adres, baudrate/pariteit?)",
+                       ${fc_address});
+          }
+          if (online->has_state() && online->state == ok) return;
+
+          if (ok) {
+            ESP_LOGI("innova", "[${fc_name}] slave %d: communicatie in orde", ${fc_address});
+          } else {
+            for (sensor::Sensor *s : std::initializer_list<sensor::Sensor *>{id(${fc_id}_air_temp), id(${fc_id}_water_temp), id(${fc_id}_real_setpoint),
+                            id(${fc_id}_fan_rpm), id(${fc_id}_setpoint_sensor), id(${fc_id}_out_raw),
+                            id(${fc_id}_stat_raw), id(${fc_id}_alarm_raw)})
+              s->publish_state(NAN);
+            for (auto *n : {id(${fc_id}_setpoint), id(${fc_id}_prg), id(${fc_id}_man)})
+              n->publish_state(NAN);
+            for (auto *b : {id(${fc_id}_boiler), id(${fc_id}_chiller), id(${fc_id}_ev1), id(${fc_id}_alarm)})
+              b->invalidate_state();
+            // Tekstsensoren kennen geen "onbekend"; zet een expliciete tekst.
+            id(${fc_id}_status).publish_state("geen verbinding");
+            id(${fc_id}_alarms).publish_state("geen verbinding");
+          }
+          online->publish_state(ok);
