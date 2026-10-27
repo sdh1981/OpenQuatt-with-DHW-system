@@ -129,7 +129,9 @@ text_sensor:
     name: "${prefix}ODU slots 3051-3060 (geen frequenties)"
     icon: mdi:table-question
     entity_category: diagnostic
-    update_interval: 60s
+    # Sneller dan de rest: tijdens een sondeproef wil je het resultaat zien
+    # zonder een minuut te wachten. Kost geen busverkeer, alleen opmaak.
+    update_interval: 15s
     web_server:
       sorting_group_id: oq_${hp_id}_freq
     lambda: |-
@@ -143,7 +145,7 @@ text_sensor:
     name: "${prefix}ODU slots 3061-3070 (geen frequenties)"
     icon: mdi:table-question
     entity_category: diagnostic
-    update_interval: 60s
+    update_interval: 15s
     web_server:
       sorting_group_id: oq_${hp_id}_freq
     lambda: |-

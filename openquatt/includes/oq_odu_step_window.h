@@ -72,6 +72,14 @@ class SlotSnapshotReader : public esphome::modbus::ModbusClientDevice {
     }
   }
 
+  // Nu opnieuw lezen in plaats van wachten op de volgende ronde. Gebruikt door
+  // de sonde: na een schrijfactie wil je zien wat er werkelijk staat, niet de
+  // stand van maximaal een uur geleden.
+  void request_refresh(uint32_t now_ms) {
+    this->next_due_ms_ = now_ms;
+    this->failures_ = 0;
+  }
+
   bool known() const { return this->known_; }
   uint8_t failures() const { return this->failures_; }
   uint32_t updated_ms() const { return this->updated_ms_; }
@@ -135,6 +143,13 @@ class SlotSnapshotReader : public esphome::modbus::ModbusClientDevice {
 inline SlotSnapshotReader &slot_reader(bool hp1) {
   static std::array<SlotSnapshotReader, 2> readers;
   return readers[hp1 ? 0 : 1];
+}
+
+inline SlotSnapshotReader *slot_reader_for(const esphome::modbus_controller::ModbusController *controller) {
+  for (bool hp1 : {true, false}) {
+    if (slot_reader(hp1).bound_to(controller)) return &slot_reader(hp1);
+  }
+  return nullptr;
 }
 
 }  // namespace oq_odu_steps

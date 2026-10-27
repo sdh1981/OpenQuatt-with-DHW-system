@@ -31,6 +31,7 @@
 
 #include "oq_odu_runtime_frequency_table_logic.h"
 #include "oq_odu_slot_probe_logic.h"
+#include "oq_odu_step_window.h"
 
 #include "esphome/components/modbus/modbus.h"
 #include "esphome/components/modbus_controller/modbus_controller.h"
@@ -239,6 +240,7 @@ class SlotProbeDevice : public esphome::modbus::ModbusClientDevice {
     this->state_.written_ms = esphome::millis();
     this->finish_(this->refs_, result_text(this->sheet_address_, this->original_, this->value_, readback) +
                                    verdict_text(this->value_, readback));
+    this->refresh_slot_readout_();
   }
 
   void handle_restore_readback_(std::span<const uint16_t> registers) {
@@ -246,6 +248,16 @@ class SlotProbeDevice : public esphome::modbus::ModbusClientDevice {
     const uint16_t original = this->state_.original;
     this->state_ = ProbeState{};
     this->finish_(this->refs_, restored_text(this->sheet_address_, original, readback));
+    this->refresh_slot_readout_();
+  }
+
+  // De uitlezing leest normaal één keer per uur. Na een proef wil je zien wat er
+  // werkelijk staat, dus die lezing nu laten gebeuren in plaats van de
+  // onthouden waarde te patchen: zo komt alle twintig slots vers van de unit.
+  void refresh_slot_readout_() {
+    if (auto *reader = oq_odu_steps::slot_reader_for(this->controller_)) {
+      reader->request_refresh(esphome::millis());
+    }
   }
 
   void queue_read_(const SlotProbeRefs &refs, Stage stage, uint16_t address, uint16_t count) {

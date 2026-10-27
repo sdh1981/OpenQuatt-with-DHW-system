@@ -103,6 +103,17 @@ terug wat de unit ervan maakte, en zet de oude waarde daarna weer terug.
    beschrijfbaar. Komt er `0` terug, dan negeert de unit ze.
 3. Herstellen — of twee minuten wachten, dan gebeurt het vanzelf.
 
+De uitlezing `ODU slots 3051-3060` leest normaal één keer per uur. Na een proef
+wordt die lezing meteen opnieuw gedaan, dus binnen een paar seconden zie je daar
+alle twintig slots vers van de unit — ook de negentien die je niet hebt
+aangeraakt. Na het herstellen gebeurt hetzelfde.
+
+**Uitkomst op fw 1.30 (V1.5):** slot 3052 nam `95` aan en gaf `95` terug. De
+registers zijn dus echte, beschrijfbare schaduwopslag. Dat ze alle twintig op nul
+staan terwijl de unit normaal draait, wijst erop dat deze firmware er niets uit
+leest — een parameter die in gebruik is, heeft zelden nul als waarde. Zeker weten
+doe je dat pas als je een geschreven waarde ergens in het gedrag terugziet.
+
 **Waarom dit voorzichtiger is dan de frequentietabel**
 
 Bij de ladder weten we wat elk getal betekent. Hier niet: op R32 dragen deze
