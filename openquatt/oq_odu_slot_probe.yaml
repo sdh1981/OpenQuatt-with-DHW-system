@@ -1,0 +1,171 @@
+# ============================================================================
+# OpenQuatt - EXPERIMENTEEL: sonde op de slots 3051-3070
+# ============================================================================
+#
+# Eén register per proef: lezen wat erin staat, er een waarde in zetten,
+# teruglezen wat de unit ervan maakte, en daarna terug naar de oude waarde.
+#
+# WAT DIT NIET IS
+#
+# Geen manier om stand 11 t/m 20 aan te zetten. Die grens staat in de
+# programmaflash van de regelprint; geen enkele schrijfactie in de schaduw
+# verandert daar iets aan. Zie docs/odu-standen-en-plafond.md.
+#
+# De vraag die deze sonde WEL beantwoordt: nemen die registers een waarde aan en
+# houden ze die vast? Op deze firmware lezen ze alle twintig nul, en dat kan
+# "leeg" betekenen of "deze unit antwoordt overal met nul".
+#
+# AANBEVOLEN VOLGORDE
+#
+#   1. schrijf 0 over de bestaande 0 -- verandert niets en laat zien of de unit
+#      de schrijfopdracht op dat adres aanneemt;
+#   2. schrijf 1 en lees terug -- blijft het staan, dan zijn de registers echt;
+#   3. herstellen (of twee minuten wachten).
+#
+# WAAROM ZO VOORZICHTIG
+#
+# Op R32 dragen deze bytes andere parameters dan de frequentieladder die ze op
+# andere platformen zijn, en we weten niet welke. Een schrijfactie in dit blok
+# werkt meteen door: het is de schaduw waar de regeling uit leest. Daarom:
+# compressor uit (zonder ontsnapping), waarden 0-100, en na twee minuten gaat de
+# oude waarde er vanzelf weer in.
+#
+# Register 5000 -- vastleggen naar EEPROM -- komt hier niet voor. Alles blijft
+# vluchtig, dus een power cycle van de buitenunit is altijd de weg terug.
+# Laat dat zo.
+# ============================================================================
+
+switch:
+  # ALWAYS_OFF: na een herstart staat schrijven nooit vanzelf weer vrij.
+  - platform: template
+    id: ${hp_id}_slot_probe_enable
+    name: "${prefix}EXPERIMENTEEL slot schrijven vrijgeven"
+    icon: mdi:alert-decagram
+    entity_category: config
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 60
+
+select:
+  - platform: template
+    id: ${hp_id}_slot_probe_address
+    name: "${prefix}EXPERIMENTEEL slot"
+    icon: mdi:table-search
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    options:
+      - "3051"
+      - "3052"
+      - "3053"
+      - "3054"
+      - "3055"
+      - "3056"
+      - "3057"
+      - "3058"
+      - "3059"
+      - "3060"
+      - "3061"
+      - "3062"
+      - "3063"
+      - "3064"
+      - "3065"
+      - "3066"
+      - "3067"
+      - "3068"
+      - "3069"
+      - "3070"
+    initial_option: "3051"
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 61
+
+number:
+  - platform: template
+    id: ${hp_id}_slot_probe_value
+    name: "${prefix}EXPERIMENTEEL slotwaarde"
+    icon: mdi:numeric
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+    min_value: 0
+    max_value: 100
+    step: 1
+    mode: box
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 62
+
+button:
+  - platform: template
+    id: ${hp_id}_slot_probe_write
+    name: "${prefix}EXPERIMENTEEL slot schrijven"
+    icon: mdi:database-edit
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 63
+    on_press:
+      - lambda: |-
+          oq_odu_slot_probe::SlotProbeRefs refs = {
+              id(${hp_id}),
+              id(${hp_id}_odu_eeprom_dump),
+              id(${hp_id}_slot_probe_enable),
+              id(${hp_id}_slot_probe_status),
+              "${prefix}",
+          };
+          uint32_t sheet = 0;
+          if (id(${hp_id}_slot_probe_address).has_state()) {
+            sheet = (uint32_t) atoi(id(${hp_id}_slot_probe_address).current_option().c_str());
+          }
+          const uint32_t value = (uint32_t) lroundf(id(${hp_id}_slot_probe_value).state);
+          oq_odu_slot_probe::slot_probe(${hp_index} == 1).start_probe(refs, sheet, value);
+
+  - platform: template
+    id: ${hp_id}_slot_probe_restore
+    name: "${prefix}EXPERIMENTEEL slot herstellen"
+    icon: mdi:undo-variant
+    entity_category: config
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 64
+    on_press:
+      - lambda: |-
+          oq_odu_slot_probe::SlotProbeRefs refs = {
+              id(${hp_id}),
+              id(${hp_id}_odu_eeprom_dump),
+              id(${hp_id}_slot_probe_enable),
+              id(${hp_id}_slot_probe_status),
+              "${prefix}",
+          };
+          oq_odu_slot_probe::slot_probe(${hp_index} == 1).start_restore(refs);
+
+text_sensor:
+  - platform: template
+    id: ${hp_id}_slot_probe_status
+    name: "${prefix}EXPERIMENTEEL slot status"
+    icon: mdi:message-text-outline
+    entity_category: diagnostic
+    update_interval: never
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+      sorting_weight: 65
+
+interval:
+  # Zet de oorspronkelijke waarde vanzelf terug, en vangt een opdracht op die
+  # nooit afkomt.
+  - interval: 1s
+    startup_delay: 20s
+    then:
+      - lambda: |-
+          oq_odu_slot_probe::SlotProbeRefs refs = {
+              id(${hp_id}),
+              id(${hp_id}_odu_eeprom_dump),
+              id(${hp_id}_slot_probe_enable),
+              id(${hp_id}_slot_probe_status),
+              "${prefix}",
+          };
+          oq_odu_slot_probe::slot_probe(${hp_index} == 1).tick(refs, (uint32_t) millis());

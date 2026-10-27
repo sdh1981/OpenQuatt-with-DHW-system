@@ -17,6 +17,12 @@ odu_step_ceiling_hp2: !include
     hp_id: "hp2"
     prefix: "HP2 - "
     hp_index: 2
+odu_slot_probe_hp2: !include
+  file: ../oq_odu_slot_probe.yaml
+  vars:
+    hp_id: "hp2"
+    prefix: "HP2 - "
+    hp_index: 2
 odu_halfstep_dryrun_hp2: !include
   file: ../oq_odu_halfstep_dryrun.yaml
   vars:

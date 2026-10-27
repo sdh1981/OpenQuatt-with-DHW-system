@@ -202,6 +202,14 @@ odu_step_ceiling_hp1: !include
     hp_id: "hp1"
     prefix: "HP1 - "
     hp_index: 1
+# EXPERIMENTEEL: één slot tegelijk beschrijven en terugzetten. Vluchtig; een
+# power cycle van de ODU wist alles. Eén regel weghalen schakelt het uit.
+odu_slot_probe_hp1: !include
+  file: oq_odu_slot_probe.yaml
+  vars:
+    hp_id: "hp1"
+    prefix: "HP1 - "
+    hp_index: 1
 odu_halfstep_dryrun_hp1: !include
   file: oq_odu_halfstep_dryrun.yaml
   vars:

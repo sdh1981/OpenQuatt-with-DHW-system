@@ -76,6 +76,54 @@ De ladderlezing die hier ook wordt aangestopt bestond al. Op een Duo deed de
 Power House v0.50-package dat al elk kwartier; op een enkele unit deed niemand
 het, en bleef die tabel leeg.
 
+## De sonde: wat zijn die slots eigenlijk (v0.67, EXPERIMENTEEL)
+
+Op deze firmware lezen alle twintig slots **nul**. De unit antwoordt wel — bij
+een niet-bestaand adres zou er een foutcode komen en zou de status "onbekend"
+melden. Twee verklaringen blijven over: de registers bestaan en zijn leeg, óf de
+unit beantwoordt elk adres met nullen.
+
+Daarvoor is er een sonde. Die zet **één** register tegelijk op een waarde, leest
+terug wat de unit ervan maakte, en zet de oude waarde daarna weer terug.
+
+| Entiteit | Rol |
+|---|---|
+| `EXPERIMENTEEL slot schrijven vrijgeven` | uit na elke herstart |
+| `EXPERIMENTEEL slot` | bladadres 3051 t/m 3070 |
+| `EXPERIMENTEEL slotwaarde` | 0 t/m 100 |
+| `EXPERIMENTEEL slot schrijven` | lezen, onthouden, schrijven, teruglezen |
+| `EXPERIMENTEEL slot herstellen` | de onthouden waarde terugzetten |
+| `EXPERIMENTEEL slot status` | `3055: was 0, geschreven 1, teruggelezen 1 - vastgehouden` |
+
+**Aanbevolen volgorde**
+
+1. Schrijf `0` over de bestaande `0`. Dat verandert niets en laat zien of de unit
+   de schrijfopdracht op dat adres aanneemt.
+2. Schrijf `1` en lees terug. Blijft het staan, dan zijn de registers echt en
+   beschrijfbaar. Komt er `0` terug, dan negeert de unit ze.
+3. Herstellen — of twee minuten wachten, dan gebeurt het vanzelf.
+
+**Waarom dit voorzichtiger is dan de frequentietabel**
+
+Bij de ladder weten we wat elk getal betekent. Hier niet: op R32 dragen deze
+bytes andere parameters, en een schrijfactie in dit blok werkt meteen door —
+het is de schaduw waar de regeling uit leest. Daarom:
+
+- de compressor moet stilstaan, **zonder** de "tijdens bedrijf"-ontsnapping die
+  de frequentietabel wel heeft;
+- waarden blijven tussen 0 en 100;
+- na twee minuten gaat de oorspronkelijke waarde er vanzelf weer in;
+- niet tijdens een EEPROM-dump.
+
+**Register 5000 komt er niet in voor.** Dat is het vastlegcommando richting
+EEPROM. Deze sonde schrijft uitsluitend in de vluchtige schaduw, zodat een power
+cycle van de buitenunit altijd alles terugzet. Een host-test bewaakt dat 5000
+nooit als geldig sondeadres kan gelden, ook niet als iemand het bereik later
+oprekt.
+
+En nog een keer, omdat het telt: als die slots waardes vasthouden, heb je
+daarmee nog steeds geen stand 11 t/m 20. De klem zit in de flash.
+
 ## Wat er niet in zit
 
 De **live stapindex** — welke stand de unit op dit moment werkelijk draait,
