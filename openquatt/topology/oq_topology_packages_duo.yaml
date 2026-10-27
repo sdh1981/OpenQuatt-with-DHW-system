@@ -11,6 +11,12 @@ odu_freq_table_hp2: !include
   vars:
     hp_id: "hp2"
     prefix: "HP2 - "
+odu_step_ceiling_hp2: !include
+  file: ../oq_odu_step_ceiling.yaml
+  vars:
+    hp_id: "hp2"
+    prefix: "HP2 - "
+    hp_index: 2
 odu_halfstep_dryrun_hp2: !include
   file: ../oq_odu_halfstep_dryrun.yaml
   vars:

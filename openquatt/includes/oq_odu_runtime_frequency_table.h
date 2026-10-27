@@ -142,7 +142,12 @@ class RuntimeFrequencySnapshotReader : public esphome::modbus::ModbusClientDevic
   // Een geverifieerde tabel uit het schrijfpad of van "tabel ophalen".
   void store(const FrequencyCurve &cooling, const FrequencyCurve &heating, uint32_t now_ms) {
     if (!validate_monotonic_table(cooling) || !validate_monotonic_table(heating)) return;
-    for (size_t i = 0; i < CURVE_POINTS; ++i) this->heating_hz_[i] = static_cast<uint16_t>(std::lround(heating[i]));
+    for (size_t i = 0; i < CURVE_POINTS; ++i) {
+      this->heating_hz_[i] = static_cast<uint16_t>(std::lround(heating[i]));
+      // De koelkromme komt in dezelfde lezing binnen en werd tot nu toe
+      // weggegooid. Bewaren kost 22 bytes en geen enkel Modbus-verzoek extra.
+      this->cooling_hz_[i] = static_cast<uint16_t>(std::lround(cooling[i]));
+    }
     this->known_ = true;
     this->updated_ms_ = now_ms;
     this->failures_ = 0;
@@ -151,6 +156,7 @@ class RuntimeFrequencySnapshotReader : public esphome::modbus::ModbusClientDevic
 
   bool known() const { return this->known_; }
   const std::array<uint16_t, CURVE_POINTS> &heating_hz() const { return this->heating_hz_; }
+  const std::array<uint16_t, CURVE_POINTS> &cooling_hz() const { return this->cooling_hz_; }
   uint32_t updated_ms() const { return this->updated_ms_; }
   uint8_t failures() const { return this->failures_; }
 
@@ -197,6 +203,7 @@ class RuntimeFrequencySnapshotReader : public esphome::modbus::ModbusClientDevic
 
   esphome::modbus_controller::ModbusController *controller_{nullptr};
   std::array<uint16_t, CURVE_POINTS> heating_hz_{};
+  std::array<uint16_t, CURVE_POINTS> cooling_hz_{};
   bool known_{false};
   bool pending_{false};
   uint8_t failures_{0};

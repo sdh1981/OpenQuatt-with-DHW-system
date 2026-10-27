@@ -1,0 +1,154 @@
+# ============================================================================
+# OpenQuatt - compressorstanden en hun plafond zichtbaar maken (ALLEEN LEZEN)
+# ============================================================================
+#
+# Vier dingen per buitenunit, allemaal diagnostisch en zonder enige invloed op
+# de regeling:
+#
+#   - de ladder die de unit NU gebruikt, verwarmen en koelen, F0 t/m F10;
+#   - de slots op bladadres 3051-3070 RAUW, met het label dat ze op R32 GEEN
+#     frequenties zijn;
+#   - het stapplafond: tien, vast;
+#   - een statusregel die zegt waar je aan toe bent.
+#
+# WAAROM ER GEEN "F11-F20 AANZETTEN" BIJ ZIT
+#
+# Op R32 klemt de regelprint de compressorstand op tien. Dat plafond staat in de
+# programmaflash van de STM8, niet in de EEPROM en niet in de schaduwregisters
+# die een Modbus-master kan schrijven. Er bestaat dus geen register dat stand 11
+# t/m 20 vrijgeeft; zoeken in de schaduw heeft geen zin. Vrijgeven vraagt om een
+# flashpatch en opnieuw programmeren van de unit, en dat valt buiten OpenQuatt:
+# een Modbus-master schrijft de schaduw, niet de programmaflash.
+#
+# De slots 3051-3070 zijn op andere platformen de F11-F20-ladder. Op R32 dragen
+# die bytes andere parameters. Ze staan hier puur ter controle, decimaal, zonder
+# eenheid. Reken ze niet om naar Hz.
+#
+# VERSIEPOORT
+#
+# Alles hangt aan holding 2122, die oq_HP_io.yaml al leest en decodeert. Alleen
+# op de twee bekende R32-versies (1.25 en 1.30) gaat er iets de bus op. Op elke
+# andere firmware blijft dit stil en melden de entiteiten "niet van toepassing".
+#
+# BUSVERKEER
+#
+# Eén lezing van 20 registers per unit per uur. De ladderlezing die hier ook
+# wordt aangestopt bestond al; op een Duo deed de Power House v0.50-package dat
+# al, op een enkele unit deed niemand het en bleef de ladder leeg.
+#
+# NIET INBEGREPEN: de live stapindex. Die staat in RAM en vraagt om de
+# geparkeerde debugvenster-lezer. Zolang die er niet is, staat hier geen
+# halfbakken versie van.
+# ============================================================================
+
+interval:
+  - interval: 10s
+    startup_delay: 25s
+    then:
+      - lambda: |-
+          const uint32_t now_ms = (uint32_t) millis();
+          if (!id(${hp_id}_pcb_firmware_raw).has_state()) return;
+          const uint16_t firmware_raw = (uint16_t) id(${hp_id}_pcb_firmware_raw).state;
+          // Versiepoort: op niet-R32 gaat er geen enkel verzoek de bus op.
+          if (!oq_odu_steps::is_r32_firmware(firmware_raw)) return;
+
+          auto *dump = id(${hp_id}_odu_eeprom_dump);
+          const bool bus_busy = dump != nullptr && dump->is_active();
+
+          oq_odu_runtime_frequency::snapshot_reader(${hp_index} == 1).poll(id(${hp_id}), now_ms, bus_busy);
+          oq_odu_steps::slot_reader(${hp_index} == 1).poll(id(${hp_id}), now_ms, bus_busy, true);
+
+sensor:
+  - platform: template
+    id: ${hp_id}_odu_step_ceiling
+    name: "${prefix}ODU stapplafond"
+    icon: mdi:stairs-box
+    unit_of_measurement: "standen"
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: 60s
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+    lambda: |-
+      if (!id(${hp_id}_pcb_firmware_raw).has_state()) return NAN;
+      const int ceiling = oq_odu_steps::step_ceiling((uint16_t) id(${hp_id}_pcb_firmware_raw).state);
+      return ceiling > 0 ? (float) ceiling : NAN;
+
+text_sensor:
+  - platform: template
+    id: ${hp_id}_odu_steps_status
+    name: "${prefix}ODU standen status"
+    icon: mdi:information-outline
+    entity_category: diagnostic
+    update_interval: 60s
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+    lambda: |-
+      const auto &slots = oq_odu_steps::slot_reader(${hp_index} == 1);
+      const bool firmware_known = id(${hp_id}_pcb_firmware_raw).has_state();
+      const uint16_t firmware_raw = firmware_known ? (uint16_t) id(${hp_id}_pcb_firmware_raw).state : 0;
+      return oq_odu_steps::status_text(firmware_known, firmware_raw, slots.known(), slots.failures());
+
+  - platform: template
+    id: ${hp_id}_odu_ladder_heating
+    name: "${prefix}ODU ladder verwarmen"
+    icon: mdi:sine-wave
+    entity_category: diagnostic
+    update_interval: 60s
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+    lambda: |-
+      if (!id(${hp_id}_pcb_firmware_raw).has_state() ||
+          !oq_odu_steps::is_r32_firmware((uint16_t) id(${hp_id}_pcb_firmware_raw).state))
+        return std::string("niet van toepassing");
+      const auto &reader = oq_odu_runtime_frequency::snapshot_reader(${hp_index} == 1);
+      const uint32_t age_min = reader.known()
+          ? (uint32_t) ((uint32_t) millis() - reader.updated_ms()) / 60000UL : 0UL;
+      return oq_odu_steps::ladder_text(reader.heating_hz(), reader.known(), age_min, reader.failures());
+
+  - platform: template
+    id: ${hp_id}_odu_ladder_cooling
+    name: "${prefix}ODU ladder koelen"
+    icon: mdi:sine-wave
+    entity_category: diagnostic
+    update_interval: 60s
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+    lambda: |-
+      if (!id(${hp_id}_pcb_firmware_raw).has_state() ||
+          !oq_odu_steps::is_r32_firmware((uint16_t) id(${hp_id}_pcb_firmware_raw).state))
+        return std::string("niet van toepassing");
+      const auto &reader = oq_odu_runtime_frequency::snapshot_reader(${hp_index} == 1);
+      const uint32_t age_min = reader.known()
+          ? (uint32_t) ((uint32_t) millis() - reader.updated_ms()) / 60000UL : 0UL;
+      return oq_odu_steps::ladder_text(reader.cooling_hz(), reader.known(), age_min, reader.failures());
+
+  # Geen frequenties. Decimaal, zonder eenheid, met de waarschuwing in de naam.
+  - platform: template
+    id: ${hp_id}_odu_slots_3051
+    name: "${prefix}ODU slots 3051-3060 (geen frequenties)"
+    icon: mdi:table-question
+    entity_category: diagnostic
+    update_interval: 60s
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+    lambda: |-
+      const bool applicable = id(${hp_id}_pcb_firmware_raw).has_state() &&
+          oq_odu_steps::is_r32_firmware((uint16_t) id(${hp_id}_pcb_firmware_raw).state);
+      const auto &slots = oq_odu_steps::slot_reader(${hp_index} == 1);
+      return oq_odu_steps::slot_text(slots.words(), 0, applicable, slots.known(), slots.failures());
+
+  - platform: template
+    id: ${hp_id}_odu_slots_3061
+    name: "${prefix}ODU slots 3061-3070 (geen frequenties)"
+    icon: mdi:table-question
+    entity_category: diagnostic
+    update_interval: 60s
+    web_server:
+      sorting_group_id: oq_${hp_id}_freq
+    lambda: |-
+      const bool applicable = id(${hp_id}_pcb_firmware_raw).has_state() &&
+          oq_odu_steps::is_r32_firmware((uint16_t) id(${hp_id}_pcb_firmware_raw).state);
+      const auto &slots = oq_odu_steps::slot_reader(${hp_index} == 1);
+      return oq_odu_steps::slot_text(slots.words(), oq_odu_steps::SLOT_GROUP_SIZE, applicable, slots.known(),
+                                     slots.failures());

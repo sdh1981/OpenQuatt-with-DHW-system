@@ -195,6 +195,13 @@ odu_freq_table_hp1: !include
     prefix: "HP1 - "
 # FASE 1 van de halve standen: rekent en toont, schrijft niets. Een regel
 # weghalen schakelt de proef uit.
+# Standen en hun plafond, alleen lezen. Doet niets op niet-R32-firmware.
+odu_step_ceiling_hp1: !include
+  file: oq_odu_step_ceiling.yaml
+  vars:
+    hp_id: "hp1"
+    prefix: "HP1 - "
+    hp_index: 1
 odu_halfstep_dryrun_hp1: !include
   file: oq_odu_halfstep_dryrun.yaml
   vars:
