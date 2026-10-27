@@ -66,6 +66,9 @@ esphome:
     # Standen en plafond: de logica eerst, want de lezer includeert hem.
     - ${odu_step_ceiling_logic_header}
     - ${odu_step_window_header}
+    # EXPERIMENTEEL: grenzen eerst, dan het Modbus-verkeer dat ze gebruikt.
+    - ${odu_slot_probe_logic_header}
+    - ${odu_slot_probe_header}
     - ${odu_halfstep_logic_header}
     # Power House-logica uit upstream v0.50.0, als map: ESPHome kopieert de boom
     # met submappen naar src/, zodat de relatieve includes (../odu/, ../../)

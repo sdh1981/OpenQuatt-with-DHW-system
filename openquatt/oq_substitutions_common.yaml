@@ -13,7 +13,7 @@
 device_name: "openquatt"                              # Internal ESPHome device ID / hostname base.
 friendly_name: OpenQuatt                              # Display name in Home Assistant / UI.
 project_name: "openquatt.openquatt"                   # ESPHome project identifier shown in firmware metadata.
-project_version: "v0.66.0"                          # Firmware version shown in firmware metadata. Loopt los van de
+project_version: "v0.67.0"                          # Firmware version shown in firmware metadata. Loopt los van de
                                                        # protocol/hardware directory versie (v0.29.0 in de mapnaam).
 release_channel: "main"                               # Firmware release channel shown in diagnostics (`main` or `dev`).
 hp_perf_map_header: "openquatt/includes/hp_perf_map.h" # C++ performance-map header include path.
@@ -31,6 +31,8 @@ odu_runtime_freq_table_logic_header: "openquatt/includes/oq_odu_runtime_frequenc
 odu_runtime_freq_table_header: "openquatt/includes/oq_odu_runtime_frequency_table.h" # EXPERIMENTEEL: frequentiekromme tijdelijk in de ODU zetten.
 odu_step_ceiling_logic_header: "openquatt/includes/oq_odu_step_ceiling_logic.h" # Standen, plafond en slotlabels; ESPHome-vrij en host-getest.
 odu_step_window_header: "openquatt/includes/oq_odu_step_window.h" # Stille lezing van de slots 3051-3070 (blad), alleen op R32.
+odu_slot_probe_logic_header: "openquatt/includes/oq_odu_slot_probe_logic.h" # EXPERIMENTEEL: grenzen van de slotsonde, host-getest.
+odu_slot_probe_header: "openquatt/includes/oq_odu_slot_probe.h" # EXPERIMENTEEL: een slot beschrijven en terugzetten, vluchtig.
 odu_halfstep_logic_header: "openquatt/includes/oq_odu_halfstep_levels_logic.h" # Halve compressorstanden: rekenwerk en grenzen, ESPHome-vrij en host-getest.
 # GRENDEL op het schrijven van de frequentiekromme. "0" = vergrendeld: de knop
 # "tabel toepassen" doet niets en meldt dat. Ophalen en bewerken blijft altijd
